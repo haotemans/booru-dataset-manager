@@ -215,3 +215,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Persist the recovery progress per provider profile so restarts do not reset it accidentally. A new HTTP 429 immediately resets active concurrency to 1, restarts the cooldown, and resets successful-request recovery progress. Only successful completed requests count; failures and pending network recovery do not count as successes.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-021 — Success criterion for concurrency recovery
+
+**Decision:** A request counts toward gradual concurrency recovery only when the HTTP request succeeds, the response passes format/schema validation, and every item in the active batch is processed successfully. Partial responses, malformed responses, or batches with any failed item do not count as successful recovery requests.
+
+**Implications:** Preserve valid partial results according to the existing partial-response policy, but do not increment the concurrency recovery success counter for that batch. Only fully successful batches advance the counter. A new HTTP 429 resets the counter and cooldown as specified in D-020; other failed batches do not count as successes.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
