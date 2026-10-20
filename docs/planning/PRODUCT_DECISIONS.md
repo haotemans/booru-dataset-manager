@@ -721,3 +721,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Interaction:** The right panel contains the selected tool's controls and actions. Show the generated result as a preview in the image area; keep the current committed output unchanged until the user explicitly confirms replacement. Preserve usable image visibility while adjusting parameters, and make the layout adapt to smaller windows without losing access to the image or tool controls.
 
 **Status:** User-confirmed layout direction; responsive behavior, tool panels and preview integration remain pending implementation and testing.
+
+## D-071 — Zoom and pan in the review editor canvas
+
+**Decision:** The review-page image canvas supports zooming in/out and panning by dragging, allowing precise inspection and selection for watermark removal, inpainting and other editing tools. Provide a way to return to a fit-to-view or reset view.
+
+**Interaction constraints:** Zoom and pan change only the canvas viewport, not the source pixels or edit output. Tool selections, masks and coordinates must map correctly between the displayed viewport and the original image coordinate space, including after zooming, panning or resizing the window. Keep the image and right-side tool panel available throughout editing.
+
+**Status:** User-confirmed behavior; canvas controls, coordinate transforms and input handling remain pending implementation and testing.
