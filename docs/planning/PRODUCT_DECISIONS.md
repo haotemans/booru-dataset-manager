@@ -1155,3 +1155,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Record an audit log entry for each automatic deduplication, including the removed file path, retained file path, detection signals/thresholds, and survivor-selection reason.
 - Deduplication is permanent: once the redundant file is deleted, the application does not provide an undo, recycle-bin, or restore action for that deletion.
 - Audit logs are for traceability only and must not retain a recoverable copy of the deleted image.
+
+
+## D-128: Background Deduplication with Dashboard Progress
+
+- Run deduplication as a background task so it does not block normal application interaction.
+- Show deduplication progress and summary statistics on the Dashboard, including processed items, automatic removals, and candidates awaiting manual review.
+- Keep the existing audit logging and permanent-deletion behavior; dashboard progress is informational and does not imply undo or recovery support.
