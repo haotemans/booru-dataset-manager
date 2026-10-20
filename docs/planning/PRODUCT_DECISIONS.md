@@ -1074,3 +1074,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - When deduplication is launched from a Character or Artist context, inspect all locally associated images in that context by default.
 - The Tag search/filter applied to the visible image list does not narrow the deduplication scope.
 - Deduplication remains a manually triggered operation; review candidate pairs and explicitly confirm any deletion before it occurs.
+
+
+## D-117: Character and Artist Card Image Counts
+
+- Each Character and Artist card displays two image counts:
+  - the number of associated images currently available in the local library;
+  - the total image count returned by the Danbooru API for that character or artist.
+- Keep the local-library count and API-reported count clearly distinguishable.
