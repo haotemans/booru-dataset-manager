@@ -449,3 +449,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep ingestion state separate from visual-analysis state. Queue priority must be persisted and scheduling fair enough to ensure backfill eventually progresses rather than starving indefinitely. Failed items retain their retry policy and should not block unrelated items. Leave room for future explicit user priority controls without requiring them for the initial implementation. Expose new-item and backfill queue progress separately.
 
 **Status:** User-confirmed scheduling policy; fairness details and implementation remain to be completed.
+
+
+## D-047 — Safe pause and cancellation for visual analysis jobs
+
+**Decision:** Visual analysis jobs support pause and cancel. Cancellation stops queued work that has not started and asks in-flight work to stop at safe cancellation points. Keep already committed valid analysis results, embeddings and index data; never remove media files or human-confirmed relationship overrides as a side effect of cancellation. Ingestion and unrelated jobs continue independently.
+
+**Implications:** Persist job state so pause/cancel survives restarts and accurately reports pending, in-flight, completed, cancelled and failed work. Cancellation is cooperative rather than process-wide forced termination; any incomplete temporary artifacts must be safely discarded or reconciled. Do not mark an item complete until its output is durably committed. Resuming a paused job continues remaining work; a cancelled job is terminal, and a user-started rerun creates a new job while reusing valid compatible results where safe.
+
+**Status:** User-confirmed policy; cancellation checkpoints and implementation remain to be completed.

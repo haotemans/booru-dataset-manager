@@ -175,3 +175,8 @@ The default policy retries retryable DINOv3 analysis failures automatically up t
 ## Analysis queue scheduling
 
 Prioritize DINOv3 analysis for newly ingested media over bulk analysis/backfill of existing library items. Backfill runs using remaining capacity so a large historical backlog does not indefinitely delay newly added media. Persist queue priority and expose new-ingestion analysis progress separately from backfill progress. Ensure backfill still makes progress under sustained ingestion (for example, via a bounded fairness policy); failed items must not block unrelated work. Manual priority controls may be added later but are not required for the initial policy. Ingestion completion and visual-analysis completion remain separate states.
+
+
+## Pause and cancellation semantics
+
+Visual analysis and backfill jobs support pause and cancel. Pause prevents new work from being dispatched and allows safe handling of in-flight work; resume continues the remaining queue. Cancel removes not-yet-started items from that job and requests cooperative cancellation at safe checkpoints for in-flight items. Preserve all already committed valid embeddings/results and index data, media files and human-confirmed relationship overrides. Do not report incomplete outputs as completed; clean up or reconcile temporary artifacts safely. Cancellation must not stop ingestion or unrelated jobs. Persist job state across restarts. A cancelled job is terminal; an explicit rerun creates a new job and may reuse compatible valid results.
