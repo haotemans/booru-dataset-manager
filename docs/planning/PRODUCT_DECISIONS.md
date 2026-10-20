@@ -975,3 +975,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - In the Character and Artist areas, each export operation lets the user choose one format: natural-language descriptions or tags.
 - The user chooses a single format for that export operation; the application does not require exporting both formats together.
 - Preserve the previously agreed scope and per-image text-file behavior for exports.
+
+
+## D-103 Choose one optimization mode per operation
+
+- In the Character and Artist areas, each optimization operation lets the user choose one mode: natural-language optimization or tag optimization.
+- The user chooses a single mode per operation; the application does not require running both modes together.
+- The operation can target selected images or all images in the current Character or Artist context.
