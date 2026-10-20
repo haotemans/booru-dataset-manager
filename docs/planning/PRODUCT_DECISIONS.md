@@ -1120,3 +1120,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 
 - Use a default DINOv3 embedding cosine-similarity threshold of 0.997 for generating visual-duplicate candidates.
 - Treat the threshold as a candidate-generation rule, not proof of duplication; candidates remain subject to user review and explicit confirmation before deletion.
+
+
+## D-123: Automatic Removal for Dual-Confirmed Duplicate Candidates
+
+- When the same image pair meets both strict pHash criteria (Hamming distance <= 2) and the DINOv3 cosine-similarity threshold (>= 0.997), automatically deduplicate the pair without requiring manual review.
+- Before removing the redundant media file/record, consolidate and preserve all valid character, artist, tag, and other metadata associations on the surviving record.
+- Candidates detected by only one method remain review-only and require explicit user confirmation before deletion.
+- Byte-for-byte identical files confirmed by a cryptographic content hash remain eligible for automatic deduplication independently of the two-model agreement rule.
