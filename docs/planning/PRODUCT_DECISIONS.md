@@ -856,3 +856,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Sorting changes presentation/order only and must not modify image files or metadata. Keep ordering deterministic by applying a stable tie-breaker when primary sort values match. If rating is unavailable for an image, handle it consistently rather than inventing a value.
 
 **Status:** User-confirmed direction; sort controls, query/index support and tests remain pending implementation.
+
+## D-087 — Composable gallery filters
+
+**Decision:** Support gallery filtering by tags, rating, image dimensions, source provider (Danbooru/Gelbooru) and review status. Allow users to combine multiple filter conditions.
+
+**Behavior:** Filters must compose predictably, with clear indication of active conditions and an easy way to clear them. Filtering must operate on indexed metadata where possible and remain responsive for galleries approaching 50,000 images. Missing metadata must be handled explicitly rather than treated as an invented value. Filtering does not modify image files or records.
+
+**Status:** User-confirmed direction; filter UI, query/index support and tests remain pending implementation.
