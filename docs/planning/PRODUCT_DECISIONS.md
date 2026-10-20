@@ -563,3 +563,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Defaults:** Daily schedule; retain seven most recent successful backups. Exact scheduling behavior when the application is not running, backup format, storage limits and implementation remain to be specified.
 
 **Status:** User-confirmed product direction; implementation pending.
+
+
+## D-057 — Scheduled metadata backups with bounded retention
+
+**Decision:** The application automatically backs up its database and critical library/task metadata on a daily schedule, retaining the seven most recent successful backups by default. Provide a manual “Back up now” action and a documented restore flow as well.
+
+**Scope:** Routine backups do not duplicate original media files or downloaded model artifacts, which can be large and are managed separately. The backup must contain enough database and metadata state to restore library records and supported application state, and must identify its format/schema version. Use a database-consistent backup method; do not copy a live SQLite database in a way that risks an inconsistent snapshot. Retention applies only to recognized, successfully completed backups created by the application, and a failed backup must not replace the last known-good backup.
+
+**Operational safeguards:** Store backups in a clearly identified location under the managed root by default, while allowing a future configurable destination. Surface last-success time, failures, and available space; handle a missing/unwritable drive without blocking normal application use. Restoration must validate the backup before replacing current state, explain that media and model files are not included, and preserve a recoverable copy of current database state before destructive replacement where feasible. A backup is not considered a full media-file disaster-recovery solution.
+
+**Status:** User-confirmed direction; backup format, scheduling behavior while the application is closed, restore UX and implementation remain pending.
