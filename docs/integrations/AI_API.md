@@ -73,3 +73,8 @@ Acceptance tests: JSON serialization, strict JSON parsing, schema validation, un
 ### Rate-limit group scope
 
 AI API configurations maintain independent concurrency, cooldown, and adaptive-recovery state by default. Users can explicitly assign multiple configurations to a shared rate-limit group. Members of that group share the effective concurrency cap, HTTP 429 cooldown, and gradual-recovery counter. Do not assume configurations share provider-side limits based only on provider name. Configurations outside a group remain independent. Group reassignment must affect future dispatches without cancelling in-flight requests solely due to the setting change.
+
+
+### Member and group concurrency caps
+
+Each API configuration retains its own configured maximum concurrency. A shared rate-limit group also has a separately configured aggregate maximum. Every dispatch must satisfy the member-level effective limit and the group's effective limit, and the aggregate in-flight request count across group members must not exceed the group cap. Group cooldown and adaptive recovery are shared; member limits continue to constrain each member individually. Limit changes affect future dispatches without cancelling in-flight requests solely due to configuration changes.

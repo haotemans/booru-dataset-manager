@@ -260,3 +260,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Do not infer a shared limit merely because configurations use the same provider name. Group membership is explicit and persisted. Requests dispatched through any member must respect the group's effective concurrency and cooldown gate. Configurations outside the group remain independent. If a configuration is moved between groups while requests are in flight, do not cancel those requests solely because of the change; apply the new group's gate to future dispatches and reconcile in-flight accounting safely.
 
 **Status:** User-confirmed policy; configuration UI, persistence, scheduler integration, and tests remain to be completed.
+
+
+## D-026 — Member and group concurrency caps
+
+**Decision:** Each API configuration retains its own configured maximum concurrency. A shared rate-limit group additionally has a separately configured group-wide maximum. Dispatch must respect both the member's effective limit and the shared group's effective limit; the total in-flight requests across group members must never exceed the group's effective cap.
+
+**Implications:** Member limits constrain requests from that configuration, while the group cap constrains aggregate requests across all members. The group cap and adaptive active limit are separate from each member's configured maximum. Existing cooldown and gradual recovery behavior applies at group scope when configurations share a rate-limit group. Configurations outside a group remain independently governed. Changes to limits affect future dispatches and do not cancel in-flight requests solely because settings changed.
+
+**Status:** User-confirmed policy; settings UI, persistence, scheduler enforcement, and tests remain to be completed.
