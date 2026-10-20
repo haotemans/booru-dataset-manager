@@ -747,3 +747,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Behavior:** Clearly identify which provider will be used before a task runs. Do not silently fall back from local to a remote API, because that can incur network traffic or cost; ask for user consent or require an explicit fallback setting. If the selected provider is unavailable, explain the issue and keep manual editing available. Provider-specific credentials must use the application's secure credential handling and must not be written to ordinary logs or configuration files.
 
 **Status:** User-confirmed direction; provider settings, local model availability checks, provider adapters and explicit fallback behavior remain pending implementation and testing.
+
+## D-074 — Confirm AI-detected watermark regions before inpainting
+
+**Decision:** When AI identifies a suspected watermark, first display the proposed region/selection for user review. The user must confirm or adjust the selection before the application generates an inpainting repair preview. The resulting image preview must still be explicitly confirmed before replacing the current committed output, as specified in D-068.
+
+**Behavior:** AI detection never directly triggers inpainting or changes the committed image. Users can edit or reject the proposed region and continue with manual selection if detection is unavailable or inaccurate.
+
+**Status:** User-confirmed workflow; region-review UI, selection-to-mask conversion and inpainting integration remain pending implementation and testing.
