@@ -1089,3 +1089,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Character and Artist lists support selecting multiple cards.
 - Batch actions can operate on the selected characters or artists, with each action's scope based on the images associated with the selected records.
 - Existing single-context actions remain available when no multiple-card selection is active.
+
+
+## D-119: Two-Stage Duplicate Detection
+
+- Run perceptual-hash (pHash) comparison as the first-stage duplicate scan to efficiently identify exact-looking or near-identical images.
+- Use DINOv3 visual-embedding similarity as a subsequent stage to find visually related images that pHash does not catch, including images with meaningful visual differences.
+- Treat both methods as candidate-generation signals, not automatic proof that two images are duplicates.
+- Present candidates for review and require explicit user confirmation before deleting any image; preserve shared-file and cross-record association safeguards.
