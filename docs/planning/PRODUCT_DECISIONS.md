@@ -233,3 +233,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep transport/content-processing failure handling separate from rate-limit recovery. Valid partial results may be preserved under the existing policy, but the batch does not count as successful. Do not clear the recovery counter for ordinary errors; a new 429 always returns active concurrency to 1 and resets the counter.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-023 — Ordinary failures do not reduce concurrency
+
+**Decision:** After concurrency has recovered above 1, ordinary failures such as HTTP 500 or content-processing failures do not reduce the active concurrency limit by themselves. Handle them using the existing error-specific retry and recovery policies. HTTP 429 remains the explicit signal that resets concurrency to 1 and restarts the cooldown.
+
+**Implications:** Do not infer rate limiting from an arbitrary failed batch. Only fully successful batches increment recovery progress; ordinary failures preserve prior progress without incrementing it, as specified in D-022. Eligible HTTP 5xx requests may still receive the existing single bounded retry, but do not change concurrency solely because of the 5xx.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
