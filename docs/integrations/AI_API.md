@@ -91,3 +91,18 @@ A newly created shared rate-limit group defaults to an aggregate maximum concurr
 
 
 Successful requests that were already in flight when a shared rate-limit group entered HTTP 429 cooldown may still complete and persist valid results, but do not count toward gradual concurrency recovery. When cooldown ends, the group's recovery success counter starts at zero; only fully successful batches completed after cooldown ends count toward raising the active concurrency limit.
+
+
+## Authoritative rate-limit and concurrency rules
+
+Use this section as the implementation summary when interpreting the related decision records above:
+
+- **Isolation:** Tasks using the same saved API profile share its scheduler. Separate profiles/configurations remain independent by default, even when they name the same provider. Users can explicitly place multiple configurations into a shared rate-limit group.
+- **Caps:** Each API configuration has its own maximum; a shared group has an additional aggregate maximum. Every dispatch must satisfy both applicable caps. A new shared group defaults to aggregate maximum 2.
+- **HTTP 429:** A 429 sets active concurrency to 1 and starts a cooldown. In a shared group, this gates all group members. Honor `Retry-After`; absent that header, use a 5-minute cooldown. Other in-flight work is not cancelled solely due to the 429, but no new work dispatches through the affected scheduler during cooldown.
+- **Recovery:** Start post-cooldown recovery at zero successful batches. Require 5 fully successful batches at active concurrency 1 before increasing to 2; require another 5 at each subsequent active level. Thresholds remain configurable and active concurrency cannot exceed the configured caps. Requests completed during cooldown may save valid results but do not count toward recovery.
+- **Other errors:** Non-429 errors do not by themselves reduce concurrency or reset accumulated recovery progress. Apply the bounded, error-specific retry policy already specified above.
+- **Configuration changes:** A raised configured cap does not bypass cooldown or reset adaptive state. A lowered cap constrains future dispatches. Do not cancel in-flight requests solely due to a cap or group-membership change; reconcile their accounting before dispatching more work.
+- **Persistence:** Persist cooldown deadlines, active limits, recovery counters, group membership, in-flight/request reconciliation data, and resumable item outcomes. Startup must not send requests until the user explicitly resumes a saved job.
+
+The numeric defaults above are product defaults, not provider guarantees; users may configure supported thresholds and caps. This is a user-confirmed policy specification, not a claim that the scheduler has already been implemented or tested.

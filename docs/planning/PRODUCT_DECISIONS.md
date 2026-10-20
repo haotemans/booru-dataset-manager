@@ -192,7 +192,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-018 — Provider-profile-wide rate-limit gate
 
-**Decision:** All tasks using the same provider profile share one rate-limit scheduler and cooldown gate. When any task receives HTTP 429, the scheduler blocks new request dispatch for every task on that profile for the applicable cooldown. After cooldown, dispatch resumes through the shared scheduler in serial mode, then concurrency is gradually restored under D-013/D-014 rules.
+**Decision:** All tasks using the exact same configured API profile share one rate-limit scheduler and cooldown gate. Distinct API configurations do not share state merely because they use the same provider name; they share only if they use the same profile entity or are explicitly assigned to the same rate-limit group. When any task receives HTTP 429, its applicable shared scheduler blocks new request dispatch for all tasks governed by that scheduler for the cooldown. After cooldown, dispatch resumes in serial mode, then concurrency is gradually restored under the applicable profile/group rules.
 
 **Implications:** A task cannot bypass a cooldown by issuing requests through another worker that uses the same profile. Other provider profiles remain independent. Persist profile-level cooldown and active concurrency state so task pause/resume or application restart does not inadvertently bypass the gate.
 
@@ -210,9 +210,9 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-020 — Gradual concurrency recovery after HTTP 429
 
-**Decision:** After the profile cooldown expires, remain at concurrency 1 until a configurable number of consecutive successful serial requests has completed; default 5. Then increase the active concurrency limit by 1. For each subsequent increase, require another 5 successful requests at the current active limit by default. Both success-count thresholds are configurable; never exceed the latest user-configured concurrency maximum.
+**Decision:** After the applicable profile/group cooldown expires, remain at active concurrency 1 until a configurable number of consecutive fully successful batches has completed; default 5. Then increase the active concurrency limit by 1. For each subsequent increase, require another 5 fully successful batches at the current active limit by default. Both success-count thresholds are configurable; never exceed the latest applicable configured maximum.
 
-**Implications:** Persist the recovery progress per provider profile so restarts do not reset it accidentally. A new HTTP 429 immediately resets active concurrency to 1, restarts the cooldown, and resets successful-request recovery progress. Only successful completed requests count; failures and pending network recovery do not count as successes.
+**Implications:** Persist the recovery progress per profile or shared rate-limit group so restarts do not reset it accidentally. A new HTTP 429 immediately resets the applicable active concurrency to 1, restarts the cooldown, and resets recovery progress. Only fully successful batches completed after cooldown expires count; failures, partial batches, cooldown-period completions, and pending network recovery do not count as successes.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
 
