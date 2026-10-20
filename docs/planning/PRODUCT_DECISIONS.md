@@ -242,3 +242,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Do not infer rate limiting from an arbitrary failed batch. Only fully successful batches increment recovery progress; ordinary failures preserve prior progress without incrementing it, as specified in D-022. Eligible HTTP 5xx requests may still receive the existing single bounded retry, but do not change concurrency solely because of the 5xx.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-024 — Raising configured concurrency during rate-limit degradation
+
+**Decision:** Changing the user-configured maximum concurrency does not override an active rate-limit reduction. If the configured maximum is raised while the active limit is 1 after HTTP 429, keep the active limit at 1 and recover gradually under the existing cooldown and successful-batch thresholds, up to the new configured maximum.
+
+**Implications:** The effective concurrency limit must always be no greater than both the configured maximum and the current rate-limit-adapted active limit. A configured maximum change affects the ceiling for future recovery, not the cooldown, recovery counter, or current active limit. Lowering the configured maximum takes effect for future dispatches without cancelling already in-flight requests solely due to the setting change.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
