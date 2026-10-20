@@ -943,3 +943,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - The Artist area follows the same interaction pattern: present artists as individual cards, and selecting an artist card opens images associated with that artist.
 - Artist records do not need a merge feature in the planned workflow; artist merging is out of scope.
 - The Artist area should support an artist list/card view, Danbooru artist metadata synchronization, alias management, associated-image browsing, and filtering the gallery by artist.
+
+
+## D-099 Character and artist card count display
+
+- Character cards and artist cards do not display the character/artist name or other metadata.
+- Each card displays only the current local image count and the image count returned by the API.
+- Character and artist cards retain the previously defined click-through behavior to open the associated image list.
