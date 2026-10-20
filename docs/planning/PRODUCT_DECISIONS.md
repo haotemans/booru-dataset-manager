@@ -879,3 +879,10 @@ Do not expand the first release with additional image-editing tools unless a lat
 When a source-provided tag is not recognized by the local tag vocabulary, preserve the original tag and consult the originating site (Danbooru or Gelbooru) for authoritative tag/alias metadata before deciding whether to normalize it. Only apply a rename or alias mapping when supported by source metadata or an otherwise verified rule; do not infer that an unlisted tag is invalid merely because the local vocabulary does not contain it. If the source lookup is unavailable or inconclusive, retain the tag unchanged and make the unresolved status visible rather than silently rewriting or dropping it. Preserve the original source tags separately from normalized tags. Lookup failures must not block image ingestion or cause repeated unbounded requests.
 
 Implementation pending: source-specific lookup, caching/rate-limit behavior, and the user-facing unresolved-tag status.
+
+
+## D-090 Danbooru is authoritative for tag normalization
+
+Use Danbooru's tag vocabulary, canonical names, and alias metadata as the authoritative standard for tag normalization, including when processing images imported from Gelbooru. Apply confirmed Danbooru aliases automatically. Preserve original source tags and provenance separately from normalized tags. If a tag cannot be resolved against Danbooru metadata, retain it unchanged and mark it unresolved rather than inventing a mapping or silently dropping it. Danbooru lookup failures must not block image ingestion; cache metadata and respect source rate limits.
+
+Implementation pending: Danbooru tag/alias lookup, cache and rate-limit handling, and normalized-tag UI.
