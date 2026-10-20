@@ -106,3 +106,8 @@ Use this section as the implementation summary when interpreting the related dec
 - **Persistence:** Persist cooldown deadlines, active limits, recovery counters, group membership, in-flight/request reconciliation data, and resumable item outcomes. Startup must not send requests until the user explicitly resumes a saved job.
 
 The numeric defaults above are product defaults, not provider guarantees; users may configure supported thresholds and caps. This is a user-confirmed policy specification, not a claim that the scheduler has already been implemented or tested.
+
+
+## Saving and testing API configurations
+
+An API configuration can be saved without a successful connection test. Connection testing is an explicit user action; saving alone must not send an API request. The UI distinguishes saved/unverified, test successful, and test failed or stale states. At task execution, unusable endpoints, authentication failures, and unsupported models produce actionable errors without discarding the saved configuration. Keep credentials out of logs and diagnostics.

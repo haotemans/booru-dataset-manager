@@ -296,3 +296,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** A shared-group 429 resets the group's recovery counter. Cooldown-period completions may still persist valid item results, but they do not advance the adaptive concurrency recovery counter. Once cooldown ends, only fully successful batches completed under the post-cooldown recovery phase count toward the configured threshold for raising concurrency.
 
 **Status:** User-confirmed policy; scheduler implementation and tests remain to be completed.
+
+
+## D-030 — Saving unverified AI API configurations
+
+**Decision:** Users may save an AI API configuration without first completing a successful connection test. Connection testing is available as an explicit action, and task execution reports connection, authentication, or model errors if the saved configuration is not usable.
+
+**Implications:** Keep configuration persistence separate from connection validation state. The UI must distinguish saved/unverified, test successful, and test failed or stale states rather than implying a saved configuration is known to work. Saving a configuration must not itself trigger external API requests. Credentials must be stored using the application's credential-protection approach and must never appear in logs or diagnostic output.
+
+**Status:** User-confirmed policy; settings UI, validation-state persistence, and tests remain to be completed.
