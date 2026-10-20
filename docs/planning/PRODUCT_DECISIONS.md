@@ -989,3 +989,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - The Character area’s Add action accepts a character tag as input.
 - The Artist area’s Add action accepts an artist tag as input.
 - Use the entered tag to look up the corresponding Danbooru metadata and add the matching character or artist to the respective area.
+
+
+## D-105 Handle character or artist tag lookup failures
+
+- If a submitted character or artist tag cannot be found on Danbooru, show a clear lookup failure reason.
+- Keep the entered tag available for the user to edit or retry.
+- Do not create a character or artist record without supporting source metadata from Danbooru.
