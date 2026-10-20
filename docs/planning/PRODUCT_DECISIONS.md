@@ -55,6 +55,22 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed policy; UI, request gating, audit behavior and tests remain to be implemented.
 
+## D-006 — Structured JSON AI requests and responses
+
+**Decision:** AI integrations must send requests using JSON and parse responses as structured JSON for reliable batch processing. Do not depend on free-form prose or ad-hoc text extraction for successful batch results.
+
+**Implications:**
+- Define versioned request/response schemas per operation (e.g. visual assessment, crop suggestion, tag optimization, caption generation), with explicit fields, types, enums, bounds and required identifiers.
+- For batch work, include a stable per-item ID and require a corresponding result/status for each input item. Validate that IDs are unique, expected and not missing; do not associate results by array position alone.
+- Prefer provider-supported structured output / JSON Schema or strict JSON mode when available. For providers without that capability, still request JSON and parse strictly; never silently treat arbitrary prose as valid output.
+- Validate syntax, schema, required fields, numeric ranges, crop coordinates and image/item identity before accepting any result. Reject malformed or ambiguous results and mark affected items for bounded retry or human review.
+- Handle partial batch failure per item: preserve valid results, retry only eligible failed items with limits, and never let one malformed item corrupt or discard unrelated successful results.
+- Bound request/response sizes and batch concurrency; persist job/item state so batches can resume without duplicating already accepted work.
+- Keep raw provider response only where useful and safe, with size limits and secret/image-payload redaction; retain normalized validated results and provider/model/schema versions for auditability.
+- Structured output improves parsing reliability but does not guarantee factual correctness; semantic checks and required human review remain in place for aesthetic and crop decisions.
+
+**Status:** User-confirmed integration requirement; schemas, provider capability handling, parser, retry behavior and tests remain to be implemented.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
