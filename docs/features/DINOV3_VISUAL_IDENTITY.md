@@ -15,24 +15,40 @@ DINOv3 embeddings are retrieval features, not proof of semantic identity and not
 
 ### Automatic recommendation/selection
 
-The system may nominate a representative image for a group and optionally set it as the default export representative. It must not delete or overwrite non-representative originals. Store the policy version, candidate set, feature measurements, decision reason, timestamp and whether the result was automatic or human-confirmed. Automatic selection must be reversible.
+The system may nominate a representative image for a group and optionally set it as the default export representative. It must not delete, overwrite, or silently quarantine non-representative originals. Store the policy version, candidate set, feature measurements, decision reason, timestamp and whether the result was automatic or human-confirmed. Automatic selection must be reversible.
 
 ### Human review
 
 Show candidates side by side with full-resolution inspection, zoom, dimensions, file size, source, artist/character links, review status and quality indicators. Actions: choose representative, keep as separate variant, mark as related-but-distinct, reject a proposed relation, defer, and undo a previous decision. A human override takes precedence over automatic recommendation until explicitly reset.
 
-## Representative quality signals
+## User-confirmed representative preference
 
-A configurable first implementation may combine measurable signals: native pixel dimensions, sharpness/blur estimate, compression or artifact indicators, clipping/overexposure where measurable, aspect ratio, image decode validity, source/original status and metadata completeness. Each signal must have a documented scale and missing-data behavior. Do not treat larger dimensions as automatically better: upscaled images can be inferior. Do not invent a universal scalar quality score before evaluation. Start by displaying signal values and a transparent rule-based recommendation; tune weights against reviewed examples.
+Ranking preference, in priority order:
 
-DINOv3 similarity should help decide which images to compare or group, not dominate the quality ranking. A visually similar image may have higher quality, but similarity and quality are different axes.
+1. **Aesthetic appeal and completion:** prefer the image that looks more polished and visually complete.
+2. **Minimal visual distractions:** prefer a clean composition with fewer distracting overlays or artifacts.
+3. **No visible text:** text-free images are preferred when other quality factors are comparable; visible text should be surfaced as a negative signal, not treated as an unconditional rejection in every context.
+
+These are user preferences to operationalize and evaluate, not claims that the system can already infer aesthetics perfectly. The UI should explain why a candidate was recommended and show uncertain cases for human review.
+
+## Quality signals and ranking
+
+A first implementation should separate user-facing preference signals from technical validity signals.
+
+- **Preference signals:** aesthetic/completion assessment, visual clutter, and visible text presence.
+- **Technical support signals:** decode validity, sharpness/blur, compression artifacts, clipping/overexposure where measurable, native dimensions, upscaling indicators, aspect ratio and metadata completeness.
+- **Contextual signals:** source/original status can be shown to the reviewer, but must not automatically outrank the user's aesthetic preferences.
+
+Do not treat larger dimensions as automatically better: upscaled images can be inferior. DINOv3 similarity should help decide which images to compare or group, not dominate quality ranking. A visually similar image may have higher quality, but similarity and quality are different axes.
+
+Start with a transparent ranking profile and per-signal explanations. Avoid inventing a universal scalar score before evaluation. If aesthetic/completion and clutter cannot be measured reliably using deterministic signals, use a vision-based assessor only after evaluation against human judgments; otherwise expose the signal for human review rather than pretending it is objective.
 
 ## Safe automatic policy
 
 - Automatic grouping only uses a versioned threshold policy evaluated on labeled data; do not hard-code an unvalidated threshold.
 - Conservative default: automatic grouping is reversible and non-destructive; ambiguous or cross-identity candidates go to review.
 - Exact duplicates can be recognized by hash independently of DINOv3.
-- Automatic representative selection is a metadata decision. It must not physically delete non-selected images or erase source records.
+- Representative selection is a metadata decision. Keep all original files and source records; do not physically delete or silently quarantine non-selected images.
 - Exports default to the selected representative when representative-only mode is chosen; allow exporting all variants.
 - A human choice must be preserved as an explicit override with audit history.
 - Re-embedding with a new model/preprocessing version must not silently rewrite prior human decisions.
@@ -51,6 +67,6 @@ These are logical schema proposals until migrations are implemented. Enforce at 
 
 ## Evaluation requirements
 
-Evaluate grouping separately from representative quality. For grouping, report precision/recall, hard-negative false positives, candidate recall at K and latency. For representative ranking, collect human pairwise preferences or group-level preferred-image labels; report top-1 agreement, top-k agreement and disagreement rates by image type. Include upscaled, low-resolution, cropped, watermarked, compressed and alternate-pose examples. Split evaluation data by identity/group to reduce leakage.
+Evaluate grouping separately from representative quality. For grouping, report precision/recall, hard-negative false positives, candidate recall at K and latency. For representative ranking, collect human pairwise preferences or group-level preferred-image labels; report top-1 agreement, top-k agreement and disagreement rates by image type. Specifically label aesthetic/completion, visual clutter, and visible text so that ranking can be audited against the user's priorities. Include upscaled, low-resolution, cropped, watermarked, compressed and alternate-pose examples. Split evaluation data by identity/group to reduce leakage.
 
-Do not enable unattended auto-representative selection as a default until evaluation establishes acceptable performance and the UI makes reversibility clear. Even then, do not delete originals.
+Do not enable unattended auto-representative selection as a default until evaluation establishes acceptable performance and the UI makes reversibility clear. Even then, do not delete or silently quarantine originals.
