@@ -886,3 +886,10 @@ Implementation pending: source-specific lookup, caching/rate-limit behavior, and
 Use Danbooru's tag vocabulary, canonical names, and alias metadata as the authoritative standard for tag normalization, including when processing images imported from Gelbooru. Apply confirmed Danbooru aliases automatically. Preserve original source tags and provenance separately from normalized tags. If a tag cannot be resolved against Danbooru metadata, retain it unchanged and mark it unresolved rather than inventing a mapping or silently dropping it. Danbooru lookup failures must not block image ingestion; cache metadata and respect source rate limits.
 
 Implementation pending: Danbooru tag/alias lookup, cache and rate-limit handling, and normalized-tag UI.
+
+
+## D-091 Preserve Danbooru tag categories and allow custom categories
+
+Preserve Danbooru's standard tag categories (including general, artist, character, copyright, and meta) as the canonical source classification. Allow users to define additional application-level categories for their own organization and workflows without overwriting or misrepresenting the original Danbooru category. Keep source category and user-assigned category distinct; custom categorization must not alter the canonical tag name or source metadata. Category changes and missing source category metadata should be represented explicitly.
+
+Implementation pending: category data model, custom-category management, and gallery/filter UI.
