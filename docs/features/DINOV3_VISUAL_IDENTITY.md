@@ -80,3 +80,13 @@ Enforce at most one current representative per eligible group transactionally. K
 Evaluate grouping separately from representative ranking and crop proposals. For grouping, report precision/recall, hard-negative false positives, candidate recall at K and latency. For representative ranking, collect human pairwise preferences or group-level preferred-image labels; report top-1/top-k agreement and disagreement rates. For crop proposals, collect accept/edit/reject rates and track whether reviewers believe the crop improves framing without losing important content. Include 9:16 portrait examples with varied subject placement, text, watermarks, cropped and alternate-pose examples. Split evaluation data by identity/group to reduce leakage.
 
 Do not enable unattended representative selection by default until evaluation establishes acceptable performance. Human review remains required for final representative and crop approval.
+
+
+## Tiered grouping behavior
+
+- **Exact duplicates:** identify with content hashes and database-enforced uniqueness; do not infer byte identity from DINOv3.
+- **High-confidence near duplicates:** resized or recompressed versions may be automatically grouped only when a versioned policy has passed evaluation on labeled examples. Decisions must be reversible and preserve all originals and provenance.
+- **Semantic or broader visual relations:** different poses/scenes, crops that alter content, alternate frames, different character identities, or merely similar composition/style are surfaced as candidate relations for human review. Similarity alone must not silently assert identity.
+- **Uncertain cases:** retain as review candidates. Do not substitute an arbitrary fixed score threshold for evaluation evidence.
+
+Every automated and human decision records relation type and decision source. Human decisions override automation until explicitly changed, with audit history preserved.

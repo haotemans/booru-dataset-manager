@@ -17,3 +17,8 @@ Persist model identifier/hash, embedding dimension, preprocessing version, dista
 ## Human controls
 
 Present candidates with similarity score and reason/context; allow accept, reject, defer, merge and split with audit history. Merge/split preserves source provenance and tags. Similarity score must not be displayed as a calibrated probability unless calibration has actually been measured.
+
+
+## Automation gate for near-duplicate grouping
+
+Automatic grouping is allowed only for the near-duplicate relation class (for example resize/recompression) and only after a versioned threshold policy has been evaluated on a labeled dataset containing hard negatives such as crops, different poses/scenes, same-character alternatives, similar style/composition and different identities. Report false-positive rates separately for each hard-negative class; do not use aggregate precision alone to justify automation. If the policy fails the predefined acceptance gate, keep all candidate relations in human review. Store model/preprocessing/policy versions with each automated decision and preserve a reversible audit trail.

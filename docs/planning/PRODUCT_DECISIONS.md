@@ -341,3 +341,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Continue to respect Danbooru authentication, rate limits, Retry-After, cooldowns and provider policies. A transient failure or 429 must follow the provider's retry/cooldown policy before any failover decision; do not use Gelbooru to bypass throttling or access restrictions. Record the fallback reason and provider provenance. De-duplicate items across providers through the shared media pipeline.
 
 **Status:** User-confirmed fallback policy; exact error classification, implementation and tests remain to be completed.
+
+
+## D-035 — Tiered automation for visual grouping
+
+**Decision:** Use tiered handling. After a versioned policy has been validated against labeled evaluation data, high-confidence near-duplicate variants such as resized or recompressed versions may be grouped automatically. Images that differ by pose, scene, crop/content, character identity, or are merely similar in composition/style are candidate relations for human review rather than automatic identity grouping based on similarity alone.
+
+**Implications:** Exact byte duplicates remain a separate hash-based concept. Visual grouping never deletes or overwrites original media. Automated group decisions must be reversible and record the model, preprocessing and policy versions; human decisions take precedence and retain audit history. If the evaluated policy does not support safe automatic grouping, leave the items as candidates for review instead of inventing a threshold.
+
+**Status:** User-confirmed policy; relation classification, labeled evaluation, calibrated policy, implementation and tests remain to be completed.
