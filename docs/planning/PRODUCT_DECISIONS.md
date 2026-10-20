@@ -139,9 +139,9 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-013 — Concurrency reduction after HTTP 429
 
-**Decision:** When HTTP 429 is received, reduce the active concurrency limit to half its current value, rounded up, with a minimum of 1.
+**Decision:** When HTTP 429 is received, disable concurrent dispatch for the affected provider profile by setting its active concurrency limit to 1.
 
-**Implications:** Example: `8 → 4 → 2 → 1`. Apply the reduction to the affected provider profile's shared scheduler. The active limit may never exceed the latest user-configured maximum. Honor `Retry-After` when present and retain the existing maximum of one retry per request. Restore concurrency gradually only after the configured cooldown without further 429 responses; exact recovery increment/cooldown parameters remain to be specified.
+**Implications:** After a 429, process requests serially for that profile; do not send parallel requests while this degraded mode is active. This overrides the previous halve-current-limit rule. Honor `Retry-After` when present and retain the existing maximum of one retry per request. Any later return to concurrency above 1 must follow a separately defined cooldown and recovery policy. The active limit must never exceed the latest user-configured maximum.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
 
