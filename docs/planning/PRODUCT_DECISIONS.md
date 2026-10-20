@@ -900,3 +900,10 @@ Implementation pending: category data model, custom-category management, and gal
 Tag normalization should support semantic redundancy rules for character tags, using Danbooru's canonical tag metadata and verified relationships rather than string matching alone. When a specific variant tag already identifies a character, remove the corresponding general character tag from the normalized tag set. For example, when both `ganyu_(genshin_impact)` and `ganyu_(twilight_blossom)_(genshin_impact)` are present, retain the specific variant tag and omit the redundant general character tag. Do not apply this rule to unrelated characters or infer relationships without sufficient evidence. Preserve the original source tags separately for provenance; report or retain ambiguous cases rather than deleting uncertain tags. This is normalization of the tag set, not deletion of source metadata.
 
 Implementation pending: character/variant relationship source, redundancy rules, and safe normalization behavior.
+
+
+## D-093 Flag potentially conflicting specific variants of the same character
+
+When multiple mutually exclusive specific variant/costume tags for the same character appear on one image, do not assume all are valid and do not silently choose one. Use verified Danbooru tag relationships where available to identify likely conflicts, then flag the image for review. Preserve the source tags and avoid automatic destructive removal until the conflict is resolved. This rule is distinct from D-092: a specific variant can replace a redundant general character tag, but multiple specific variants may indicate tagging error and require review.
+
+Implementation pending: variant exclusivity metadata/rules, conflict detection, and review UI.
