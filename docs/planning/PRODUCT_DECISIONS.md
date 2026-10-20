@@ -94,6 +94,8 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 - On application startup, detect persisted incomplete AI jobs and show the user a resume prompt with the saved job status/progress. Do not issue external API requests until the user explicitly chooses to resume. Dismissal leaves the job pending; the user can resume it later from the task UI.
 
+- On resume, reconcile any request that was in flight at interruption before blindly resending it. Prefer provider-supported request-status lookup and/or idempotency keys using a stable persisted request ID. If the provider offers neither capability, apply a documented bounded fallback that avoids indefinite retries and records ambiguity; do not assume exactly-once execution.
+
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
 ## Deferred decisions
 
