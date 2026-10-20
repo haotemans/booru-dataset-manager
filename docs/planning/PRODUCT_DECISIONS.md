@@ -982,3 +982,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - In the Character and Artist areas, each optimization operation lets the user choose one mode: natural-language optimization or tag optimization.
 - The user chooses a single mode per operation; the application does not require running both modes together.
 - The operation can target selected images or all images in the current Character or Artist context.
+
+
+## D-104 Add characters and artists by tag input
+
+- The Character area’s Add action accepts a character tag as input.
+- The Artist area’s Add action accepts an artist tag as input.
+- Use the entered tag to look up the corresponding Danbooru metadata and add the matching character or artist to the respective area.
