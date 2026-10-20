@@ -893,3 +893,10 @@ Implementation pending: Danbooru tag/alias lookup, cache and rate-limit handling
 Preserve Danbooru's standard tag categories (including general, artist, character, copyright, and meta) as the canonical source classification. Allow users to define additional application-level categories for their own organization and workflows without overwriting or misrepresenting the original Danbooru category. Keep source category and user-assigned category distinct; custom categorization must not alter the canonical tag name or source metadata. Category changes and missing source category metadata should be represented explicitly.
 
 Implementation pending: category data model, custom-category management, and gallery/filter UI.
+
+
+## D-092 Remove redundant general character tags when a specific variant tag is present
+
+Tag normalization should support semantic redundancy rules for character tags, using Danbooru's canonical tag metadata and verified relationships rather than string matching alone. When a specific variant tag already identifies a character, remove the corresponding general character tag from the normalized tag set. For example, when both `ganyu_(genshin_impact)` and `ganyu_(twilight_blossom)_(genshin_impact)` are present, retain the specific variant tag and omit the redundant general character tag. Do not apply this rule to unrelated characters or infer relationships without sufficient evidence. Preserve the original source tags separately for provenance; report or retain ambiguous cases rather than deleting uncertain tags. This is normalization of the tag set, not deletion of source metadata.
+
+Implementation pending: character/variant relationship source, redundancy rules, and safe normalization behavior.
