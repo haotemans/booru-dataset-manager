@@ -656,3 +656,14 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Limitations and safety:** Danbooru availability, post deletion, access restrictions, changed URLs or source-file changes can make an original impossible to retrieve later. The application must disclose that source originals are not covered by remote backup and report unrecoverable originals during restore. If a source original is no longer available, retain and restore the edited output and its metadata; do not silently claim a fully identical reconstruction of the original library. Keep the local latest restore point policy consistent with this scope, and do not delete a local original unless the user explicitly chooses that storage policy separately.
 
 **Status:** User-confirmed backup scope; exact manifest schema, source re-fetch workflow and missing-source reporting remain pending implementation and testing.
+
+
+## D-064 — Back up committed edit outputs and reproducible edit parameters
+
+**Decision:** For each user-committed edit, back up the resulting image output and the parameters needed to understand or continue the edit. Do not back up transient previews or uncommitted intermediate operations by default.
+
+**Required edit record:** Preserve the parent/source variant reference, output file hash and metadata, operation type (for example inpainting or crop), operation parameters and coordinates, relevant mask or selection assets when required to reproduce/continue the edit, and tool/model/version identifiers where available. Record provenance and timestamps as appropriate. Store enough information to distinguish an edit that can be reproduced from one whose output is preserved but whose exact regeneration is no longer possible.
+
+**Recovery semantics:** Restore the committed output even if its original model, tool version, mask or source original is unavailable. Where dependencies remain available, present the saved parameters and provenance so the user can continue editing; do not promise deterministic reproduction if the tool/model is nondeterministic or dependencies are missing. Preserve the parent-child version graph and validate references when restoring. Failed or partial backup must not mark an edit record as backed up.
+
+**Status:** User-confirmed decision; edit-record schema, mask/selection persistence, tool-specific parameter adapters and restore UI remain pending implementation and testing.
