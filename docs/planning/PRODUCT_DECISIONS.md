@@ -170,3 +170,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** The scheduler enforces request-start spacing rather than a fixed post-completion sleep. This interval is separate from the HTTP 429 cooldown and applies while the profile is in serial mode. A new 429 still resets the active concurrency limit to 1 and restarts the cooldown.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-016 — Transient network failure during serial dispatch
+
+**Decision:** In serial mode, transient network failures and timeouts follow the existing transport retry policy: retry the same request at most once with bounded backoff. If the retry also fails, persist the affected item IDs as pending network recovery and continue processing subsequent items; do not shrink the batch or classify the items as content-processing failures solely because transport failed.
+
+**Implications:** Pending items are recovered after the main scan when connectivity is available, remain resumable if connectivity is still unavailable, and do not count as completed outcomes. Apply the same request-start pacing rule to subsequent serial requests. HTTP 429 remains governed by the dedicated cooldown and concurrency rules.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
