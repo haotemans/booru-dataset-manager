@@ -40,9 +40,24 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed preference; ranking, crop suggestions, human review UI and evaluation remain pending.
 
+## D-005 — Vision API image-upload consent
+
+**Decision:** Before a visual-analysis job sends images to an external vision API, the user must confirm upload for that batch. One confirmation may authorize the selected batch; no confirmation is assumed for future batches.
+
+**Implications:**
+- The confirmation screen must identify the provider/profile, selected image count and scope, the purpose of analysis, and any applicable cost/usage estimate available to the app.
+- Clearly state that selected image content will leave the local machine and be sent to the configured external provider. Do not imply that only metadata is sent when image bytes are included.
+- Provide reviewable selection and a way to remove images from the batch before approval. Cancel means no image upload for that job.
+- Approval is scoped to the confirmed batch/job and purpose; it is not persistent global consent. A later batch requires a new confirmation, even if the same profile is used.
+- Do not upload automatically in background jobs before confirmation. If confirmation cannot be obtained, skip external vision analysis and report that it requires approval.
+- Never send API keys, cookies, provider session tokens, or unrelated local files with image requests. Redact credentials from diagnostics and logs.
+- Store a minimal audit record of consent scope/time and job outcome without copying image bytes or secrets into the audit log. Do not treat consent as proof that a provider has a particular retention or training policy; display provider policy information separately when known.
+
+**Status:** User-confirmed policy; UI, request gating, audit behavior and tests remain to be implemented.
+
 ## Deferred decisions
 
-- Which vision API/provider to use, its privacy/cost controls, and whether images are sent only after explicit opt-in.
+- Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
 - Exact ranking weights and how to evaluate aesthetic completion, clutter, and crop quality against human judgments.
 - Whether automatic representative recommendations are enabled by default for newly discovered groups.
 - Whether a visual group can contain different crops/poses/frames versus only near-duplicate versions. The relation types must remain distinct even if groups share one UI.
