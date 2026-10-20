@@ -864,3 +864,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Filters must compose predictably, with clear indication of active conditions and an easy way to clear them. Filtering must operate on indexed metadata where possible and remain responsive for galleries approaching 50,000 images. Missing metadata must be handled explicitly rather than treated as an invented value. Filtering does not modify image files or records.
 
 **Status:** User-confirmed direction; filter UI, query/index support and tests remain pending implementation.
+
+## D-088 — Save named gallery filter presets
+
+**Decision:** Allow users to save frequently used combinations of gallery filters as named presets and reapply them later.
+
+**Behavior:** Presets store filter criteria, not copies of image data. Users can create, rename, update and delete their own presets. Applying or editing a preset must not modify images or metadata. If a saved criterion becomes unavailable due to schema/provider changes, show a clear warning instead of silently changing its meaning.
+
+**Status:** User-confirmed direction; persistence model, preset management UI and tests remain pending implementation.
