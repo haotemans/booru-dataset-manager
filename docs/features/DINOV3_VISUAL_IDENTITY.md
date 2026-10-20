@@ -180,3 +180,8 @@ Prioritize DINOv3 analysis for newly ingested media over bulk analysis/backfill 
 ## Pause and cancellation semantics
 
 Visual analysis and backfill jobs support pause and cancel. Pause prevents new work from being dispatched and allows safe handling of in-flight work; resume continues the remaining queue. Cancel removes not-yet-started items from that job and requests cooperative cancellation at safe checkpoints for in-flight items. Preserve all already committed valid embeddings/results and index data, media files and human-confirmed relationship overrides. Do not report incomplete outputs as completed; clean up or reconcile temporary artifacts safely. Cancellation must not stop ingestion or unrelated jobs. Persist job state across restarts. A cancelled job is terminal; an explicit rerun creates a new job and may reuse compatible valid results.
+
+
+## Resource budget and performance target
+
+The initial target library size is up to 50,000 images. Do not design the initial implementation around a one-million-image target or introduce distributed-scale infrastructure without measured need. Run DINOv3 inference and index work in the background with conservative defaults to protect desktop responsiveness. Allow configurable inference concurrency and batch size within safe bounds; determine shipped defaults through benchmarks on supported hardware, not invented CPU/GPU/RAM assumptions. Benchmark throughput, peak memory, index build time, retrieval latency and UI responsiveness at representative sizes up to 50,000 images. Resource tuning must preserve durable job state, safe pause/cancel, index integrity and independent ingestion.

@@ -458,3 +458,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Persist job state so pause/cancel survives restarts and accurately reports pending, in-flight, completed, cancelled and failed work. Cancellation is cooperative rather than process-wide forced termination; any incomplete temporary artifacts must be safely discarded or reconciled. Do not mark an item complete until its output is durably committed. Resuming a paused job continues remaining work; a cancelled job is terminal, and a user-started rerun creates a new job while reusing valid compatible results where safe.
 
 **Status:** User-confirmed policy; cancellation checkpoints and implementation remain to be completed.
+
+
+## D-048 — Visual analysis resource controls for a library up to 50,000 images
+
+**Decision:** Plan and benchmark visual analysis for a target library of up to 50,000 images, not one million. Use conservative defaults that preserve desktop responsiveness, allow users to configure inference concurrency and batch size within safe bounds, and establish defaults through benchmarks on supported hardware rather than guessed hardware-specific values.
+
+**Implications:** Keep analysis in the background and separate from ingestion. Resource settings must not compromise job persistence, pause/cancel behavior, or index integrity. Benchmark throughput, peak memory, index build time, retrieval latency and desktop responsiveness at representative library sizes up to 50,000 images. Avoid introducing distributed or million-scale infrastructure unless later evidence justifies it.
+
+**Status:** User-confirmed target scale and resource policy; benchmark matrix, concrete defaults and implementation remain to be completed.
