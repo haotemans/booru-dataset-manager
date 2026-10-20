@@ -1017,3 +1017,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Provide previous/next controls and direct page-number navigation.
 - Tag search filters results immediately and resets pagination to the first page.
 - Render/load only the current page of cards to control resource usage.
+
+
+## D-109: Default Character and Artist Card Ordering
+
+- In both Character and Artist areas, the default card order is newest-added first, based on the local record's creation/addition timestamp.
+- When a new character or artist is successfully added from Danbooru metadata, its card appears first in the relevant list.
+- Download activity alone does not reorder an existing character or artist; ordering reflects when the local record was added, not the latest image download time.
+- Keep the ordering deterministic across pagination and filtering; changing search terms does not mutate the underlying order.
