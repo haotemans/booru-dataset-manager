@@ -113,6 +113,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
 
+## D-010 — Adaptive concurrency on HTTP 429
+
+**Decision:** Dynamically reduce AI API concurrency when HTTP 429 rate limiting is observed, then cautiously restore it after a stable period.
+
+**Implications:** Honor `Retry-After` when supplied and keep the existing maximum of one retry per request. Reduce the active concurrency limit conservatively (never below 1); do not increase above the user-configured profile limit. Restore concurrency gradually only after a defined cooldown without further 429 responses. A 429 must not trigger batch shrinking or content-processing fallback. Persist unresolved item IDs and avoid retry loops.
+
+**Status:** User-confirmed policy; exact reduction/recovery parameters and implementation remain to be completed.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
