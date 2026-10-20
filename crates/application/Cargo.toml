@@ -1,0 +1,10 @@
+[package]
+name = "bdm-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[dependencies]
+bdm-domain = { path = "../domain" }
+bdm-ports = { path = "../ports" }
+thiserror.workspace = true
