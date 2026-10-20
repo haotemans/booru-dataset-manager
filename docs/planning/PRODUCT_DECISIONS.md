@@ -503,3 +503,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep the media library separate from application configuration and, where practical, the SQLite database so large media collections do not unnecessarily consume the system/application configuration area. Clearly display the active media path. Changing the configured path must not silently move, delete or orphan existing media. Provide an explicit, validated migration/move workflow if moving an existing library is supported; otherwise explain that selecting a different directory affects future imports or requires a deliberate library-relink operation. Handle unavailable drives and missing directories with actionable errors and recovery options.
 
 **Status:** User-confirmed default behavior and directory configurability; exact platform-specific path, first-run UX, library migration semantics and implementation remain to be completed.
+
+
+## D-053 — Unified user-selected application root directory
+
+**Decision:** Support a user-selected root directory on one drive for the application's managed files, with separate subdirectories for application files, configuration, model artifacts, SQLite/library state, media and exports. This is the preferred managed-layout option for users who want the project and its data together. The application must not require all content to be stored on the system drive.
+
+**Implications:** Use a clear directory layout (for example, `app/`, `config/`, `models/`, `data/`, `media/` and `exports/`) while keeping these concerns logically separate. Do not overwrite or delete user data during application upgrades. Clearly distinguish files that can be downloaded/rebuilt from primary media, database state and user decisions that require preservation. Validate available disk space and write permissions where practical; report unavailable drives and storage failures without corrupting the library. Backups and any future root-directory relocation must account for database consistency, active jobs, model/index versions and media paths. Keep the existing ability to select a different model directory or media location available when needed, but do not force users to distribute content across drives.
+
+**Status:** User-confirmed preference for a unified root directory; exact install/update mechanism, default root, backup policy and relocation workflow remain to be completed.
