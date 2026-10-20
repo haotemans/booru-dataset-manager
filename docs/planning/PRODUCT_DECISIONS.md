@@ -206,3 +206,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Persist the deadline in durable storage with the profile-level rate-limit state. Account for system clock changes defensively: if the wall clock is moved backward or the deadline cannot be trusted, fail conservatively by retaining serial mode and re-establishing a safe cooldown rather than raising concurrency unexpectedly. Do not reset the cooldown to a full duration on every restart.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-020 — Gradual concurrency recovery after HTTP 429
+
+**Decision:** After the profile cooldown expires, remain at concurrency 1 until a configurable number of consecutive successful serial requests has completed; default 5. Then increase the active concurrency limit by 1. For each subsequent increase, require another 5 successful requests at the current active limit by default. Both success-count thresholds are configurable; never exceed the latest user-configured concurrency maximum.
+
+**Implications:** Persist the recovery progress per provider profile so restarts do not reset it accidentally. A new HTTP 429 immediately resets active concurrency to 1, restarts the cooldown, and resets successful-request recovery progress. Only successful completed requests count; failures and pending network recovery do not count as successes.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
