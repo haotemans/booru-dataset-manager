@@ -105,6 +105,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
 
+## D-009 — AI API concurrency
+
+**Decision:** The default maximum number of concurrent AI API requests is 2. The concurrency limit is configurable per provider profile.
+
+**Implications:** Enforce the configured limit centrally in the request scheduler; batch size 8 does not imply eight simultaneous requests. Validate configured values and apply a bounded safe range. Respect provider rate limits and HTTP 429 retry policy without silently increasing concurrency. Persist enough job state to resume safely after interruption.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
