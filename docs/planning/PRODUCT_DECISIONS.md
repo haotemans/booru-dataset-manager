@@ -1195,3 +1195,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Candidates found by only one visual method remain pending manual review; they must not be automatically deleted.
 - Keep the manual deduplication command for scanning the existing library and processing outstanding candidates. It is not a prerequisite for checking newly downloaded images.
 - Coordinate background work automatically to keep the application responsive; expose progress and controls through the existing task model without requiring users to configure CPU/GPU priorities.
+
+
+## D-133: Automatically Retry Failed Image Downloads
+
+- Automatically retry image downloads that fail, rather than requiring the user to manually restart them.
+- Retry only the images that failed; do not redownload images that were successfully downloaded and validated.
+- Preserve successful downloads and their library records while retries are in progress.
