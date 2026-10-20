@@ -485,3 +485,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Users should not have to manually download or place model files. Display the configured model path and allow it to be changed. Download to temporary files and verify integrity using trusted checksum/release metadata before making a model active. An interrupted or invalid download must not be considered usable, and a previously working model remains available until a replacement is verified. Keep artifact/version identity tied to runtime compatibility and versioned embedding migration.
 
 **Status:** User-confirmed policy; artifact source, checksum mechanism, path-selection UX, recovery behavior, implementation and tests remain to be completed.
+
+
+## D-051 — Separate application configuration file
+
+**Decision:** Store application-level settings in a dedicated configuration file, separate from the SQLite database that holds library and business data.
+
+**Implications:** Keep user preferences and operational settings (for example, configured directories and safe runtime defaults) in a human-inspectable configuration format. Provide documented platform-appropriate config location and sensible defaults. Validate settings at startup and handle missing, malformed or outdated configuration safely by using defaults and surfacing actionable diagnostics rather than corrupting library data. Secrets, if any are introduced, should not be stored as plaintext in the config file; use an appropriate OS credential store. SQLite remains the source of truth for library records, media metadata and persisted job/business state. Exact format, schema versioning and migration behavior remain implementation details to define.
+
+**Status:** User-confirmed storage approach; config format, path, schema migration, validation and implementation remain to be completed.
