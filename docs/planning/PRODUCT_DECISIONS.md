@@ -494,3 +494,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep user preferences and operational settings (for example, configured directories and safe runtime defaults) in a human-inspectable configuration format. Provide documented platform-appropriate config location and sensible defaults. Validate settings at startup and handle missing, malformed or outdated configuration safely by using defaults and surfacing actionable diagnostics rather than corrupting library data. Secrets, if any are introduced, should not be stored as plaintext in the config file; use an appropriate OS credential store. SQLite remains the source of truth for library records, media metadata and persisted job/business state. Exact format, schema versioning and migration behavior remain implementation details to define.
 
 **Status:** User-confirmed storage approach; config format, path, schema migration, validation and implementation remain to be completed.
+
+
+## D-052 — Default media directory with user-selectable location
+
+**Decision:** On first launch, automatically use a recommended media-library directory rather than blocking startup on a directory-selection prompt. Users can choose a different location during initial setup or later in settings.
+
+**Implications:** Keep the media library separate from application configuration and, where practical, the SQLite database so large media collections do not unnecessarily consume the system/application configuration area. Clearly display the active media path. Changing the configured path must not silently move, delete or orphan existing media. Provide an explicit, validated migration/move workflow if moving an existing library is supported; otherwise explain that selecting a different directory affects future imports or requires a deliberate library-relink operation. Handle unavailable drives and missing directories with actionable errors and recovery options.
+
+**Status:** User-confirmed default behavior and directory configurability; exact platform-specific path, first-run UX, library migration semantics and implementation remain to be completed.
