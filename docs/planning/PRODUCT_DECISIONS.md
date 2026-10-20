@@ -129,6 +129,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
 
+## D-012 — Runtime concurrency configuration changes
+
+**Decision:** User changes to a provider profile's configured concurrency limit take effect immediately for future scheduling, but cannot override a lower active limit imposed by HTTP 429 rate-limit adaptation.
+
+**Implications:** Keep the configured maximum and dynamic active limit as separate values. Effective concurrency is bounded by both; increasing the configured value does not clear an active rate-limit reduction. Gradual recovery may raise the active limit only under the established cooldown rule and never above the latest configured maximum. Reducing the configured value should stop dispatching new work until in-flight requests fall within the new cap; do not cancel already-sent requests solely due to this setting change.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
