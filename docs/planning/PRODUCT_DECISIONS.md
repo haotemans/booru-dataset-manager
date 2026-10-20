@@ -1060,3 +1060,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - When exporting from a Character or Artist context, the default "all images" option exports every locally associated image in that context.
 - The Tag search/filter currently applied to the visible image list does not narrow the "all images" export scope.
 - Users may explicitly choose a selected-image export when they want only specific images.
+
+
+## D-115: Optimize Scope in Character and Artist Contexts
+
+- When optimization is launched from a Character or Artist context, the default scope is all locally associated images in the current context.
+- The Tag search/filter applied to the visible image list does not narrow the default optimization scope.
+- Users may explicitly choose selected images when they want to optimize only a subset.
