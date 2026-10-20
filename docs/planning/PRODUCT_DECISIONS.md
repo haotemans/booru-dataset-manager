@@ -1114,3 +1114,9 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Combine candidate results from both methods in the deduplication review workflow. Neither signal alone proves that two images should be deleted.
 - Keep pHash near-duplicate and DINOv3 candidates review-only; require explicit user confirmation before deletion. Only byte-for-byte identical files confirmed by a cryptographic content hash qualify for automatic deduplication.
 - Preserve valid shared metadata and character/artist/tag associations when consolidating exact duplicate records.
+
+
+## D-122: DINOv3 Deduplication Similarity Threshold
+
+- Use a default DINOv3 embedding cosine-similarity threshold of 0.997 for generating visual-duplicate candidates.
+- Treat the threshold as a candidate-generation rule, not proof of duplication; candidates remain subject to user review and explicit confirmation before deletion.
