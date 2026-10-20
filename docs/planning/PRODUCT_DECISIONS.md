@@ -73,16 +73,16 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-007 — AI batch size and failure-window advancement
 
-**Decision:** The default AI request batch contains 8 items. On a failed window, normally advance the input cursor by 4 items, creating overlap. If the remaining tail cannot advance to a new full window, reduce the tail batch size progressively from 8 to 4, then 2, then 1, so the remaining items can still be processed in smaller groups.
+**Decision:** The default AI request batch contains 8 items. A failed 8-item window advances by 4 items. When processing reaches a tail that cannot advance further at the current window size, switch to smaller batches and move by that same smaller batch size: 4-item batches advance by 4; if a 4-item batch fails, process that failed group in 2-item batches advancing by 2; if a 2-item batch fails, fall back to single-item batches advancing by 1.
 
 **Implications:**
-- A fully successful default 8-item window advances by 8. A failed non-tail window advances by 4, creating a 4-item overlap with the previous window.
+- A successful 8-item window advances by 8. A failed 8-item window advances by 4, creating a 4-item overlap.
 - Failure includes transport/API errors, malformed JSON, schema validation failure, and partial responses containing failed or missing item results.
 - Preserve valid item results from a partial response, and record invalid/missing items as failed. Never discard valid results just because another item failed.
-- Track each result by stable item ID and make writes idempotent. Overlapping windows and smaller tail batches must not create duplicate results or overwrite human-reviewed choices.
-- Do not resend the same failed request at the same batch size. When the tail cannot advance further, retry processing that remaining tail at progressively smaller batch sizes: 8 → 4 → 2 → 1. Do not jump directly to single-item requests while a larger fallback size remains.
-- If a one-item request fails, record the failure reason and leave the item failed/deferred for later manual handling; do not retry it indefinitely.
-- Persist cursor, selected batch size and per-item states for resume. The final request may contain fewer items than the current batch size; never add fake padding entries.
+- Track each result by stable item ID and make writes idempotent. Overlapping windows and smaller fallback batches must not create duplicate results or overwrite human-reviewed choices.
+- Do not repeat the same failed request at the same size. At the tail, reduce batch size progressively: 8 → 4 → 2 → 1. Within each fallback level, advance by the batch size (4, then 2, then 1), rather than repeatedly shifting by 4 or retrying the identical window.
+- If a 4-item batch fails, subdivide that failed 4-item group into two 2-item windows. If a 2-item window fails, subdivide that failed pair into single-item windows. A failed single-item request is recorded as failed/deferred for later manual handling; do not retry it indefinitely.
+- Persist cursor, fallback level and per-item states for resume. The final window may contain fewer items than the current batch size; never add fake padding entries.
 - Mark the job complete only when each input item is completed or explicitly recorded as failed/deferred.
 
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
