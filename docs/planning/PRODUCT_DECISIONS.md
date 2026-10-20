@@ -1097,3 +1097,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Use DINOv3 visual-embedding similarity as a subsequent stage to find visually related images that pHash does not catch, including images with meaningful visual differences.
 - Treat both methods as candidate-generation signals, not automatic proof that two images are duplicates.
 - Present candidates for review and require explicit user confirmation before deleting any image; preserve shared-file and cross-record association safeguards.
+
+
+## D-120: Automatic Handling of Exact Duplicates
+
+- Automatically deduplicate files only when a cryptographic content hash confirms byte-for-byte identity.
+- Before removing a duplicate file entry, preserve all valid character, artist, tag, and other metadata associations by consolidating them onto the surviving media record.
+- Do not automatically delete pHash near-duplicate candidates; show them for user review and require explicit confirmation before deletion.
+- DINOv3 similarity candidates also remain review-only.
