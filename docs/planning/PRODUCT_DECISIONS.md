@@ -816,3 +816,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** The confirmation view must make the deletion scope clear. Cancelling leaves all listed images and their associated records unchanged. Do not delete items that are not in the confirmed list; report any deletion failures accurately.
 
 **Status:** User-confirmed policy; pending-deletion list, confirmation UI and deletion implementation remain pending implementation and testing.
+
+## D-082 — Delete rejected images and their image-specific data together
+
+**Decision:** Once the user confirms the batch deletion, delete each listed rejected image and its image-specific database records and derived data together. This includes its tags/caption sidecars, AI analysis results and visual features/embeddings where applicable.
+
+**Safety:** Only remove data owned by the confirmed images. Do not delete shared model files, shared indexes, or resources referenced by other images; update or rebuild shared indexes as required. Keep the operation consistent and report partial failures clearly rather than claiming full success. Before confirmation, nothing is deleted; cancelling leaves files and records unchanged.
+
+**Status:** User-confirmed policy; dependency/reference checks, coordinated cleanup and failure recovery remain pending implementation and testing.
