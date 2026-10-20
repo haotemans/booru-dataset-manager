@@ -224,3 +224,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Preserve valid partial results according to the existing partial-response policy, but do not increment the concurrency recovery success counter for that batch. Only fully successful batches advance the counter. A new HTTP 429 resets the counter and cooldown as specified in D-020; other failed batches do not count as successes.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-022 — Which failures reset concurrency recovery progress
+
+**Decision:** Only a new HTTP 429 resets the concurrency recovery success counter and restarts the cooldown. Other failed requests or batches do not increment the counter but preserve the already accumulated successful-batch progress.
+
+**Implications:** Keep transport/content-processing failure handling separate from rate-limit recovery. Valid partial results may be preserved under the existing policy, but the batch does not count as successful. Do not clear the recovery counter for ordinary errors; a new 429 always returns active concurrency to 1 and resets the counter.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
