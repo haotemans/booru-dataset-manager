@@ -88,3 +88,6 @@ An HTTP 429 from any member configuration places the entire explicitly shared ra
 ### Default group concurrency maximum
 
 A newly created shared rate-limit group defaults to an aggregate maximum concurrency of 2, regardless of the individual maxima or the number of member configurations. Users can change the group maximum explicitly. Requests must still satisfy both member-level and group-level effective limits; group creation does not silently increase aggregate concurrency.
+
+
+Successful requests that were already in flight when a shared rate-limit group entered HTTP 429 cooldown may still complete and persist valid results, but do not count toward gradual concurrency recovery. When cooldown ends, the group's recovery success counter starts at zero; only fully successful batches completed after cooldown ends count toward raising the active concurrency limit.

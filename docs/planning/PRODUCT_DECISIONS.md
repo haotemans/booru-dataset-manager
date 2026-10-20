@@ -287,3 +287,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Creating a shared group must not silently increase aggregate request pressure. Each member remains constrained by its own configured/effective limit as well as the group's aggregate/effective limit. The group's default maximum is independent of member count and member-level settings. Existing HTTP 429 cooldown and gradual recovery rules remain in force.
 
 **Status:** User-confirmed policy; settings UI, persistence, scheduler integration, and tests remain to be completed.
+
+
+## D-029 — Requests completing during a shared-group cooldown
+
+**Decision:** Successful requests that were already in flight when a shared rate-limit group entered HTTP 429 cooldown do not count toward gradual concurrency recovery, even if they complete successfully during the cooldown. After the cooldown expires, recovery success counting starts at zero.
+
+**Implications:** A shared-group 429 resets the group's recovery counter. Cooldown-period completions may still persist valid item results, but they do not advance the adaptive concurrency recovery counter. Once cooldown ends, only fully successful batches completed under the post-cooldown recovery phase count toward the configured threshold for raising concurrency.
+
+**Status:** User-confirmed policy; scheduler implementation and tests remain to be completed.
