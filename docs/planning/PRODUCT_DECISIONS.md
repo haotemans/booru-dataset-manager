@@ -792,3 +792,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Do not silently perform lossy conversion. When conversion is required, explain the reason and use a suitable output format; preserve image dimensions and visual quality as far as the selected operation and format allow. The output must be validated before replacing the current committed file, following D-068.
 
 **Status:** User-confirmed policy; format capability checks, conversion behavior and tests remain pending implementation.
+
+## D-079 — Optional configurable edited-file size limit
+
+**Decision:** Do not impose a default fixed file-size limit on edited images. Offer an optional configurable per-file size limit for users who want to manage disk usage.
+
+**Behavior:** When the limit is enabled and an output exceeds it, notify the user and allow adjustment rather than silently degrading image quality or discarding the output. Any compression or format conversion must be explicit and consistent with D-078. Validate available disk space and the output file before replacing the current committed image.
+
+**Status:** User-confirmed policy; settings UI, output-size checks and related tests remain pending implementation.
