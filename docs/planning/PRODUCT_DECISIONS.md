@@ -1170,3 +1170,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Pausing must stop scheduling new deduplication work and reach a safe checkpoint for any in-progress item before reporting the task as paused.
 - Resume continues from persisted progress rather than restarting the entire scan.
 - Any completed deletions remain permanent; pausing or resuming does not provide undo or recovery.
+
+
+## D-130: Confirm Before Resuming Deduplication After Unexpected Shutdown
+
+- If the application closes unexpectedly while deduplication is in progress, persist enough task state to show the interrupted task and its progress on the next launch.
+- Do not resume deduplication automatically after restart. Ask the user to explicitly confirm resumption.
+- Continue from the last safe checkpoint after confirmation; deletions completed before shutdown remain permanent and are not rolled back.
