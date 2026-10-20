@@ -530,3 +530,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Scope and safeguards:** The data-removal choice must clearly identify the categories and root directory it will affect (including the database/library state, media, downloaded models, configuration and exports as applicable). Do not delete data outside the managed root or independently configured locations without explicitly identifying them and obtaining consent. If the root or a configured data location is unavailable, report that data could not be removed rather than implying cleanup succeeded. Keep uninstall and data deletion as distinguishable actions, and never make data deletion the implicit consequence of uninstalling.
 
 **Status:** User-confirmed product behavior; installer/uninstaller implementation and exact platform-specific confirmation UI remain pending.
+
+
+## D-056 — In-app update checking with user-confirmed installation
+
+**Decision:** The application includes an update-checking entry point. When a newer release is available, it shows the version and release notes and lets the user choose to open the official release page to download the installer. The first release of this feature does not silently download or install updates and does not automatically replace the running application.
+
+**Security and UX requirements:** Use the project's official release source; show the current and available versions and relevant release notes; handle offline, rate-limit, malformed metadata and unavailable-release cases without blocking core application use. Do not execute an installer or change installed files without an explicit user action. Verify that displayed download links point to the configured official project release location. Automatic download/install and signature verification workflows are future scope, not implied by this decision.
+
+**Status:** User-confirmed product direction; release metadata format, update-check frequency, implementation and installer integration remain pending.
