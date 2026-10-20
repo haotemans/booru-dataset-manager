@@ -32,3 +32,8 @@ Include source-linked difference/alternate-artwork sets in the labeled data. Eva
 ## Difference-set representative selection evaluation
 
 For source-confirmed difference sets, evaluate automatic representative ranking separately from relationship detection. Collect human preferred-image labels within each set and report top-1 agreement, pairwise preference agreement, disagreement rates, and cases where technical defects or visible text affect ranking. Compare automatic and manual selection workflows. If the ranking service returns an invalid/unavailable result, the system must preserve the set and request manual selection rather than silently dropping all variants. Record selection mode and ranking-policy version for reproducibility.
+
+
+## Aesthetic-first representative ranking
+
+For each source-confirmed difference set, the default is automatic selection of the single most aesthetically appealing image. Evaluate agreement with human preferences using top-1 accuracy/agreement, pairwise preference agreement, and disagreement analysis grouped by content type and common failure mode. Aesthetic quality and degree of completion are primary; distraction, text and technical defects are supporting evidence. Do not treat resolution, source priority, file size or embedding similarity as proxies for aesthetic appeal. If the model cannot produce a sufficiently reliable ranking, leave the representative unset and request manual selection. Human overrides must be preserved and excluded from being silently overwritten by later runs.

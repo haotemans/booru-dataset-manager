@@ -28,7 +28,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-004 — Representative-image ranking and original retention
 
-**Decision:** Rank representative candidates primarily by visual appeal and degree of completion, then by minimal visual distractions; images with no visible text are preferred when other quality factors are comparable. Keep all original files. For source-confirmed difference sets, the system may select one representative either automatically using the configured quality policy or manually by the user. Crop suggestions still require explicit human approval.
+**Decision:** For source-confirmed difference sets, default to automatically selecting the single most aesthetically appealing image as representative; the user may manually replace that choice at any time. Evaluate aesthetic appeal and degree of completion first, then consider visual distractions and visible text as supporting factors. Keep all original files. Crop suggestions still require explicit human approval.
 
 **Implications:**
 - Treat aesthetic/completion quality as the primary preference, not file size, source priority, or embedding similarity.
@@ -363,7 +363,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-037 — Automatic association of source-confirmed difference sets and single representative selection
 
-**Decision:** When a provider explicitly and reliably identifies a difference set (for example, a Danbooru difference relationship), automatically create the association group and record the source relationship. For representative-only dataset selection, retain one selected representative per difference set by default. The representative may be chosen automatically using the configured quality ranking or manually by the user.
+**Decision:** When a provider explicitly and reliably identifies a difference set (for example, a Danbooru difference relationship), automatically create the association group and record the source relationship. For representative-only dataset selection, automatically choose the most aesthetically appealing single representative per difference set by default; the user may manually choose a different member at any time.
 
 **Implications:** Automatic selection follows the existing preference order: aesthetic appeal/completion, fewer visual distractions, and preferably no visible text when other factors are comparable. Store the selected representative, selection mode, ranking/policy version, recommendation rationale and decision history. Manual choice overrides automatic selection. Keep all original media files and provenance in the library; “one representative” governs the representative-only dataset/export view and does not physically delete or erase unselected difference variants. Exports may offer an explicit all-variants option. Do not apply one representative to an entire broad association group unless its members are confirmed to be interchangeable for that selection purpose. Crop suggestions remain subject to explicit human approval.
 
@@ -377,3 +377,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** If the model/runtime is unavailable, keep the item imported and mark analysis as pending with an actionable reason. If embedding or similarity analysis fails, retain the imported media, preserve any valid prior analysis and record a retryable/permanent analysis state independently. Re-analysis is versioned by model and preprocessing version and must not silently overwrite human-confirmed relationships or representative selections. Expose ingestion completion and DINOv3 analysis completion as separate progress/status values.
 
 **Status:** User-confirmed policy; queue, persistence, reanalysis UI, integration and tests remain to be implemented.
+
+
+## D-039 — Aesthetic-first automatic representative selection
+
+**Decision:** Automatically choose one representative for each eligible source-confirmed difference set, with aesthetic quality as the primary objective. The user can manually replace the selected representative at any time.
+
+**Implications:** Use vision-based aesthetic assessment and quality evidence to rank candidates. Prioritize overall visual appeal and degree of completion; use visual clutter, distracting artifacts and visible text as supporting factors rather than rigid rejection rules. Do not substitute resolution, source priority, file size or DINOv3 similarity for aesthetic quality. If the assessment service is unavailable or cannot provide a sufficiently reliable ranking, leave the group marked as needing representative selection instead of silently choosing arbitrarily. Preserve all original variants, record selection rationale and model/prompt/policy versions, and keep manual overrides with audit history. Crop proposals still require explicit human approval.
+
+**Status:** User-confirmed policy; aesthetic-ranking implementation, evaluation, fallback state and tests remain to be completed.

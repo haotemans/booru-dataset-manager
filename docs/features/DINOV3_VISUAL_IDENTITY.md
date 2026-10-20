@@ -13,17 +13,19 @@ DINOv3 embeddings are retrieval features, not proof of semantic identity and not
 
 ## Recommendation and human review
 
-The system supports both automatic representative selection and manual selection. For source-confirmed difference sets, create the association automatically and select one representative either by the configured quality-ranking policy or by an explicit user choice. Keep the selection reversible and explainable; a manual choice overrides automation. For broader or uncertain visual relationships, DINOv3 supplies candidates and the user confirms the association. Crop suggestions always require explicit human approval.
+The default for a source-confirmed difference set is to automatically choose its most aesthetically appealing image as the representative. The user can manually replace that choice at any time. Keep the selection reversible and explainable; a manual choice overrides automation. For broader or uncertain visual relationships, DINOv3 supplies candidates and the user confirms the association. Crop suggestions always require explicit human approval.
 
 The review UI should show candidates side by side with full-resolution inspection, zoom, dimensions, file size, source, artist/character links, review status and quality indicators. Actions should include choose representative, keep as separate variant, mark as related-but-distinct, reject a proposed relation, accept/edit/reject a crop suggestion, defer, and undo. A human decision takes precedence over automated suggestions until explicitly reset.
 
 ## User-confirmed representative preference
 
-Ranking preference, in priority order:
+Ranking objective and supporting signals:
 
-1. **Aesthetic appeal and completion:** prefer the image that looks more polished and visually complete.
-2. **Minimal visual distractions:** prefer a clean composition with fewer distracting overlays or artifacts.
-3. **No visible text:** text-free images are preferred when other quality factors are comparable; visible text is a negative signal, not an unconditional rejection.
+1. **Primary objective — overall aesthetic appeal:** choose the image that is most visually appealing and feels compositionally coherent and complete.
+2. **Completion and quality:** consider whether the artwork looks finished, whether important details are intact, and whether defects materially harm the image.
+3. **Supporting preferences — fewer distractions and less visible text:** prefer clean compositions when aesthetic quality is otherwise comparable. Visible text is a contextual signal, not an unconditional rejection.
+
+Do not let dimensions, file size, source priority, or DINOv3 similarity stand in for aesthetic judgment.
 
 Use a vision API to assess these subjective signals and provide concise reasons. The assessment is advisory: confidence/uncertainty should be surfaced and the human reviewer makes the final decision. DINOv3 similarity must not be used as a substitute for aesthetic evaluation.
 
@@ -115,7 +117,7 @@ A broad association group does not automatically have one representative for all
 
 For an explicit, trustworthy source-declared difference set, automatically create the association and offer two selection modes:
 
-- **Automatic:** select one representative using the configured quality ranking: aesthetic appeal/completion first, then fewer distracting artifacts, with text-free artwork preferred when other factors are comparable. Record the ranking and policy versions and a concise rationale. If the scoring/vision service cannot provide a usable result, mark the set as needing selection rather than inventing a result.
+- **Automatic:** select one representative using the configured quality ranking: aesthetic appeal/completion first, then fewer distracting artifacts, with text-free artwork preferred when other factors are comparable. Record the ranking and policy versions and a concise rationale. If the scoring/vision service cannot provide a usable or sufficiently reliable ranking, mark the set as needing representative selection rather than inventing a result.
 - **Manual:** show the variants side by side and let the user choose one. A manual decision overrides the automatic choice and is recorded in history.
 
 Representative-only export includes the selected image for each eligible difference set. All variants remain in the managed library, and an explicit all-variants export remains available. Do not physically delete unselected images. This rule applies to source-confirmed difference sets or other groups whose members are eligible substitutes; it does not collapse an entire character, artist, or broad visual-association group to one image.
