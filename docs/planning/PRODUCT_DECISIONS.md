@@ -907,3 +907,10 @@ Implementation pending: character/variant relationship source, redundancy rules,
 When multiple mutually exclusive specific variant/costume tags for the same character appear on one image, do not assume all are valid and do not silently choose one. Use verified Danbooru tag relationships where available to identify likely conflicts, then flag the image for review. Preserve the source tags and avoid automatic destructive removal until the conflict is resolved. This rule is distinct from D-092: a specific variant can replace a redundant general character tag, but multiple specific variants may indicate tagging error and require review.
 
 Implementation pending: variant exclusivity metadata/rules, conflict detection, and review UI.
+
+
+## D-094 Auto-correct only well-supported tag conflicts
+
+When resolving tag conflicts, automatically correct cases only when a deterministic, verified rule or authoritative Danbooru metadata makes the correction unambiguous. For example, remove a redundant general character tag when a verified specific variant tag is present. For potentially mutually exclusive specific variants, automatically select/remove a tag only if authoritative metadata or a confirmed rule identifies the correct outcome. If evidence is insufficient or ambiguous, show a recommended correction for user confirmation. Preserve original source tags and provenance; do not let speculative AI guesses trigger destructive normalization.
+
+Implementation pending: confidence/evidence rules, correction suggestions, and review workflow.
