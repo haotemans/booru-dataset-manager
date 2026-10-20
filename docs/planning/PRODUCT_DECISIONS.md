@@ -521,3 +521,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Validate that the selected location is writable and has sufficient available space where practical. Explain that the root will contain separate subdirectories for application files, configuration, model artifacts, database/library state, media and exports. Do not silently fall back to another drive or system-directory location if the selected drive is unavailable; present an actionable error and allow the user to reconnect the drive or choose another location. Keep upgrades from overwriting or deleting managed user data. If the installer and runtime packaging impose platform-specific constraints on where executable files can live, preserve the user-selected managed-data root and clearly document any required distinction rather than silently changing the user's choice.
 
 **Status:** User-confirmed installation UX; installer technology, path validation, missing-drive behavior and implementation remain to be completed.
+
+
+## D-055 — Uninstall defaults to preserving user data
+
+**Decision:** Uninstalling the application removes program files but preserves user data by default. The uninstaller offers an explicit, opt-in choice to delete managed application data as well; that choice is unchecked by default.
+
+**Scope and safeguards:** The data-removal choice must clearly identify the categories and root directory it will affect (including the database/library state, media, downloaded models, configuration and exports as applicable). Do not delete data outside the managed root or independently configured locations without explicitly identifying them and obtaining consent. If the root or a configured data location is unavailable, report that data could not be removed rather than implying cleanup succeeded. Keep uninstall and data deletion as distinguishable actions, and never make data deletion the implicit consequence of uninstalling.
+
+**Status:** User-confirmed product behavior; installer/uninstaller implementation and exact platform-specific confirmation UI remain pending.
