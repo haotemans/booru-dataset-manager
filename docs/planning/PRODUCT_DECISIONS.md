@@ -677,3 +677,13 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Trade-off:** Because the local previous output is overwritten and remote backup runs weekly, an edit made after the latest successful remote backup may not be recoverable if overwritten or damaged before the next successful backup. The application must communicate the last successful backup time and pending/unprotected changes; it must not silently claim every edit is recoverable. Do not add local version archives to avoid this trade-off unless the user explicitly changes this decision.
 
 **Status:** User-confirmed storage and cadence requirements; scheduling, status UI, overwrite behavior, and backup verification remain pending implementation and testing.
+
+## D-066 — Re-edit from the source instead of relying on image-version backups
+
+**Decision:** An ordinary editing mistake should be recoverable by re-fetching the source original from its recorded Danbooru post and starting the edit again; it should not require a backup restore. Keep only the current local image output per image/variant and do not retain multiple local image-version files solely for undo/history. Preserve the source post ID/URL, expected source hash when known, and edit parameters/metadata needed to re-fetch and re-run the workflow.
+
+**Recovery behavior:** Provide a direct action to re-fetch the source original and restart editing. Validate the downloaded source against the recorded hash when available. If the source cannot be fetched or no longer matches, explain the failure and offer available recovery paths; do not silently overwrite the current output before the source is successfully fetched and validated. This is a recovery workflow, not a guarantee that every remote source will remain available.
+
+**Backup role and cadence:** Remote backup remains weekly as separately decided. It protects against loss of data that cannot simply be re-fetched or regenerated, rather than serving as the normal undo mechanism for editing mistakes. Do not increase upload frequency or add local image-version archives to solve routine edit mistakes.
+
+**Status:** User-confirmed recovery principle; source re-fetch action, safe replacement flow and validation remain pending implementation and testing.
