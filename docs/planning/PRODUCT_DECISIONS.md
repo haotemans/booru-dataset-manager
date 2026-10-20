@@ -968,3 +968,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - This is a user-triggered, manual workflow; it does not run automatically just because a Character or Artist page is opened or images are imported.
 - The workflow analyzes images in the current Character or Artist context, presents candidate duplicates/similar images for user review, and requires user confirmation before any deletion.
 - Existing DINOv3 analysis, similarity grouping, and image-deletion safeguards remain in effect.
+
+
+## D-102 Choose one export format per export operation
+
+- In the Character and Artist areas, each export operation lets the user choose one format: natural-language descriptions or tags.
+- The user chooses a single format for that export operation; the application does not require exporting both formats together.
+- Preserve the previously agreed scope and per-image text-file behavior for exports.
