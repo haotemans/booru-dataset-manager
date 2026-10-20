@@ -188,3 +188,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** A 429 immediately sets the affected provider profile's active concurrency to 1 and resets its cooldown. Do not shrink the batch or classify the item as a content-processing failure solely due to rate limiting. Keep the configured serial request-start interval in force. A later 429 starts a new cooldown; unresolved IDs remain resumable.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-018 — Provider-profile-wide rate-limit gate
+
+**Decision:** All tasks using the same provider profile share one rate-limit scheduler and cooldown gate. When any task receives HTTP 429, the scheduler blocks new request dispatch for every task on that profile for the applicable cooldown. After cooldown, dispatch resumes through the shared scheduler in serial mode, then concurrency is gradually restored under D-013/D-014 rules.
+
+**Implications:** A task cannot bypass a cooldown by issuing requests through another worker that uses the same profile. Other provider profiles remain independent. Persist profile-level cooldown and active concurrency state so task pause/resume or application restart does not inadvertently bypass the gate.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
