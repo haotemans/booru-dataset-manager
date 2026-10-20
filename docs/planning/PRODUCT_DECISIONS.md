@@ -28,20 +28,22 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-004 — Representative-image ranking and original retention
 
-**Decision:** Rank representative candidates primarily by visual appeal and degree of completion, then by minimal visual distractions; images with no visible text are preferred. Keep all original files. Mark the recommended representative separately and let export settings choose representative-only or all variants.
+**Decision:** Rank representative candidates primarily by visual appeal and degree of completion, then by minimal visual distractions; images with no visible text are preferred. Keep all original files. Use a vision API to assess aesthetic quality and suggest potentially beneficial crops, but require human review before accepting representative choices or crop suggestions.
 
 **Implications:**
-- Treat aesthetic/completion quality as the primary human preference, not file size, source priority, or embedding similarity.
-- Prefer clean compositions with minimal distracting overlays or other visual clutter; visible text is a negative signal, with text-free images preferred when other quality factors are comparable.
-- Use measurable technical signals (decode validity, blur/sharpness, compression artifacts, resolution and upscaling indicators) as supporting evidence, not as a replacement for aesthetic judgment.
-- Show the recommendation and its reasons, allow manual override, and preserve decision history. Do not delete, overwrite, or silently quarantine non-representative originals.
-- This is a ranking policy to evaluate, not a claim that aesthetic quality can already be measured reliably by an implemented model. Ambiguous or close calls should be surfaced for human review.
+- Treat aesthetic/completion quality as the primary preference, not file size, source priority, or embedding similarity.
+- Prefer clean compositions with fewer distracting overlays or artifacts; text-free images are preferred when other quality factors are comparable.
+- A vision API may propose crop coordinates and explain why the crop could improve composition. Example: for a 9:16 image, shifting the crop window upward may improve framing. The system must not assume every image needs cropping or that a crop improves aesthetics.
+- Any crop is a derived preview/export variant, never an edit to the original. Preserve the original bytes and hash; show original and crop side by side, allow adjustment/rejection, and only use an approved crop in an explicitly selected output.
+- Show recommendation reasons and uncertainty. Human decisions take precedence and are recorded in history.
+- This is a desired workflow, not a claim that the vision API, crop UI, or ranking system is implemented or already reliable.
 
-**Status:** User-confirmed preference; ranking implementation and evaluation remain pending.
+**Status:** User-confirmed preference; ranking, crop suggestions, human review UI and evaluation remain pending.
 
 ## Deferred decisions
 
-- Exact ranking weights, how aesthetic completion and visual clutter are measured, and whether some signals require a vision model or human labels.
-- Whether automatic representative selection is enabled by default for newly discovered groups.
+- Which vision API/provider to use, its privacy/cost controls, and whether images are sent only after explicit opt-in.
+- Exact ranking weights and how to evaluate aesthetic completion, clutter, and crop quality against human judgments.
+- Whether automatic representative recommendations are enabled by default for newly discovered groups.
 - Whether a visual group can contain different crops/poses/frames versus only near-duplicate versions. The relation types must remain distinct even if groups share one UI.
 - Which DINOv3 artifact/runtime and nearest-neighbor index meet license, compatibility, memory and latency requirements.
