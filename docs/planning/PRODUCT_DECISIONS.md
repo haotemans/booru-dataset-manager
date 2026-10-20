@@ -16,7 +16,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Implications:** Distinguish visual grouping, representative selection and physical deletion as separate operations. Group membership does not imply byte-identical duplicates. A representative is a reversible dataset-selection decision, not a destructive cleanup. Exact byte duplicates may be deduplicated logically using database-enforced hashes while retaining source provenance.
 
-**Status:** Confirmed by user; policy design only. Model thresholds and quality-ranking behavior are not yet calibrated or implemented.
+**Status:** Confirmed by user; policy documentation only. Model thresholds and quality-ranking behavior are not yet calibrated or implemented.
 
 ## D-003 — Target library scale
 
@@ -60,16 +60,30 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Decision:** AI integrations must send requests using JSON and parse responses as structured JSON for reliable batch processing. Do not depend on free-form prose or ad-hoc text extraction for successful batch results.
 
 **Implications:**
-- Define versioned request/response schemas per operation (e.g. visual assessment, crop suggestion, tag optimization, caption generation), with explicit fields, types, enums, bounds and required identifiers.
+- Define versioned schemas per operation, with explicit fields, types, enums, bounds and required identifiers.
 - For batch work, include a stable per-item ID and require a corresponding result/status for each input item. Validate that IDs are unique, expected and not missing; do not associate results by array position alone.
-- Prefer provider-supported structured output / JSON Schema or strict JSON mode when available. For providers without that capability, still request JSON and parse strictly; never silently treat arbitrary prose as valid output.
+- Prefer provider-supported structured output / JSON Schema or strict JSON mode when available. For providers without that capability, still request JSON and parse strictly.
 - Validate syntax, schema, required fields, numeric ranges, crop coordinates and image/item identity before accepting any result. Reject malformed or ambiguous results and mark affected items for bounded retry or human review.
 - Handle partial batch failure per item: preserve valid results, retry only eligible failed items with limits, and never let one malformed item corrupt or discard unrelated successful results.
 - Bound request/response sizes and batch concurrency; persist job/item state so batches can resume without duplicating already accepted work.
-- Keep raw provider response only where useful and safe, with size limits and secret/image-payload redaction; retain normalized validated results and provider/model/schema versions for auditability.
-- Structured output improves parsing reliability but does not guarantee factual correctness; semantic checks and required human review remain in place for aesthetic and crop decisions.
+- Keep diagnostics redacted; retain provider/model/schema versions and validation outcomes for auditability.
+- JSON validity is not semantic correctness. Protected-term checks remain required, and vision-based aesthetic/crop proposals remain advisory pending human review.
 
-**Status:** User-confirmed integration requirement; schemas, provider capability handling, parser, retry behavior and tests remain to be implemented.
+**Status:** User-confirmed integration requirement; schemas, parser, retry behavior and tests remain to be implemented.
+
+## D-007 — AI batch size and failure-window advancement
+
+**Decision:** The default AI request batch contains 8 items. Single-item processing must also be supported. When a batch fails, advance the input window by 4 items and continue, creating a 4-item overlap with the prior window.
+
+**Implications:**
+- For a successful batch, advance by 8 items. For a failed batch, advance by 4 items; do not reprocess already accepted item results just because a later window overlaps them.
+- Track state and outcome per item ID. Deduplicate accepted results by job and item ID so overlap cannot create duplicate writes or overwrite human-reviewed results.
+- Preserve valid per-item results from a partially successful response. Treat invalid/missing/failed item results as failures, rather than discarding unrelated valid results.
+- Support a batch size of 1 for providers/models or tasks that are more reliable with single-item requests. Batch size should be configurable, with 8 as the default.
+- Bound retries per item and per request. A failed window must not cause an infinite loop; persist the failure reason and leave exhausted items in a retry/review queue.
+- Handle the final window when fewer than 8 items remain without padding with fake items. Confirm every input item has a terminal or explicitly deferred state before marking the job complete.
+
+**Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
 
 ## Deferred decisions
 

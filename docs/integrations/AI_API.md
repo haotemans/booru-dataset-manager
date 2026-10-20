@@ -19,6 +19,15 @@ All AI API requests must be serialized as JSON. All accepted operation results m
 - Record provider/model, schema version, request/job ID, attempt count, validation outcome and error category. Keep diagnostics redacted; cap raw response retention and never log image bytes, secrets or credential-bearing headers.
 - JSON validity is not semantic correctness. Apply protected-term checks and domain validation; vision-based aesthetic and crop proposals remain advisory and require human review.
 
+## Batch sizing and sliding-window policy
+
+- Default to 8 items per API request; also support a batch size of 1. Keep the batch size configurable.
+- After a successful 8-item window, advance the window by 8. After a failed request/window, advance by 4, so the next window overlaps the previous one by 4 items.
+- Treat accepted results as item-level, idempotent records keyed by stable item ID. Overlapping windows must not duplicate writes or overwrite human-reviewed results.
+- For partial responses, retain valid item results and mark only failed/invalid/missing items as failed. The window failure policy must not discard valid results.
+- Apply bounded retries, then place exhausted failures in a visible retry/review queue. Persist the cursor and item states so restart/resume does not repeat accepted work.
+- The final request may contain fewer than 8 remaining items. Never fabricate padding entries; job completion requires every item to be completed or explicitly marked deferred/failed.
+
 ## External vision API upload consent
 
 Image analysis is a separate capability from text-only AI operations. External image upload is disabled unless the user explicitly approves the current batch.
@@ -43,4 +52,4 @@ A vision model may assess aesthetic completion, visual clutter and visible text,
 
 Treat model output as untrusted data. Validate schema, length, encoding, protected-term coverage, unauthorized additions, and output target. Do not allow model output to choose filesystem paths, SQL fragments, shell commands, or remote repository names. Use bounded request/response sizes and cancellation. A failed target must not overwrite its last valid version or undo another target's successful result.
 
-Acceptance tests: JSON serialization, strict JSON parsing, schema validation, unknown/duplicate/missing batch item IDs, malformed and oversized output, bounded retries, partial batch success, resume/idempotency, key redaction, timeout, protected artist/character names, unknown special tags, no image upload by default, batch consent required on every external vision job, cancellation/no-dispatch behavior, consent audit redaction, target isolation, and reviewed-output preservation.
+Acceptance tests: JSON serialization, strict JSON parsing, schema validation, unknown/duplicate/missing batch item IDs, malformed and oversized output, bounded retries, partial batch success, sliding-window advancement (8 on success, 4 on failure), overlap idempotency, single-item mode, resume behavior, key redaction, timeout, protected artist/character names, unknown special tags, no image upload by default, batch consent required on every external vision job, cancellation/no-dispatch behavior, consent audit redaction, target isolation, and reviewed-output preservation.
