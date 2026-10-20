@@ -1002,3 +1002,9 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 
 - Both the Character and Artist areas provide a search field for filtering cards by tag.
 - Filter the visible cards as the user types, without requiring a separate submit action.
+
+
+## D-107 Responsive grid layout for Character and Artist cards
+
+- Character and Artist cards use an adaptive grid layout.
+- The number of cards per row adjusts automatically to the available window width.
