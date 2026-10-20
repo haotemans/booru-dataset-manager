@@ -1162,3 +1162,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Run deduplication as a background task so it does not block normal application interaction.
 - Show deduplication progress and summary statistics on the Dashboard, including processed items, automatic removals, and candidates awaiting manual review.
 - Keep the existing audit logging and permanent-deletion behavior; dashboard progress is informational and does not imply undo or recovery support.
+
+
+## D-129: Pause and Resume Background Deduplication
+
+- Allow users to manually pause and resume a running background deduplication task.
+- Pausing must stop scheduling new deduplication work and reach a safe checkpoint for any in-progress item before reporting the task as paused.
+- Resume continues from persisted progress rather than restarting the entire scan.
+- Any completed deletions remain permanent; pausing or resuming does not provide undo or recovery.
