@@ -1142,3 +1142,9 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Extend the automatic duplicate survivor priority to: highest aesthetic score, highest pixel resolution, PNG format, then prefer the image confirmed to be watermark-free.
 - Watermark status is a tie-breaker after the previously defined criteria; do not let it override a higher-priority criterion.
 - If watermark status is unknown or uncertain, do not assume the image is watermark-free; continue with deterministic fallback criteria rather than making an unsupported classification.
+
+
+## D-126: Prefer Confirmed Watermark-Free Image Over Unknown Status
+
+- When aesthetic score, pixel resolution, and format tie, prefer an image confirmed to be watermark-free over an otherwise equivalent image whose watermark status is unknown.
+- Do not treat unknown watermark status as proof that a watermark exists or is absent; this rule only prefers the positively confirmed watermark-free candidate in an otherwise exact tie.
