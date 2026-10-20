@@ -28,3 +28,8 @@ Prefer provider-declared original dimensions and original media URLs. Never appl
 ## Preferred source and fallback
 
 Use Danbooru as the default primary source. If a task cannot feasibly proceed through Danbooru, Gelbooru is the fallback. Do not harvest both sources in parallel by default. Record the selected provider and any failover reason in task provenance, and route both providers through the same normalized ingestion pipeline. Failover must respect authentication, rate limits and site policies. Automatic failover conditions must be defined explicitly before implementation; transient throttling or service errors must not be treated as permission to bypass a provider's rate limits.
+
+
+### Danbooru-to-Gelbooru fallback conditions
+
+For a Danbooru-first task, Gelbooru may be used when Danbooru cannot be used for the task, or when Danbooru produces no items that pass configured eligibility filters such as the original-dimension gate and actual-file validation. No matching results and all-results-excluded outcomes qualify. This policy does not automatically top up a partially met numeric target from Gelbooru. Handle transient network errors and HTTP 429 using the primary provider's bounded retry/cooldown policy before deciding whether to fail over; never switch providers to evade rate limits, authentication requirements, policy restrictions or access controls. Persist the failover reason and source provenance, and use the common deduplication pipeline across both providers.

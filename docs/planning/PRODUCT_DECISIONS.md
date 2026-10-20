@@ -332,3 +332,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep source selection and fallback decisions visible in the job's provenance and progress. Records from either provider still flow through the same normalization, dimension gate, exact-deduplication and media-import pipeline. A fallback must not bypass source authentication, provider policy, rate limits, or access restrictions. The exact conditions that trigger fallback must be explicitly defined before implementing automatic failover.
 
 **Status:** User-confirmed provider priority; automatic fallback conditions, implementation and tests remain to be specified.
+
+
+## D-034 — Conditions for falling back from Danbooru to Gelbooru
+
+**Decision:** In a Danbooru-first ingestion task, attempt Gelbooru when Danbooru cannot be used for the task or yields no items that pass the task's configured eligibility filters (including the minimum resolution and validated-file requirements). A successful search with no results, or a result set whose items are all excluded by eligibility filters, may trigger fallback. Reaching a numeric target before exhausting Danbooru results does not itself require Gelbooru; top-up behavior is not part of this fallback rule.
+
+**Implications:** Continue to respect Danbooru authentication, rate limits, Retry-After, cooldowns and provider policies. A transient failure or 429 must follow the provider's retry/cooldown policy before any failover decision; do not use Gelbooru to bypass throttling or access restrictions. Record the fallback reason and provider provenance. De-duplicate items across providers through the shared media pipeline.
+
+**Status:** User-confirmed fallback policy; exact error classification, implementation and tests remain to be completed.
