@@ -165,3 +165,8 @@ Group candidates by relationship type first, then sort within each group by cali
 ## Human-confirmed relationship overrides
 
 Persist human decisions as first-class overrides, distinct from model-generated relationship candidates. Model upgrades, embedding/index rebuilds and batch re-analysis may update model scores and generate new candidates, but must not silently change or delete an override. The user can explicitly edit or clear an override to permit reassessment. Keep an audit trail including media IDs, relationship type, decision source, timestamp and prior state. If a schema migration makes a stored decision ambiguous, flag it for review rather than silently reinterpret it.
+
+
+## Visual analysis failure and recovery
+
+The default policy retries retryable DINOv3 analysis failures automatically up to three attempts. When exhausted, mark the analysis item failed/deferred, expose an actionable error and provide a manual retry action. Persist attempt count and failure history across application restarts; restarting must not silently reset the retry budget. Use bounded backoff for transient failures, and do not repeatedly retry permanent model/configuration incompatibilities. A successful media ingestion remains successful regardless of analysis failure; the analysis queue is independent of ingestion and must not block unrelated gallery operations. Manual retry begins an explicit new cycle while preserving previous attempts and errors.

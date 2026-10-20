@@ -431,3 +431,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Store the decision, relationship type, involved media IDs, actor/source, timestamp and audit history. Distinguish an explicit human override from a model-generated suggestion. Re-analysis may refresh scores and candidates but must preserve the human-selected relationship state; if the underlying media or relationship schema changes incompatibly, flag the decision for review rather than silently reinterpret it. Clearing an override is an explicit user action and should be auditable.
 
 **Status:** User-confirmed policy; persistence, migration and UI implementation remain to be completed.
+
+
+## D-045 — Bounded retry for visual analysis failures
+
+**Decision:** DINOv3 analysis failures are retried automatically up to three attempts by default. After the retry budget is exhausted, the item is marked failed/deferred with an actionable error and a manual retry option. Visual analysis failure never rolls back successful media ingestion or blocks unrelated gallery operations.
+
+**Implications:** Retry only retryable failures; permanent configuration/model incompatibility should be surfaced promptly rather than pointlessly retried. Persist attempt count, error category, last error and next retry/terminal state so restarts do not reset the retry budget. Use bounded backoff for transient failures and keep analysis queue state separate from ingestion state. Manual retry explicitly starts a new retry cycle while retaining prior failure history.
+
+**Status:** User-confirmed policy; failure taxonomy, backoff values and implementation remain to be completed.
