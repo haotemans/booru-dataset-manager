@@ -78,3 +78,8 @@ AI API configurations maintain independent concurrency, cooldown, and adaptive-r
 ### Member and group concurrency caps
 
 Each API configuration retains its own configured maximum concurrency. A shared rate-limit group also has a separately configured aggregate maximum. Every dispatch must satisfy the member-level effective limit and the group's effective limit, and the aggregate in-flight request count across group members must not exceed the group cap. Group cooldown and adaptive recovery are shared; member limits continue to constrain each member individually. Limit changes affect future dispatches without cancelling in-flight requests solely due to configuration changes.
+
+
+### HTTP 429 behavior for shared rate-limit groups
+
+An HTTP 429 from any member configuration places the entire explicitly shared rate-limit group into cooldown. No member may dispatch new requests until the cooldown expires. In-flight requests are not cancelled solely because another member received 429. After cooldown, the group resumes at active concurrency 1 and gradually recovers using the shared success counter. Honor Retry-After when present, otherwise use the configured default cooldown. Retry the request that received 429 at most once; if it fails again, defer its affected IDs to recovery. Configurations outside the group are unaffected.

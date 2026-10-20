@@ -269,3 +269,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Member limits constrain requests from that configuration, while the group cap constrains aggregate requests across all members. The group cap and adaptive active limit are separate from each member's configured maximum. Existing cooldown and gradual recovery behavior applies at group scope when configurations share a rate-limit group. Configurations outside a group remain independently governed. Changes to limits affect future dispatches and do not cancel in-flight requests solely because settings changed.
 
 **Status:** User-confirmed policy; settings UI, persistence, scheduler enforcement, and tests remain to be completed.
+
+
+## D-027 — HTTP 429 cooldown scope for shared rate-limit groups
+
+**Decision:** When any API configuration in a shared rate-limit group receives HTTP 429, the entire group enters cooldown. Stop dispatching new requests for all configurations in that group. When cooldown expires, resume from group concurrency 1 and use the existing gradual recovery policy. The request that received 429 follows the existing policy: honor Retry-After when present, otherwise use the configured default cooldown; retry that request at most once, then defer affected item IDs to recovery if it fails again.
+
+**Implications:** Group cooldown and adaptive concurrency state are shared across all group members. Other in-flight requests are not cancelled solely because a member triggered 429; they may complete, but no new group requests dispatch until cooldown expires. Configurations outside the group are unaffected. The 429 resets the shared group's recovery progress.
+
+**Status:** User-confirmed policy; scheduler integration, persistence, and tests remain to be completed.
