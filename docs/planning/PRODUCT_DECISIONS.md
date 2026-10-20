@@ -467,3 +467,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep analysis in the background and separate from ingestion. Resource settings must not compromise job persistence, pause/cancel behavior, or index integrity. Benchmark throughput, peak memory, index build time, retrieval latency and desktop responsiveness at representative library sizes up to 50,000 images. Avoid introducing distributed or million-scale infrastructure unless later evidence justifies it.
 
 **Status:** User-confirmed target scale and resource policy; benchmark matrix, concrete defaults and implementation remain to be completed.
+
+
+## D-049 — Automatic inference device selection with CPU fallback
+
+**Decision:** Automatically detect supported GPU acceleration for DINOv3 inference and use it when runtime/model initialization succeeds; otherwise fall back to CPU. GPU presence alone is insufficient: validate runtime compatibility and successful model initialization before selecting the accelerated path.
+
+**Implications:** Treat out-of-memory and runtime/device failures as recoverable device failures where safe. Preserve already committed analysis results, avoid marking incomplete outputs as complete, and retry the affected work on CPU when feasible. Report the selected device and fallback reason in diagnostics/status. CPU fallback must remain bounded and must not block ingestion or unrelated desktop operations. Device/runtime support varies by packaged backend and hardware; implement against the selected runtime's actual capabilities rather than assuming universal GPU support.
+
+**Status:** User-confirmed policy; runtime-specific detection, fallback behavior and benchmarks remain to be completed.

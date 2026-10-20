@@ -185,3 +185,8 @@ Visual analysis and backfill jobs support pause and cancel. Pause prevents new w
 ## Resource budget and performance target
 
 The initial target library size is up to 50,000 images. Do not design the initial implementation around a one-million-image target or introduce distributed-scale infrastructure without measured need. Run DINOv3 inference and index work in the background with conservative defaults to protect desktop responsiveness. Allow configurable inference concurrency and batch size within safe bounds; determine shipped defaults through benchmarks on supported hardware, not invented CPU/GPU/RAM assumptions. Benchmark throughput, peak memory, index build time, retrieval latency and UI responsiveness at representative sizes up to 50,000 images. Resource tuning must preserve durable job state, safe pause/cancel, index integrity and independent ingestion.
+
+
+## Inference device selection
+
+Automatically detect supported GPU acceleration and use it only after the configured runtime and model initialize successfully on that device. If GPU support is absent, incompatible, or initialization/inference fails recoverably (including resource exhaustion), fall back to CPU when safe. Preserve committed valid results and never mark incomplete output as complete. Retry only affected work, report the selected device and fallback reason, and keep analysis failures independent of ingestion. The implementation must reflect the actual packaged inference runtime's capabilities; GPU availability is not proof of model/runtime compatibility. Benchmark CPU and supported accelerated paths on representative hardware before setting performance expectations.
