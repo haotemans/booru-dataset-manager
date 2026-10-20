@@ -687,3 +687,13 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Backup role and cadence:** Remote backup remains weekly as separately decided. It protects against loss of data that cannot simply be re-fetched or regenerated, rather than serving as the normal undo mechanism for editing mistakes. Do not increase upload frequency or add local image-version archives to solve routine edit mistakes.
 
 **Status:** User-confirmed recovery principle; source re-fetch action, safe replacement flow and validation remain pending implementation and testing.
+
+## D-067 — Retain edit parameters and masks, not historical output images
+
+**Decision:** Retain the parameters needed to repeat or continue an edit, including inpainting masks/selections, watermark-removal regions, crop coordinates, operation settings, and available tool/model/version identifiers. Keep these as compact edit metadata/assets associated with the current image variant; do not retain multiple historical output image files locally.
+
+**Re-edit workflow:** When the user chooses to re-edit, re-fetch the source original from its recorded Danbooru source, validate it when a source hash is available, and offer to reuse the saved parameters/masks as the starting point. Because masks and coordinates may depend on image dimensions or alignment, validate compatibility before applying them and allow adjustment if needed. Do not overwrite the current output until the source is fetched and validated and the user confirms the replacement.
+
+**Storage and backup:** Avoid duplicating unchanged parameter assets unnecessarily. Include the edit parameters and necessary masks in the weekly remote backup so a source image can be re-fetched and the edit workflow reconstructed where dependencies permit. This does not require keeping old output image versions.
+
+**Status:** User-confirmed behavior; parameter schema, mask persistence, compatibility validation and re-edit UI remain pending implementation and testing.
