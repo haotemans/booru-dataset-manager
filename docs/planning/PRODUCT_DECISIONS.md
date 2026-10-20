@@ -512,3 +512,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Use a clear directory layout (for example, `app/`, `config/`, `models/`, `data/`, `media/` and `exports/`) while keeping these concerns logically separate. Do not overwrite or delete user data during application upgrades. Clearly distinguish files that can be downloaded/rebuilt from primary media, database state and user decisions that require preservation. Validate available disk space and write permissions where practical; report unavailable drives and storage failures without corrupting the library. Backups and any future root-directory relocation must account for database consistency, active jobs, model/index versions and media paths. Keep the existing ability to select a different model directory or media location available when needed, but do not force users to distribute content across drives.
 
 **Status:** User-confirmed preference for a unified root directory; exact install/update mechanism, default root, backup policy and relocation workflow remain to be completed.
+
+
+## D-054 — Choose the unified root directory during installation
+
+**Decision:** The installer asks the user to choose the application's managed root directory. The application uses that root on first launch rather than first placing managed files in a default location and requiring later relocation.
+
+**Implications:** Validate that the selected location is writable and has sufficient available space where practical. Explain that the root will contain separate subdirectories for application files, configuration, model artifacts, database/library state, media and exports. Do not silently fall back to another drive or system-directory location if the selected drive is unavailable; present an actionable error and allow the user to reconnect the drive or choose another location. Keep upgrades from overwriting or deleting managed user data. If the installer and runtime packaging impose platform-specific constraints on where executable files can live, preserve the user-selected managed-data root and clearly document any required distinction rather than silently changing the user's choice.
+
+**Status:** User-confirmed installation UX; installer technology, path validation, missing-drive behavior and implementation remain to be completed.
