@@ -73,16 +73,17 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-007 — AI batch size and failure-window advancement
 
-**Decision:** The default AI request batch contains 8 items. A failed 8-item window advances by 4 items. When processing reaches a tail that cannot advance further at the current window size, switch to smaller batches and move by that same smaller batch size: 4-item batches advance by 4; if a 4-item batch fails, process that failed group in 2-item batches advancing by 2; if a 2-item batch fails, fall back to single-item batches advancing by 1.
+**Decision:** The default AI request batch contains 8 items. A fully successful 8-item window advances by 8. If the request fails as a whole, advance by 4 to create a 4-item overlap. If a response is valid but only some items fail or are missing, preserve successful item results and recover only the failed item group; the normal 8-item main window continues advancing by 8. At a tail that cannot advance at the current window size, reduce batch size progressively: 8 → 4 → 2 → 1, advancing by the active fallback batch size.
 
 **Implications:**
-- A successful 8-item window advances by 8. A failed 8-item window advances by 4, creating a 4-item overlap.
-- Failure includes transport/API errors, malformed JSON, schema validation failure, and partial responses containing failed or missing item results.
-- Preserve valid item results from a partial response, and record invalid/missing items as failed. Never discard valid results just because another item failed.
-- Track each result by stable item ID and make writes idempotent. Overlapping windows and smaller fallback batches must not create duplicate results or overwrite human-reviewed choices.
-- Do not repeat the same failed request at the same size. At the tail, reduce batch size progressively: 8 → 4 → 2 → 1. Within each fallback level, advance by the batch size (4, then 2, then 1), rather than repeatedly shifting by 4 or retrying the identical window.
-- If a 4-item batch fails, subdivide that failed 4-item group into two 2-item windows. If a 2-item window fails, subdivide that failed pair into single-item windows. A failed single-item request is recorded as failed/deferred for later manual handling; do not retry it indefinitely.
-- Persist cursor, fallback level and per-item states for resume. The final window may contain fewer items than the current batch size; never add fake padding entries.
+- Distinguish whole-request failure from item-level partial failure. Whole-request failure includes transport/API errors, malformed JSON, or response-level schema failure; item-level failure means a valid response identifies failed items or omits expected item results.
+- For a partial response, accept and persist every valid item result. Build an independent recovery group from only the failed/missing item IDs; do not reprocess successful items as part of that recovery group.
+- Recovery is a separate fallback phase, not a same-payload, same-size retry. If a recovery group still fails, subdivide that failed group progressively (for example, 2 failed items become two single-item requests); never discard previously accepted results.
+- A failed whole 8-item window advances the main cursor by 4, creating a 4-item overlap. A successful 8-item window—or a valid partial response whose failed items are handled by the separate recovery phase—advances the normal main cursor by 8.
+- Track every result by stable item ID. Writes must be idempotent; overlap and recovery requests must not duplicate accepted results or overwrite human-reviewed choices.
+- Do not repeat an identical failed request indefinitely. At a tail, reduce batch size progressively: 8 → 4 → 2 → 1. Within each fallback level, advance by that level's batch size. A failed 4-item fallback group is subdivided into 2-item groups; a failed 2-item group is subdivided into single-item groups.
+- A failed single-item request is recorded as failed/deferred for later manual handling; do not retry indefinitely.
+- Persist the main cursor, recovery groups, fallback level and per-item states for resume. The final window may contain fewer items than the current batch size; never add fake padding entries.
 - Mark the job complete only when each input item is completed or explicitly recorded as failed/deferred.
 
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
