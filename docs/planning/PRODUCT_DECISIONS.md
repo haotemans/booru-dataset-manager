@@ -848,3 +848,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Store thumbnails in the designated cache area, reuse them across grid and masonry layouts, and regenerate them when missing, invalid, or stale. Cache cleanup must never delete original images or committed edited outputs. Avoid creating redundant full-resolution image copies; thumbnail generation and cache management must be bounded and suitable for galleries approaching 50,000 images.
 
 **Status:** User-confirmed direction; thumbnail pipeline, cache invalidation and cleanup remain pending implementation and testing.
+
+## D-086 — Default to newest imports with selectable gallery sorting
+
+**Decision:** Sort the gallery by import time descending by default, showing the most recently imported images first. Also support sorting by filename, file size, image dimensions and rating where those values are available.
+
+**Behavior:** Sorting changes presentation/order only and must not modify image files or metadata. Keep ordering deterministic by applying a stable tie-breaker when primary sort values match. If rating is unavailable for an image, handle it consistently rather than inventing a value.
+
+**Status:** User-confirmed direction; sort controls, query/index support and tests remain pending implementation.
