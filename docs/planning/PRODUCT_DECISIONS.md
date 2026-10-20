@@ -771,3 +771,16 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Behavior:** Before execution, validate that the configured provider is available and sufficiently configured. If it is unavailable or fails, report the problem and keep manual editing available; do not silently switch to a different provider or make remote calls contrary to the saved setting. Any explicit fallback policy must itself be configured in settings. Existing per-image selection review and final output approval remain mandatory regardless of provider.
 
 **Status:** User-confirmed behavior; provider settings validation, execution routing and failure UI remain pending implementation and testing.
+
+## D-077 — Keep the initial editing toolset focused
+
+**Decision:** The initial review-page editing toolset is limited to:
+- Watermark removal/inpainting.
+- Cropping.
+- Rectangular selection.
+- Freehand brush selection.
+- Polygon selection.
+
+Do not expand the first release with additional image-editing tools unless a later user decision explicitly adds them.
+
+**Status:** User-confirmed scope; implementation and testing remain pending.
