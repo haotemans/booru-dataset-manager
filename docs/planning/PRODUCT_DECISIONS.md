@@ -996,3 +996,9 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - If a submitted character or artist tag cannot be found on Danbooru, show a clear lookup failure reason.
 - Keep the entered tag available for the user to edit or retry.
 - Do not create a character or artist record without supporting source metadata from Danbooru.
+
+
+## D-106 Search Character and Artist cards by tag
+
+- Both the Character and Artist areas provide a search field for filtering cards by tag.
+- Filter the visible cards as the user types, without requiring a separate submit action.
