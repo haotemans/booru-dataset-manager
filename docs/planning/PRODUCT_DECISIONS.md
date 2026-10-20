@@ -539,3 +539,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Security and UX requirements:** Use the project's official release source; show the current and available versions and relevant release notes; handle offline, rate-limit, malformed metadata and unavailable-release cases without blocking core application use. Do not execute an installer or change installed files without an explicit user action. Verify that displayed download links point to the configured official project release location. Automatic download/install and signature verification workflows are future scope, not implied by this decision.
 
 **Status:** User-confirmed product direction; release metadata format, update-check frequency, implementation and installer integration remain pending.
+
+
+## D-057 — Automatic database and metadata backups
+
+**Decision:** The application periodically backs up the database and critical library metadata automatically. The initial policy is one backup per day, retaining the seven most recent successful backups. Provide a manual “Back up now” action and a user-accessible restore flow as well.
+
+**Scope:** Back up the database and the metadata needed to reconstruct library state, task state and relationships. Do not duplicate media originals or model files in each routine backup; those files can be large and should be handled separately. Store backups in a dedicated location under the managed data root by default, while making the location discoverable and configurable if supported.
+
+**Safety requirements:** Use a database-consistent snapshot/backup mechanism rather than copying a live database naively. Never overwrite the only valid backup with a failed backup. Validate backup completion and report failures clearly. Restore must explain which current state will be replaced, preserve a recoverable pre-restore snapshot where practical, and not silently delete media or model files. Backup retention must delete only backups created and managed by this application. Exact scheduling behavior, backup format, compatibility policy and implementation remain to be specified.
+
+**Status:** User-confirmed product direction; implementation pending.
