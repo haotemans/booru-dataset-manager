@@ -960,3 +960,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Export supports natural-language format or tag format.
 - Optimize supports natural-language optimization or tag optimization.
 - Deduplicate operates on images associated with the current character or artist context.
+
+
+## D-101 Manual DINOv3-based deduplication in Character and Artist areas
+
+- The Deduplicate action in the Character and Artist areas uses the project's DINOv3 visual similarity analysis, not only exact file hashes.
+- This is a user-triggered, manual workflow; it does not run automatically just because a Character or Artist page is opened or images are imported.
+- The workflow analyzes images in the current Character or Artist context, presents candidate duplicates/similar images for user review, and requires user confirmation before any deletion.
+- Existing DINOv3 analysis, similarity grouping, and image-deletion safeguards remain in effect.
