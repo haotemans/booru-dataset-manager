@@ -1128,3 +1128,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Before removing the redundant media file/record, consolidate and preserve all valid character, artist, tag, and other metadata associations on the surviving record.
 - Candidates detected by only one method remain review-only and require explicit user confirmation before deletion.
 - Byte-for-byte identical files confirmed by a cryptographic content hash remain eligible for automatic deduplication independently of the two-model agreement rule.
+
+
+## D-124: Preferred Image When Automatically Deduplicating
+
+- When a pair qualifies for automatic deduplication through byte-identical content or agreement between pHash (Hamming distance <= 2) and DINOv3 (cosine similarity >= 0.997), choose the surviving image using this priority: highest aesthetic score first, then highest pixel resolution, then PNG format.
+- Use the configured/available aesthetic scoring result; if a score is unavailable for either candidate, do not invent a score and fall back to the next comparable criterion.
+- Preserve and consolidate valid metadata associations from both records before removing the redundant record/file. Do not discard a source file until the survivor and its associations are safely established.
