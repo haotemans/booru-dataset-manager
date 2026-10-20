@@ -645,3 +645,14 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Deletion safety:** Remove an obsolete restore point only after confirming that it is outside all retention tiers and not otherwise pinned by the user. Then garbage-collect an object only if no retained restore point or active library state references it, and only after a safety grace period and verified inventory. The latest verified local restore point must remain protected. If the system cannot establish reachability or upload/restore status, retain the data and report cleanup as incomplete.
 
 **Status:** User-confirmed retention policy; scheduler, tier selection, user-pinned restore points and reference-safe garbage collection remain pending implementation and testing.
+
+
+## D-063 — Back up edited image results; re-fetch source originals when possible
+
+**Decision:** The backup set prioritizes user-created/edited image outputs rather than duplicating source originals that can be downloaded again from Danbooru. Preserve edited results such as inpainting/watermark-removal outputs, crops and other derived variants, plus the metadata and provenance needed to associate each result with its source and restore the edit/version relationships. Source-original image files are excluded from remote backup by default.
+
+**Source recovery metadata:** For every excluded source original, preserve stable source identifiers and the best available source URL/provider, source post ID, expected file hash, relevant file metadata, and the parent/variant relationship. Restore should clearly mark source originals that need to be re-fetched and should not treat a missing source download as a reason to discard a backed-up edited result. Re-fetch only from the recorded source and validate the retrieved file against the stored hash when available.
+
+**Limitations and safety:** Danbooru availability, post deletion, access restrictions, changed URLs or source-file changes can make an original impossible to retrieve later. The application must disclose that source originals are not covered by remote backup and report unrecoverable originals during restore. If a source original is no longer available, retain and restore the edited output and its metadata; do not silently claim a fully identical reconstruction of the original library. Keep the local latest restore point policy consistent with this scope, and do not delete a local original unless the user explicitly chooses that storage policy separately.
+
+**Status:** User-confirmed backup scope; exact manifest schema, source re-fetch workflow and missing-source reporting remain pending implementation and testing.
