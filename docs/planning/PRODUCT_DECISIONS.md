@@ -667,3 +667,13 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Recovery semantics:** Restore the committed output even if its original model, tool version, mask or source original is unavailable. Where dependencies remain available, present the saved parameters and provenance so the user can continue editing; do not promise deterministic reproduction if the tool/model is nondeterministic or dependencies are missing. Preserve the parent-child version graph and validate references when restoring. Failed or partial backup must not mark an edit record as backed up.
 
 **Status:** User-confirmed decision; edit-record schema, mask/selection persistence, tool-specific parameter adapters and restore UI remain pending implementation and testing.
+
+## D-065 — Single local image copy and seven-day remote backup cadence
+
+**Decision:** Optimize for low local storage use and low network traffic. The application must not keep a local archive of every edited image version. For each image/variant, keep only the current committed file locally; committing a new edit replaces the previous local output rather than creating another retained image copy. Temporary previews and intermediate outputs must be cleaned up when no longer needed.
+
+**Remote backup cadence:** Run remote backup on a seven-day interval, not daily. Use incremental, content-addressed backup and avoid uploading unchanged objects again. Keep the previously agreed remote retention tiers (daily/weekly/monthly restore points) only to the extent they can be represented by deduplicated objects; this retention policy does not authorize keeping multiple local image copies. A restore point is complete only after its manifest and all referenced objects have been uploaded and verified.
+
+**Trade-off:** Because the local previous output is overwritten and remote backup runs weekly, an edit made after the latest successful remote backup may not be recoverable if overwritten or damaged before the next successful backup. The application must communicate the last successful backup time and pending/unprotected changes; it must not silently claim every edit is recoverable. Do not add local version archives to avoid this trade-off unless the user explicitly changes this decision.
+
+**Status:** User-confirmed storage and cadence requirements; scheduling, status UI, overwrite behavior, and backup verification remain pending implementation and testing.
