@@ -23,3 +23,8 @@ Prefer provider-declared original dimensions and original media URLs. Never appl
 - Cancellation and timeout tests
 - No credential leakage in logs
 - A documented live smoke test against a user-authorized account before marking provider verified
+
+
+## Preferred source and fallback
+
+Use Danbooru as the default primary source. If a task cannot feasibly proceed through Danbooru, Gelbooru is the fallback. Do not harvest both sources in parallel by default. Record the selected provider and any failover reason in task provenance, and route both providers through the same normalized ingestion pipeline. Failover must respect authentication, rate limits and site policies. Automatic failover conditions must be defined explicitly before implementation; transient throttling or service errors must not be treated as permission to bypass a provider's rate limits.

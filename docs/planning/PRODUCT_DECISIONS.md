@@ -323,3 +323,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Persist each job's input snapshot, source cursor, progress, item outcomes, cancellation state and resumable state. One job must not silently turn into a recurring task. Implement and test the ingestion workflow independently behind application/domain/port boundaries; other features can be added later without duplicating the ingestion pipeline or bypassing shared media and job services.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-033 — Danbooru primary source with Gelbooru fallback
+
+**Decision:** Danbooru is the preferred/default source for ingestion. Gelbooru is the fallback source when the current task cannot feasibly proceed through Danbooru. This is a prioritized failover policy, not default parallel harvesting from both sources.
+
+**Implications:** Keep source selection and fallback decisions visible in the job's provenance and progress. Records from either provider still flow through the same normalization, dimension gate, exact-deduplication and media-import pipeline. A fallback must not bypass source authentication, provider policy, rate limits, or access restrictions. The exact conditions that trigger fallback must be explicitly defined before implementing automatic failover.
+
+**Status:** User-confirmed provider priority; automatic fallback conditions, implementation and tests remain to be specified.
