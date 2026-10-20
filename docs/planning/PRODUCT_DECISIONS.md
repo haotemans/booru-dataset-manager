@@ -1082,3 +1082,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
   - the number of associated images currently available in the local library;
   - the total image count returned by the Danbooru API for that character or artist.
 - Keep the local-library count and API-reported count clearly distinguishable.
+
+
+## D-118: Batch Selection of Character and Artist Cards
+
+- Character and Artist lists support selecting multiple cards.
+- Batch actions can operate on the selected characters or artists, with each action's scope based on the images associated with the selected records.
+- Existing single-context actions remain available when no multiple-card selection is active.
