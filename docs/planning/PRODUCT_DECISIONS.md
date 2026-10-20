@@ -92,6 +92,8 @@ This file records user-confirmed product decisions. A decision is not a claim th
 - Persist the main cursor, recovery groups, fallback level and per-item states for resume. The final window may contain fewer items than the current batch size; never add fake padding entries.
 - Mark the job complete only when every input item has a terminal outcome: successfully completed, or explicitly recorded as a final failed/deferred item after content-processing fallbacks. Items deferred solely because of transient network failure are non-terminal; keep the job resumable and not complete while any such item remains pending. Resume post-scan recovery when connectivity returns.
 
+- On application startup, detect persisted incomplete AI jobs and show the user a resume prompt with the saved job status/progress. Do not issue external API requests until the user explicitly chooses to resume. Dismissal leaves the job pending; the user can resume it later from the task UI.
+
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
 ## Deferred decisions
 
