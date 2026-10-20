@@ -160,3 +160,8 @@ For upgrades, keep the active index serving queries while a resumable background
 ## Visual retrieval result presentation
 
 Group candidates by relationship type first, then sort within each group by calibrated confidence/relevance. Do not present a single global similarity ranking as if it established semantic relationship. Distinguish exact duplicates, resize/recompression near-duplicates, crop/content variations, difference/alternate artwork, alternate poses/frames, same subject in another scene, same artist and composition/style similarity when supported by evidence. Keep uncertain candidates explicitly unclassified or marked for review. Show available confidence, provenance and evidence, and restrict bulk actions to relations for which the action is semantically valid. Similarity alone never authorizes deletion, representative-image selection or collapsing meaningful variants.
+
+
+## Human-confirmed relationship overrides
+
+Persist human decisions as first-class overrides, distinct from model-generated relationship candidates. Model upgrades, embedding/index rebuilds and batch re-analysis may update model scores and generate new candidates, but must not silently change or delete an override. The user can explicitly edit or clear an override to permit reassessment. Keep an audit trail including media IDs, relationship type, decision source, timestamp and prior state. If a schema migration makes a stored decision ambiguous, flag it for review rather than silently reinterpret it.

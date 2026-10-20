@@ -422,3 +422,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep distinct groups for exact duplicates, resize/recompression near-duplicates, crop/content variations, difference/alternate artwork, alternate poses/frames, same subject in another scene, same artist, and similar composition/style where evidence supports those labels. Show the relationship type, confidence or ranking signal, and evidence/provenance where available. Only actions appropriate to the relationship type are enabled; broad visual similarity must not be treated as permission to collapse variants or select a representative image. Unknown/ambiguous relationships remain unclassified candidates for review.
 
 **Status:** User-confirmed presentation policy; UI implementation and usability validation remain to be completed.
+
+
+## D-044 — Persistent human overrides for visual relationships
+
+**Decision:** Human-confirmed visual relationship decisions are persisted as explicit overrides and survive model upgrades, index rebuilds and re-analysis. Automated analysis must not silently replace them. A user may explicitly edit or clear an override to allow reassessment.
+
+**Implications:** Store the decision, relationship type, involved media IDs, actor/source, timestamp and audit history. Distinguish an explicit human override from a model-generated suggestion. Re-analysis may refresh scores and candidates but must preserve the human-selected relationship state; if the underlying media or relationship schema changes incompatibly, flag the decision for review rather than silently reinterpret it. Clearing an override is an explicit user action and should be auditable.
+
+**Status:** User-confirmed policy; persistence, migration and UI implementation remain to be completed.
