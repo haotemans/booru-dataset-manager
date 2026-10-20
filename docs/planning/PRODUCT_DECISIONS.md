@@ -1046,3 +1046,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Opening a Character or Artist card shows its associated local images.
 - Support both Grid and Masonry layouts for these images.
 - Grid is the default layout; users can switch to Masonry.
+
+
+## D-113: Tag Search in Character and Artist Image Lists
+
+- Character and Artist associated-image views include a Tag search field.
+- Search filters the images in the current character or artist context by their tags.
+- Filtering updates live as the user types, without requiring a submit action.
