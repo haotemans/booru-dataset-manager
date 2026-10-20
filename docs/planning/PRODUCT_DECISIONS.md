@@ -1135,3 +1135,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - When a pair qualifies for automatic deduplication through byte-identical content or agreement between pHash (Hamming distance <= 2) and DINOv3 (cosine similarity >= 0.997), choose the surviving image using this priority: highest aesthetic score first, then highest pixel resolution, then PNG format.
 - Use the configured/available aesthetic scoring result; if a score is unavailable for either candidate, do not invent a score and fall back to the next comparable criterion.
 - Preserve and consolidate valid metadata associations from both records before removing the redundant record/file. Do not discard a source file until the survivor and its associations are safely established.
+
+
+## D-125: Watermark Status as Duplicate Retention Tie-Breaker
+
+- Extend the automatic duplicate survivor priority to: highest aesthetic score, highest pixel resolution, PNG format, then prefer the image confirmed to be watermark-free.
+- Watermark status is a tie-breaker after the previously defined criteria; do not let it override a higher-priority criterion.
+- If watermark status is unknown or uncertain, do not assume the image is watermark-free; continue with deterministic fallback criteria rather than making an unsupported classification.
