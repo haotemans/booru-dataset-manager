@@ -251,3 +251,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** The effective concurrency limit must always be no greater than both the configured maximum and the current rate-limit-adapted active limit. A configured maximum change affects the ceiling for future recovery, not the cooldown, recovery counter, or current active limit. Lowering the configured maximum takes effect for future dispatches without cancelling already in-flight requests solely due to the setting change.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-025 — Configurable shared rate-limit groups
+
+**Decision:** Each AI API configuration is independent by default. Users may explicitly place multiple configurations into the same rate-limit group; configurations in a shared group use one shared concurrency cap, active adaptive limit, cooldown, and recovery counter.
+
+**Implications:** Do not infer a shared limit merely because configurations use the same provider name. Group membership is explicit and persisted. Requests dispatched through any member must respect the group's effective concurrency and cooldown gate. Configurations outside the group remain independent. If a configuration is moved between groups while requests are in flight, do not cancel those requests solely because of the change; apply the new group's gate to future dispatches and reconcile in-flight accounting safely.
+
+**Status:** User-confirmed policy; configuration UI, persistence, scheduler integration, and tests remain to be completed.
