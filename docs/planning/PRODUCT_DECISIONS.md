@@ -1148,3 +1148,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 
 - When aesthetic score, pixel resolution, and format tie, prefer an image confirmed to be watermark-free over an otherwise equivalent image whose watermark status is unknown.
 - Do not treat unknown watermark status as proof that a watermark exists or is absent; this rule only prefers the positively confirmed watermark-free candidate in an otherwise exact tie.
+
+
+## D-127: Audit Logging for Automatic Deduplication Without Undo
+
+- Record an audit log entry for each automatic deduplication, including the removed file path, retained file path, detection signals/thresholds, and survivor-selection reason.
+- Deduplication is permanent: once the redundant file is deleted, the application does not provide an undo, recycle-bin, or restore action for that deletion.
+- Audit logs are for traceability only and must not retain a recoverable copy of the deleted image.
