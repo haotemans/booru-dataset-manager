@@ -1177,3 +1177,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - If the application closes unexpectedly while deduplication is in progress, persist enough task state to show the interrupted task and its progress on the next launch.
 - Do not resume deduplication automatically after restart. Ask the user to explicitly confirm resumption.
 - Continue from the last safe checkpoint after confirmation; deletions completed before shutdown remain permanent and are not rolled back.
+
+
+## D-131: Deduplication and DINOv3 Analysis May Run Concurrently
+
+- Allow the unified deduplication task (pHash plus DINOv3 duplicate detection) to run concurrently with the background DINOv3 analysis queue for newly imported images.
+- Coordinate shared compute resources so concurrency does not block normal application interaction; keep task progress and pause/resume state independently visible.
+- Reuse valid cached DINOv3 embeddings where compatible, avoiding unnecessary repeated inference.
