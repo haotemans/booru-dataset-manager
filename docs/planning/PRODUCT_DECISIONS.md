@@ -784,3 +784,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 Do not expand the first release with additional image-editing tools unless a later user decision explicitly adds them.
 
 **Status:** User-confirmed scope; implementation and testing remain pending.
+
+## D-078 — Preserve source format for edited outputs by default
+
+**Decision:** Save edited outputs in the source image format by default. Convert to another format only when the source format cannot support the required output or when the user explicitly chooses a different format.
+
+**Behavior:** Do not silently perform lossy conversion. When conversion is required, explain the reason and use a suitable output format; preserve image dimensions and visual quality as far as the selected operation and format allow. The output must be validated before replacing the current committed file, following D-068.
+
+**Status:** User-confirmed policy; format capability checks, conversion behavior and tests remain pending implementation.
