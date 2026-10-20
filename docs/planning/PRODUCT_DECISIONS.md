@@ -872,3 +872,10 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Presets store filter criteria, not copies of image data. Users can create, rename, update and delete their own presets. Applying or editing a preset must not modify images or metadata. If a saved criterion becomes unavailable due to schema/provider changes, show a clear warning instead of silently changing its meaning.
 
 **Status:** User-confirmed direction; persistence model, preset management UI and tests remain pending implementation.
+
+
+## D-089 Resolve unknown tags against source-site metadata
+
+When a source-provided tag is not recognized by the local tag vocabulary, preserve the original tag and consult the originating site (Danbooru or Gelbooru) for authoritative tag/alias metadata before deciding whether to normalize it. Only apply a rename or alias mapping when supported by source metadata or an otherwise verified rule; do not infer that an unlisted tag is invalid merely because the local vocabulary does not contain it. If the source lookup is unavailable or inconclusive, retain the tag unchanged and make the unresolved status visible rather than silently rewriting or dropping it. Preserve the original source tags separately from normalized tags. Lookup failures must not block image ingestion or cause repeated unbounded requests.
+
+Implementation pending: source-specific lookup, caching/rate-limit behavior, and the user-facing unresolved-tag status.
