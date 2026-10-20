@@ -713,3 +713,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Workflow:** Keep the review context visible while editing so the user can assess the image and decide whether to accept the result. Reuse the existing source re-fetch, saved edit parameters/masks, preview lifecycle and safe replacement rules. Do not create extra retained image versions as part of the editing workflow.
 
 **Status:** User-confirmed direction; review-page layout, tool switching, editor integration and interaction details remain pending implementation and testing.
+
+## D-070 — Persistent image canvas with a right-side editing panel
+
+**Decision:** In the review page, keep the image visible in the main/left canvas and place editing tools and their controls in a right-side panel. Switching between tools (for example watermark removal and inpainting) must not navigate away from the image or hide the review context.
+
+**Interaction:** The right panel contains the selected tool's controls and actions. Show the generated result as a preview in the image area; keep the current committed output unchanged until the user explicitly confirms replacement. Preserve usable image visibility while adjusting parameters, and make the layout adapt to smaller windows without losing access to the image or tool controls.
+
+**Status:** User-confirmed layout direction; responsive behavior, tool panels and preview integration remain pending implementation and testing.
