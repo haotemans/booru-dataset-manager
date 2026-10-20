@@ -97,6 +97,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 - On resume, reconcile any request that was in flight at interruption before blindly resending it. Prefer provider-supported request-status lookup and/or idempotency keys using a stable persisted request ID. If the provider offers neither capability, apply a documented bounded fallback that avoids indefinite retries and records ambiguity; do not assume exactly-once execution.
 
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
+## D-008 — AI request timeout and error-specific retry policy
+
+**Decision:** Set the default AI request timeout to 120 seconds and allow at most one retry per request. Retry behavior must depend on error category rather than applying the same retry rule to every failure.
+
+**Implications:** Retry transient connection failures/timeouts at most once using a bounded backoff. For HTTP 429, honor `Retry-After` when present, while retaining the one-retry limit. Retry eligible HTTP 5xx failures at most once. Do not automatically retry authentication/authorization errors or other clearly non-transient client errors. A timeout or connection loss remains a transport failure: do not shrink the batch or apply the content-processing overlap rule solely because of it. If the single retry fails, persist unresolved item IDs for later recovery; do not loop indefinitely. Resume reconciliation and provider idempotency/status support still apply.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
