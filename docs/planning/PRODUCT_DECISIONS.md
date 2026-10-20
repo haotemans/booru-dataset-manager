@@ -729,3 +729,13 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Interaction constraints:** Zoom and pan change only the canvas viewport, not the source pixels or edit output. Tool selections, masks and coordinates must map correctly between the displayed viewport and the original image coordinate space, including after zooming, panning or resizing the window. Keep the image and right-side tool panel available throughout editing.
 
 **Status:** User-confirmed behavior; canvas controls, coordinate transforms and input handling remain pending implementation and testing.
+
+## D-072 — Manual and AI-assisted region selection
+
+**Decision:** The review editor supports rectangle, freehand brush and polygon selections, and is not limited to manual selection. Integrate AI visual-recognition assistance through an appropriate tool/model interface so the user can request candidate regions for tasks such as watermark detection/removal and inpainting. AI suggestions assist the user; they do not silently commit edits or replace the current image.
+
+**Workflow:** Users can create or adjust selections manually, request AI-generated candidate masks/regions when supported, inspect and refine the proposed selection, and then preview the edit. Keep selection coordinates aligned with the original image regardless of canvas zoom/pan. Tool/model availability and task suitability should be explicit; if AI assistance fails or is unavailable, manual selection remains usable.
+
+**Architecture:** Keep visual-recognition providers behind a tool/adapter interface rather than hard-coupling the editor to one model. Record the selected tool/model and relevant parameters when available so an edit can be continued or reproduced as far as dependencies allow. Do not invoke remote AI services without making the action and its applicable configuration clear to the user.
+
+**Status:** User-confirmed direction; provider/tool adapters, AI region proposals, mask editing and preview integration remain pending implementation and testing.
