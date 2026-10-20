@@ -33,3 +33,8 @@ Use Danbooru as the default primary source. If a task cannot feasibly proceed th
 ### Danbooru-to-Gelbooru fallback conditions
 
 For a Danbooru-first task, Gelbooru may be used when Danbooru cannot be used for the task, or when Danbooru produces no items that pass configured eligibility filters such as the original-dimension gate and actual-file validation. No matching results and all-results-excluded outcomes qualify. This policy does not automatically top up a partially met numeric target from Gelbooru. Handle transient network errors and HTTP 429 using the primary provider's bounded retry/cooldown policy before deciding whether to fail over; never switch providers to evade rate limits, authentication requirements, policy restrictions or access controls. Persist the failover reason and source provenance, and use the common deduplication pipeline across both providers.
+
+
+## Source-provided relationships
+
+When a provider exposes trustworthy post-to-post, parent/child, pool, difference-set or alternate-version relationships, the adapter may normalize them as relationship records with relation type, provider, remote IDs/URLs and retrieval time. Preserve the source relationship provenance and distinguish direct provider links from DINOv3 suggestions and human-confirmed links. Do not assume every provider exposes these fields, and do not invent relations when unavailable. A provider relationship creates an association candidate, not an exact-duplicate assertion and not permission to delete any file.

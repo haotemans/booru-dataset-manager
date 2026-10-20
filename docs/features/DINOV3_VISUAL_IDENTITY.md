@@ -90,3 +90,22 @@ Do not enable unattended representative selection by default until evaluation es
 - **Uncertain cases:** retain as review candidates. Do not substitute an arbitrary fixed score threshold for evaluation evidence.
 
 Every automated and human decision records relation type and decision source. Human decisions override automation until explicitly changed, with audit history preserved.
+
+
+## Broad visual-association groups and difference sets
+
+An association group may contain several related but non-equivalent images, including difference/alternate artwork sets such as variants of the same Danbooru work. This is a relationship container, not a duplicate bucket. Each member must carry an explicit relationship type and provenance, for example:
+
+- exact byte duplicate;
+- resized/recompressed near-duplicate;
+- crop or content variation;
+- difference/alternate artwork variant;
+- alternate pose/frame;
+- same subject or character in another scene;
+- same artist, or merely similar composition/style.
+
+Use source-provided relationship metadata when the adapter can reliably obtain it, recording the provider and remote relationship identifier/URL. If source metadata is unavailable or ambiguous, make association a human-confirmed decision; embedding similarity alone is not enough to assert a broad semantic relationship. DINOv3 can retrieve candidates for review but must not silently turn all visually similar images into one identity group.
+
+### Representative selection scope
+
+A broad association group does not automatically have one representative for all members. Representative selection operates only within an explicitly eligible subset of interchangeable near-duplicates/variants for the intended export or review purpose. Difference images that intentionally depict distinct expressions, outfits, censorship states, or other meaningful artwork changes must remain selectable as separate variants. Do not exclude them from export merely because they share an association group. Preserve every original and allow users to inspect, keep separate, split, regroup and undo decisions.

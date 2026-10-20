@@ -22,3 +22,8 @@ Present candidates with similarity score and reason/context; allow accept, rejec
 ## Automation gate for near-duplicate grouping
 
 Automatic grouping is allowed only for the near-duplicate relation class (for example resize/recompression) and only after a versioned threshold policy has been evaluated on a labeled dataset containing hard negatives such as crops, different poses/scenes, same-character alternatives, similar style/composition and different identities. Report false-positive rates separately for each hard-negative class; do not use aggregate precision alone to justify automation. If the policy fails the predefined acceptance gate, keep all candidate relations in human review. Store model/preprocessing/policy versions with each automated decision and preserve a reversible audit trail.
+
+
+## Difference-set and association evaluation
+
+Include source-linked difference/alternate-artwork sets in the labeled data. Evaluate the relation types separately: exact duplicate, near-duplicate, crop/content variation, difference set, alternate pose/frame, same character across scenes, same artist, style/composition similarity, and unrelated. Metrics must identify false merges between meaningful difference variants and unrelated/identity-distinct images. Source-supplied relations are recorded as provenance and can be shown as candidate associations, but must not be mislabeled as byte duplicates. Representative-ranking labels must specify the eligible interchangeable subset, not merely the broad association group.

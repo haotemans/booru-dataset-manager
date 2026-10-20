@@ -350,3 +350,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Exact byte duplicates remain a separate hash-based concept. Visual grouping never deletes or overwrites original media. Automated group decisions must be reversible and record the model, preprocessing and policy versions; human decisions take precedence and retain audit history. If the evaluated policy does not support safe automatic grouping, leave the items as candidates for review instead of inventing a threshold.
 
 **Status:** User-confirmed policy; relation classification, labeled evaluation, calibrated policy, implementation and tests remain to be completed.
+
+
+## D-036 — Broad visual-association groups and difference sets
+
+**Decision:** A visual-association group may contain more than near-duplicate images, including difference sets such as related artwork variants from the same work. Every member relationship must have an explicit relation type; membership does not imply exact duplication or interchangeability. Use trustworthy source-provided relationships when available and allow human-confirmed associations when needed. DINOv3 similarity alone must not automatically assert that different poses, scenes, character identities or merely similar compositions belong to the same association group.
+
+**Implications:** Keep relation classes distinct, including exact duplicate, resized/recompressed near-duplicate, crop/content variant, difference/alternate artwork, alternate pose/frame, same subject across scenes, same character/person, same artist, and merely similar composition/style. Representative-image selection is restricted to a subset whose members are reasonably interchangeable for the relevant export/review purpose; do not select one representative for an entire broad association group by default. Preserve original media, source provenance, relationship source and human override history. Source relationships must not bypass exact-hash deduplication rules or imply file deletion.
+
+**Status:** User-confirmed policy; source relationship ingestion, group/member data model, UI, representative scope and tests remain to be implemented.
