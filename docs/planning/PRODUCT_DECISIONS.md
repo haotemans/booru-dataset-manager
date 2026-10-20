@@ -137,6 +137,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
 
+## D-013 — Concurrency reduction after HTTP 429
+
+**Decision:** When HTTP 429 is received, reduce the active concurrency limit to half its current value, rounded up, with a minimum of 1.
+
+**Implications:** Example: `8 → 4 → 2 → 1`. Apply the reduction to the affected provider profile's shared scheduler. The active limit may never exceed the latest user-configured maximum. Honor `Retry-After` when present and retain the existing maximum of one retry per request. Restore concurrency gradually only after the configured cooldown without further 429 responses; exact recovery increment/cooldown parameters remain to be specified.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
