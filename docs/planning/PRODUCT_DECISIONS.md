@@ -609,3 +609,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Security requirements:** Explain that private-repository access control is not the same as end-to-end backup encryption. Keep access tokens out of source code, ordinary configuration files, logs, crash reports and backup archives; use an appropriate OS credential store where available. Request only the permissions needed for backup upload and restore. Verify repository visibility before uploading, and clearly report if the destination is public or its privacy cannot be confirmed. Remote restore must authenticate before accessing private backup content.
 
 **Status:** User-confirmed decision; secure credential storage, private repository verification and ModelScope integration remain pending implementation and validation.
+
+
+## D-060 — Resumable ModelScope uploads and post-verification local cleanup
+
+**Decision:** Use resumable uploads for remote backup archives where supported by the selected ModelScope upload mechanism. After an older restore point has uploaded successfully and remote integrity has been verified, delete its temporary/local archive copy so local storage retains only the latest verified full restore point.
+
+**Safety invariants:** Never delete an upload source while the upload is in progress, after an interrupted/failed upload, or before the remote object and its manifest/checksums have been verified. On interruption, preserve the partial-upload/resume state and local source so upload can continue. If resume is unsupported by the actual ModelScope interface, safely restart or retry without deleting the only remaining valid copy. Always keep the latest verified local full restore point; only clean up older backup archives after verified remote archival. Report upload, verification, and cleanup outcomes separately, and do not report cleanup success unless deletion actually completed.
+
+**Status:** User-confirmed behavior; resumability depends on the selected ModelScope upload API/client and remains to be implemented and tested.
