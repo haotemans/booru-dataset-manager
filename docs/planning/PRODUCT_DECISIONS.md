@@ -832,3 +832,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Safety:** The confirmation step must identify the exact deletion scope. Before confirmation, no files or records are removed. The deletion implementation must coordinate image-specific files and database records, preserve shared resources, and report failures accurately.
 
 **Status:** User-confirmed policy; implementation and testing remain pending.
+
+## D-084 — Support grid and masonry gallery layouts
+
+**Decision:** Support both a fixed-size thumbnail grid and a responsive masonry layout in the gallery. Use the grid as the default layout and let users switch layouts in the interface.
+
+**Behavior:** Changing layout affects presentation only; it must not alter image files, ordering, selection, or metadata. Both layouts should retain consistent selection and review actions and adapt to the available window size.
+
+**Status:** User-confirmed direction; layout switching and responsive presentation remain pending implementation and testing.
