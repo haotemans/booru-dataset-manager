@@ -440,3 +440,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Retry only retryable failures; permanent configuration/model incompatibility should be surfaced promptly rather than pointlessly retried. Persist attempt count, error category, last error and next retry/terminal state so restarts do not reset the retry budget. Use bounded backoff for transient failures and keep analysis queue state separate from ingestion state. Manual retry explicitly starts a new retry cycle while retaining prior failure history.
 
 **Status:** User-confirmed policy; failure taxonomy, backoff values and implementation remain to be completed.
+
+
+## D-046 — Prioritize newly ingested media in visual analysis
+
+**Decision:** Schedule DINOv3 analysis for newly ingested media ahead of bulk backfill/re-analysis of existing library items. Backfill runs in the background and uses remaining processing capacity, so a large historical backlog does not indefinitely delay analysis of new media.
+
+**Implications:** Keep ingestion state separate from visual-analysis state. Queue priority must be persisted and scheduling fair enough to ensure backfill eventually progresses rather than starving indefinitely. Failed items retain their retry policy and should not block unrelated items. Leave room for future explicit user priority controls without requiring them for the initial implementation. Expose new-item and backfill queue progress separately.
+
+**Status:** User-confirmed scheduling policy; fairness details and implementation remain to be completed.

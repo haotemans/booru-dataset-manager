@@ -170,3 +170,8 @@ Persist human decisions as first-class overrides, distinct from model-generated 
 ## Visual analysis failure and recovery
 
 The default policy retries retryable DINOv3 analysis failures automatically up to three attempts. When exhausted, mark the analysis item failed/deferred, expose an actionable error and provide a manual retry action. Persist attempt count and failure history across application restarts; restarting must not silently reset the retry budget. Use bounded backoff for transient failures, and do not repeatedly retry permanent model/configuration incompatibilities. A successful media ingestion remains successful regardless of analysis failure; the analysis queue is independent of ingestion and must not block unrelated gallery operations. Manual retry begins an explicit new cycle while preserving previous attempts and errors.
+
+
+## Analysis queue scheduling
+
+Prioritize DINOv3 analysis for newly ingested media over bulk analysis/backfill of existing library items. Backfill runs using remaining capacity so a large historical backlog does not indefinitely delay newly added media. Persist queue priority and expose new-ingestion analysis progress separately from backfill progress. Ensure backfill still makes progress under sustained ingestion (for example, via a bounded fairness policy); failed items must not block unrelated work. Manual priority controls may be added later but are not required for the initial policy. Ingestion completion and visual-analysis completion remain separate states.
