@@ -38,3 +38,8 @@ For a Danbooru-first task, Gelbooru may be used when Danbooru cannot be used for
 ## Source-provided relationships
 
 When a provider exposes trustworthy post-to-post, parent/child, pool, difference-set or alternate-version relationships, the adapter may normalize them as relationship records with relation type, provider, remote IDs/URLs and retrieval time. Preserve the source relationship provenance and distinguish direct provider links from DINOv3 suggestions and human-confirmed links. Do not assume every provider exposes these fields, and do not invent relations when unavailable. A provider relationship creates an association candidate, not an exact-duplicate assertion and not permission to delete any file.
+
+
+### Difference-set relationship handling
+
+When a source API explicitly provides a reliable difference-set relationship, automatically create the corresponding association group and persist provider ID/URL, relationship type and retrieval provenance. For representative-only dataset selection, choose one member of each difference set; selection can be automatic using the configured quality ranking or manual by the user. Keep every original variant in the managed library, and preserve an all-variants export option. Do not infer a source-confirmed difference relationship from DINOv3 similarity alone. If the adapter cannot reliably obtain source relationship metadata, it must not fabricate the relationship.

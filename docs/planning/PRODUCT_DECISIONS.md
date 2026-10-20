@@ -28,7 +28,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-004 — Representative-image ranking and original retention
 
-**Decision:** Rank representative candidates primarily by visual appeal and degree of completion, then by minimal visual distractions; images with no visible text are preferred. Keep all original files. Use a vision API to assess aesthetic quality and suggest potentially beneficial crops, but require human review before accepting representative choices or crop suggestions.
+**Decision:** Rank representative candidates primarily by visual appeal and degree of completion, then by minimal visual distractions; images with no visible text are preferred when other quality factors are comparable. Keep all original files. For source-confirmed difference sets, the system may select one representative either automatically using the configured quality policy or manually by the user. Crop suggestions still require explicit human approval.
 
 **Implications:**
 - Treat aesthetic/completion quality as the primary preference, not file size, source priority, or embedding similarity.
@@ -354,8 +354,17 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-036 — Broad visual-association groups and difference sets
 
-**Decision:** A visual-association group may contain more than near-duplicate images, including difference sets such as related artwork variants from the same work. Every member relationship must have an explicit relation type; membership does not imply exact duplication or interchangeability. Use trustworthy source-provided relationships when available and allow human-confirmed associations when needed. DINOv3 similarity alone must not automatically assert that different poses, scenes, character identities or merely similar compositions belong to the same association group.
+**Decision:** A visual-association group may contain more than near-duplicate images, including difference sets such as related artwork variants from the same work. Every member relationship must have an explicit relation type; membership does not imply exact duplication or interchangeability. Automatically establish an association when the source explicitly provides a trustworthy difference-set relationship, recording its provenance. Other broad associations may be human-confirmed when needed. DINOv3 similarity alone must not automatically assert that different poses, scenes, character identities or merely similar compositions belong to the same association group.
 
 **Implications:** Keep relation classes distinct, including exact duplicate, resized/recompressed near-duplicate, crop/content variant, difference/alternate artwork, alternate pose/frame, same subject across scenes, same character/person, same artist, and merely similar composition/style. Representative-image selection is restricted to a subset whose members are reasonably interchangeable for the relevant export/review purpose; do not select one representative for an entire broad association group by default. Preserve original media, source provenance, relationship source and human override history. Source relationships must not bypass exact-hash deduplication rules or imply file deletion.
 
 **Status:** User-confirmed policy; source relationship ingestion, group/member data model, UI, representative scope and tests remain to be implemented.
+
+
+## D-037 — Automatic association of source-confirmed difference sets and single representative selection
+
+**Decision:** When a provider explicitly and reliably identifies a difference set (for example, a Danbooru difference relationship), automatically create the association group and record the source relationship. For representative-only dataset selection, retain one selected representative per difference set by default. The representative may be chosen automatically using the configured quality ranking or manually by the user.
+
+**Implications:** Automatic selection follows the existing preference order: aesthetic appeal/completion, fewer visual distractions, and preferably no visible text when other factors are comparable. Store the selected representative, selection mode, ranking/policy version, recommendation rationale and decision history. Manual choice overrides automatic selection. Keep all original media files and provenance in the library; “one representative” governs the representative-only dataset/export view and does not physically delete or erase unselected difference variants. Exports may offer an explicit all-variants option. Do not apply one representative to an entire broad association group unless its members are confirmed to be interchangeable for that selection purpose. Crop suggestions remain subject to explicit human approval.
+
+**Status:** User-confirmed policy; source relationship extraction, representative selection modes, export behavior, persistence, implementation and tests remain to be completed.

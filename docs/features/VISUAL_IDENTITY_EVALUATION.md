@@ -27,3 +27,8 @@ Automatic grouping is allowed only for the near-duplicate relation class (for ex
 ## Difference-set and association evaluation
 
 Include source-linked difference/alternate-artwork sets in the labeled data. Evaluate the relation types separately: exact duplicate, near-duplicate, crop/content variation, difference set, alternate pose/frame, same character across scenes, same artist, style/composition similarity, and unrelated. Metrics must identify false merges between meaningful difference variants and unrelated/identity-distinct images. Source-supplied relations are recorded as provenance and can be shown as candidate associations, but must not be mislabeled as byte duplicates. Representative-ranking labels must specify the eligible interchangeable subset, not merely the broad association group.
+
+
+## Difference-set representative selection evaluation
+
+For source-confirmed difference sets, evaluate automatic representative ranking separately from relationship detection. Collect human preferred-image labels within each set and report top-1 agreement, pairwise preference agreement, disagreement rates, and cases where technical defects or visible text affect ranking. Compare automatic and manual selection workflows. If the ranking service returns an invalid/unavailable result, the system must preserve the set and request manual selection rather than silently dropping all variants. Record selection mode and ranking-policy version for reproducibility.

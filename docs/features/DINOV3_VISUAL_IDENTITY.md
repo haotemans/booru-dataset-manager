@@ -13,7 +13,7 @@ DINOv3 embeddings are retrieval features, not proof of semantic identity and not
 
 ## Recommendation and human review
 
-The system can rank candidate representatives, but the user has chosen **vision-API assessment plus human review** rather than trusting unattended aesthetic judgments.
+The system supports both automatic representative selection and manual selection. For source-confirmed difference sets, create the association automatically and select one representative either by the configured quality-ranking policy or by an explicit user choice. Keep the selection reversible and explainable; a manual choice overrides automation. For broader or uncertain visual relationships, DINOv3 supplies candidates and the user confirms the association. Crop suggestions always require explicit human approval.
 
 The review UI should show candidates side by side with full-resolution inspection, zoom, dimensions, file size, source, artist/character links, review status and quality indicators. Actions should include choose representative, keep as separate variant, mark as related-but-distinct, reject a proposed relation, accept/edit/reject a crop suggestion, defer, and undo. A human decision takes precedence over automated suggestions until explicitly reset.
 
@@ -52,7 +52,7 @@ Do not treat larger dimensions as automatically better. Avoid presenting model o
 
 ## Safe automatic policy
 
-- Automatic grouping only uses a versioned threshold policy evaluated on labeled data; do not hard-code an unvalidated threshold.
+- Automatic grouping of DINOv3-inferred near-duplicates only uses a versioned threshold policy evaluated on labeled data; do not hard-code an unvalidated threshold. Trustworthy source-declared difference-set relationships may be grouped automatically with source provenance.
 - Automatic grouping is reversible and non-destructive; ambiguous or cross-identity candidates go to review.
 - Exact duplicates can be recognized by hash independently of DINOv3.
 - Representative selection is a metadata decision. Keep all original files and source records; do not physically delete or silently quarantine non-selected images.
@@ -109,3 +109,13 @@ Use source-provided relationship metadata when the adapter can reliably obtain i
 ### Representative selection scope
 
 A broad association group does not automatically have one representative for all members. Representative selection operates only within an explicitly eligible subset of interchangeable near-duplicates/variants for the intended export or review purpose. Difference images that intentionally depict distinct expressions, outfits, censorship states, or other meaningful artwork changes must remain selectable as separate variants. Do not exclude them from export merely because they share an association group. Preserve every original and allow users to inspect, keep separate, split, regroup and undo decisions.
+
+
+## Difference-set representative selection
+
+For an explicit, trustworthy source-declared difference set, automatically create the association and offer two selection modes:
+
+- **Automatic:** select one representative using the configured quality ranking: aesthetic appeal/completion first, then fewer distracting artifacts, with text-free artwork preferred when other factors are comparable. Record the ranking and policy versions and a concise rationale. If the scoring/vision service cannot provide a usable result, mark the set as needing selection rather than inventing a result.
+- **Manual:** show the variants side by side and let the user choose one. A manual decision overrides the automatic choice and is recorded in history.
+
+Representative-only export includes the selected image for each eligible difference set. All variants remain in the managed library, and an explicit all-variants export remains available. Do not physically delete unselected images. This rule applies to source-confirmed difference sets or other groups whose members are eligible substitutes; it does not collapse an entire character, artist, or broad visual-association group to one image.
