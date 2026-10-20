@@ -1067,3 +1067,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - When optimization is launched from a Character or Artist context, the default scope is all locally associated images in the current context.
 - The Tag search/filter applied to the visible image list does not narrow the default optimization scope.
 - Users may explicitly choose selected images when they want to optimize only a subset.
+
+
+## D-116: Deduplication Scope in Character and Artist Contexts
+
+- When deduplication is launched from a Character or Artist context, inspect all locally associated images in that context by default.
+- The Tag search/filter applied to the visible image list does not narrow the deduplication scope.
+- Deduplication remains a manually triggered operation; review candidate pairs and explicitly confirm any deletion before it occurs.
