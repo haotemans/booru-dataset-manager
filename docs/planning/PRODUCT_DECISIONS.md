@@ -179,3 +179,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Pending items are recovered after the main scan when connectivity is available, remain resumable if connectivity is still unavailable, and do not count as completed outcomes. Apply the same request-start pacing rule to subsequent serial requests. HTTP 429 remains governed by the dedicated cooldown and concurrency rules.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-017 — Handling HTTP 429 on the current serial request
+
+**Decision:** When a request receives HTTP 429, honor `Retry-After` when present; otherwise use the default 5-minute cooldown. After the cooldown, retry the same request once, subject to the existing maximum of one retry per request. If that retry still fails, persist the affected item IDs for later recovery and continue processing subsequent items.
+
+**Implications:** A 429 immediately sets the affected provider profile's active concurrency to 1 and resets its cooldown. Do not shrink the batch or classify the item as a content-processing failure solely due to rate limiting. Keep the configured serial request-start interval in force. A later 429 starts a new cooldown; unresolved IDs remain resumable.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
