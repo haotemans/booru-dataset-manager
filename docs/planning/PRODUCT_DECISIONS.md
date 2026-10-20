@@ -824,3 +824,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Safety:** Only remove data owned by the confirmed images. Do not delete shared model files, shared indexes, or resources referenced by other images; update or rebuild shared indexes as required. Keep the operation consistent and report partial failures clearly rather than claiming full success. Before confirmation, nothing is deleted; cancelling leaves files and records unchanged.
 
 **Status:** User-confirmed policy; dependency/reference checks, coordinated cleanup and failure recovery remain pending implementation and testing.
+
+## D-083 — Delete confirmed rejected items immediately without an undo window
+
+**Decision:** After the user explicitly confirms the batch deletion, execute deletion immediately. Do not add a temporary undo window or maintain a separate trash state for rejected images.
+
+**Safety:** The confirmation step must identify the exact deletion scope. Before confirmation, no files or records are removed. The deletion implementation must coordinate image-specific files and database records, preserve shared resources, and report failures accurately.
+
+**Status:** User-confirmed policy; implementation and testing remain pending.
