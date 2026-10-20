@@ -1,0 +1,10 @@
+[package]
+name = "bdm-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+bdm-application = { path = "../../crates/application" }
+bdm-config = { path = "../../crates/config" }
