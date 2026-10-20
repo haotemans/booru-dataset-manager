@@ -305,3 +305,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Keep configuration persistence separate from connection validation state. The UI must distinguish saved/unverified, test successful, and test failed or stale states rather than implying a saved configuration is known to work. Saving a configuration must not itself trigger external API requests. Credentials must be stored using the application's credential-protection approach and must never appear in logs or diagnostic output.
 
 **Status:** User-confirmed policy; settings UI, validation-state persistence, and tests remain to be completed.
+
+
+## D-031 — Pause jobs on configuration-wide AI API errors
+
+**Decision:** When an AI request returns a clear configuration-wide error—such as HTTP 401 authentication failure, HTTP 403 authorization failure, or an explicit unsupported/nonexistent model error—pause the affected job immediately. Preserve the cursor, recovery queue, item outcomes, and all resumable progress. Show an actionable error so the user can correct the saved API configuration, then require explicit user action to resume.
+
+**Implications:** Do not repeatedly send requests known to fail because of the same configuration issue, and do not classify affected items as content-processing failures. Ordinary item-specific failures continue through existing bounded retry and recovery policies. A failure isolated to one API profile pauses jobs using that profile; unrelated jobs on independent profiles may continue. If the error occurs within a shared rate-limit group, pause the affected job and do not bypass any active group cooldown. Configuration edits alone do not automatically resume or dispatch requests.
+
+**Status:** User-confirmed policy; error classification, job pause/resume integration, UI, persistence, and tests remain to be completed.

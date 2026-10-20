@@ -111,3 +111,8 @@ The numeric defaults above are product defaults, not provider guarantees; users 
 ## Saving and testing API configurations
 
 An API configuration can be saved without a successful connection test. Connection testing is an explicit user action; saving alone must not send an API request. The UI distinguishes saved/unverified, test successful, and test failed or stale states. At task execution, unusable endpoints, authentication failures, and unsupported models produce actionable errors without discarding the saved configuration. Keep credentials out of logs and diagnostics.
+
+
+## Pause on configuration-wide API errors
+
+Pause the affected job immediately when a response clearly indicates a configuration-wide problem, including HTTP 401 authentication failure, HTTP 403 authorization failure, or an explicit unsupported/nonexistent model error. Persist resumable progress, cursor, queued IDs and completed outcomes; present an actionable message and require explicit user action to resume after correction. Do not keep retrying requests under the same invalid configuration or mark affected content as failed merely because of a configuration-wide error. Ordinary item-level processing errors continue under existing bounded fallback/recovery rules. Jobs on unrelated profiles may continue; configuration edits alone must not automatically resume a paused job or dispatch requests.
