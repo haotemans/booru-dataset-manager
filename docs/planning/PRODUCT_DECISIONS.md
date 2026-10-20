@@ -600,3 +600,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Configuration and limits:** The ModelScope destination/repository, authentication method, privacy/visibility, quota and large-file/upload constraints must be confirmed and implemented before relying on remote backups. Do not hard-code credentials in application configuration or logs. Make clear that remote backup is not complete until verification succeeds. If ModelScope is unavailable or unsuitable for the required file sizes or privacy expectations, preserve local backups and ask the user to resolve configuration rather than falling back to destructive cleanup.
 
 **Status:** User-confirmed retention and destination direction; ModelScope integration, secure authentication, archive format, upload/resume behavior, and remote restore remain pending implementation and feasibility validation.
+
+
+## D-059 — Use a private ModelScope repository without application-level backup encryption
+
+**Decision:** Do not add a separate application-level encryption layer to backup archives. Store remote backup archives in a private ModelScope (魔搭) repository, relying on the repository's access controls.
+
+**Security requirements:** Explain that private-repository access control is not the same as end-to-end backup encryption. Keep access tokens out of source code, ordinary configuration files, logs, crash reports and backup archives; use an appropriate OS credential store where available. Request only the permissions needed for backup upload and restore. Verify repository visibility before uploading, and clearly report if the destination is public or its privacy cannot be confirmed. Remote restore must authenticate before accessing private backup content.
+
+**Status:** User-confirmed decision; secure credential storage, private repository verification and ModelScope integration remain pending implementation and validation.
