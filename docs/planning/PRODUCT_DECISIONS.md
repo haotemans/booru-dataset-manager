@@ -763,3 +763,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Behavior:** Batch processing must not turn detection into unattended destructive editing. Rejected or failed items leave their current outputs unchanged; users can adjust individual selections and proceed manually. Show per-image progress and outcomes so failures do not obscure successful items.
 
 **Status:** User-confirmed workflow; batch scheduling, per-image review states, failure handling and UI remain pending implementation and testing.
+
+## D-076 — Use the configured visual-recognition provider
+
+**Decision:** AI-assisted region detection uses the provider selected in application settings. If settings select a local model, use that local model; if settings select an AI API provider, use that provider. Do not ask the user to choose the provider again for every batch task.
+
+**Behavior:** Before execution, validate that the configured provider is available and sufficiently configured. If it is unavailable or fails, report the problem and keep manual editing available; do not silently switch to a different provider or make remote calls contrary to the saved setting. Any explicit fallback policy must itself be configured in settings. Existing per-image selection review and final output approval remain mandatory regardless of provider.
+
+**Status:** User-confirmed behavior; provider settings validation, execution routing and failure UI remain pending implementation and testing.
