@@ -20,3 +20,8 @@ Every long-running job has a stable ID, immutable input snapshot, state, timesta
 ## Errors
 
 Use machine-readable error codes plus safe user-facing messages. Do not include API keys, authorization headers, cookies, signed URLs or raw secrets in logs. Preserve actionable context such as provider, media ID, stage and retryability. Avoid swallowing errors with default values.
+
+
+## Independent feature delivery
+
+Implement features as independently testable modules with explicit application use cases, domain rules and port contracts. A feature should be buildable and testable without requiring unrelated product features to be complete. Shared concerns—media identity, persistence, job state, cancellation, review state and export selection—must be provided through shared services/contracts rather than duplicated in feature-specific code. Do not make independence an excuse to bypass module dependency rules or create conflicting sources of truth.

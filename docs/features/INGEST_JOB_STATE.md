@@ -21,3 +21,10 @@ A repeated provider record maps to the same source identity key. Repeated downlo
 ## Progress semantics
 
 Progress reports completed/total items and current stage. When total is unknown due to pagination, use indeterminate progress rather than invented percentages. A job is successful only when all required stages reach their defined completion condition; pending embeddings are surfaced separately rather than hidden inside a generic success count.
+
+
+## One-shot job lifecycle
+
+Ingestion jobs are finite and user-initiated. The user creates a job from source/search inputs; the job runs until it completes, is cancelled, fails into a persisted resumable state, or requires review. It must not restart or schedule itself after reaching a terminal state. Scheduled/continuous monitoring is not part of the initial ingestion workflow.
+
+Each job is a separately persisted, resumable work unit with a stable ID, immutable input snapshot, cursor/checkpoint, stage, progress and per-item outcomes. A failed/cancelled job must not invalidate items already committed successfully. Keep this contract independent of source adapter implementation so providers can be implemented and verified one at a time.

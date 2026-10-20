@@ -314,3 +314,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Do not repeatedly send requests known to fail because of the same configuration issue, and do not classify affected items as content-processing failures. Ordinary item-specific failures continue through existing bounded retry and recovery policies. A failure isolated to one API profile pauses jobs using that profile; unrelated jobs on independent profiles may continue. If the error occurs within a shared rate-limit group, pause the affected job and do not bypass any active group cooldown. Configuration edits alone do not automatically resume or dispatch requests.
 
 **Status:** User-confirmed policy; error classification, job pause/resume integration, UI, persistence, and tests remain to be completed.
+
+
+## D-032 — One-shot ingestion jobs and independently deliverable features
+
+**Decision:** The first ingestion workflow is user-initiated and finite: create a one-shot job from source/search inputs, run it to a terminal or resumable state, and stop. Scheduled or continuous source monitoring is out of scope for the initial ingestion workflow. Features should be implemented as independently testable modules with explicit contracts and dependencies, and may be delivered in stages rather than requiring the entire product to be completed at once.
+
+**Implications:** Persist each job's input snapshot, source cursor, progress, item outcomes, cancellation state and resumable state. One job must not silently turn into a recurring task. Implement and test the ingestion workflow independently behind application/domain/port boundaries; other features can be added later without duplicating the ingestion pipeline or bypassing shared media and job services.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
