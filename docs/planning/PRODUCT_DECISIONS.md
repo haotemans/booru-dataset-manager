@@ -840,3 +840,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Changing layout affects presentation only; it must not alter image files, ordering, selection, or metadata. Both layouts should retain consistent selection and review actions and adapt to the available window size.
 
 **Status:** User-confirmed direction; layout switching and responsive presentation remain pending implementation and testing.
+
+## D-085 — Generate and cache rebuildable gallery thumbnails
+
+**Decision:** Generate and cache thumbnails for gallery browsing rather than repeatedly decoding and resizing full-resolution images. Treat thumbnails as disposable derived cache, not as authoritative image copies or backup data.
+
+**Behavior:** Store thumbnails in the designated cache area, reuse them across grid and masonry layouts, and regenerate them when missing, invalid, or stale. Cache cleanup must never delete original images or committed edited outputs. Avoid creating redundant full-resolution image copies; thumbnail generation and cache management must be bounded and suitable for galleries approaching 50,000 images.
+
+**Status:** User-confirmed direction; thumbnail pipeline, cache invalidation and cleanup remain pending implementation and testing.
