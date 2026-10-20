@@ -935,3 +935,11 @@ Implementation pending: navigation shell, page ownership, and cross-page links.
 The Character area should automatically discover candidate relationships between canonical character tags and specific variant/costume tags using Danbooru tag metadata and other verifiable relationships where available. Users can manually correct, add, or remove relationships. Do not assume Danbooru supplies complete semantic character-variant relationships; distinguish verified relationships from inferred candidates, and avoid applying destructive tag normalization based solely on an uncertain candidate. Feed only sufficiently verified relationships into automatic redundant-tag removal and conflict detection.
 
 Implementation pending: relationship discovery, confidence/provenance, and character relationship editing UI.
+
+
+## D-098 Artist and character card navigation; no artist merging
+
+- The Character area presents characters as individual cards. Selecting a character card opens that character's associated images.
+- The Artist area follows the same interaction pattern: present artists as individual cards, and selecting an artist card opens images associated with that artist.
+- Artist records do not need a merge feature in the planned workflow; artist merging is out of scope.
+- The Artist area should support an artist list/card view, Danbooru artist metadata synchronization, alias management, associated-image browsing, and filtering the gallery by artist.
