@@ -121,6 +121,14 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 **Status:** User-confirmed policy; exact reduction/recovery parameters and implementation remain to be completed.
 
+## D-011 — Concurrency scope per provider profile
+
+**Decision:** All jobs using the same AI API provider profile share one concurrency limit and one adaptive rate-limit controller. Different profiles maintain independent limits.
+
+**Implications:** Enforce concurrency in a shared scheduler keyed by provider profile, not separately per task. Tag optimization and caption generation using the same profile count toward the same cap. HTTP 429 adaptation applies to that profile's shared active limit and must never exceed its configured maximum. Jobs using other profiles are not throttled by this profile's 429 response.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
+
 ## Deferred decisions
 
 - Which vision API/provider to use, its privacy/cost controls, and provider-specific retention/training policy.
