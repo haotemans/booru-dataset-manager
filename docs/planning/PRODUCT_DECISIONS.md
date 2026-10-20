@@ -928,3 +928,10 @@ Implementation pending: staged normalization pipeline, background task state/ret
 The primary UI navigation consists of seven areas: Dashboard, Artist, Character, Tag Management, API Configuration, Logs, and System Settings. Centralized tag normalization review, unresolved tags, and tag-conflict handling belong in Tag Management. Character identity and variant relationships belong in Character. Image review may provide contextual tag warnings and shortcuts into relevant management workflows, but should not require a separate top-level tag-conflict page. Dashboard summarizes library/task status; Logs expose operational records and failures; System Settings owns application-wide paths, models, backup, and other system-level options; API Configuration owns AI/API provider settings.
 
 Implementation pending: navigation shell, page ownership, and cross-page links.
+
+
+## D-097 Automatically discover character-variant relationships with manual correction
+
+The Character area should automatically discover candidate relationships between canonical character tags and specific variant/costume tags using Danbooru tag metadata and other verifiable relationships where available. Users can manually correct, add, or remove relationships. Do not assume Danbooru supplies complete semantic character-variant relationships; distinguish verified relationships from inferred candidates, and avoid applying destructive tag normalization based solely on an uncertain candidate. Feed only sufficiently verified relationships into automatic redundant-tag removal and conflict detection.
+
+Implementation pending: relationship discovery, confidence/provenance, and character relationship editing UI.
