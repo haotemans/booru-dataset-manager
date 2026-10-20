@@ -574,3 +574,16 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Operational safeguards:** Store backups in a clearly identified location under the managed root by default, while allowing a future configurable destination. Surface last-success time, failures, and available space; handle a missing/unwritable drive without blocking normal application use. Restoration must validate the backup before replacing current state, explain that media and model files are not included, and preserve a recoverable copy of current database state before destructive replacement where feasible. A backup is not considered a full media-file disaster-recovery solution.
 
 **Status:** User-confirmed direction; backup format, scheduling behavior while the application is closed, restore UX and implementation remain pending.
+
+
+## D-057 — Automatic backups must restore the complete library and edit history
+
+**Decision:** Use automatic periodic backups, with a default daily schedule and a default retention of the latest 7 successful restore points. A backup must be sufficient to restore the library's images and user changes, not merely the SQLite database.
+
+**Backup scope:** Include a consistent snapshot of the database and required metadata, original source images, all managed derived/edited image files (including inpainting/watermark-removal results and crops), and the edit/variant relationships and history needed to restore which files came from which originals and what changes were made. Include application-managed sidecar metadata and manifests needed to reconnect records to files. Any files that are intentionally excluded must be clearly identified and must not be represented as fully backed up.
+
+**Integrity and recovery:** A backup is not considered successful until its manifest and required files are written and verified. Use a consistent snapshot strategy so database records cannot refer to missing backup files. Provide a restore workflow that validates the backup before changing active data, reports missing/corrupt files, and avoids overwriting the current library without explicit confirmation. Preserve original images and edited variants; restoring must not flatten edits or discard the edit history. Support manual backup and restore in addition to the automatic schedule.
+
+**Storage policy:** Because complete image backups can be large, expose the backup destination and estimated/required space where practical. Do not silently delete source images, edited files, or restore points to make room. Retention cleanup may remove only older verified backup sets beyond the configured retention count, and must never remove the active library files.
+
+**Status:** User-confirmed requirements; backup format, storage destination, scheduling implementation, consistency strategy and restore UX remain to be designed and implemented.
