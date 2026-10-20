@@ -697,3 +697,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Storage and backup:** Avoid duplicating unchanged parameter assets unnecessarily. Include the edit parameters and necessary masks in the weekly remote backup so a source image can be re-fetched and the edit workflow reconstructed where dependencies permit. This does not require keeping old output image versions.
 
 **Status:** User-confirmed behavior; parameter schema, mask persistence, compatibility validation and re-edit UI remain pending implementation and testing.
+
+## D-068 — Preview before replacing the current edited output
+
+**Decision:** Re-editing must produce a preview first. Do not replace the current committed output until the user explicitly confirms the preview. Canceling or rejecting the preview leaves the current output unchanged. Temporary preview files are disposable and must be cleaned up after confirmation, cancellation or failure when no longer in use; they are not retained as historical image versions.
+
+**Safety:** Validate the new output and ensure it is readable before replacement. Perform the final replacement atomically where supported so an interrupted write does not leave a partial output. Keep the current output until the replacement is ready and confirmed.
+
+**Status:** User-confirmed behavior; preview lifecycle, atomic replacement and cleanup remain pending implementation and testing.
