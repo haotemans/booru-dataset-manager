@@ -950,3 +950,13 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Character cards and artist cards do not display the character/artist name or other metadata.
 - Each card displays only the current local image count and the image count returned by the API.
 - Character and artist cards retain the previously defined click-through behavior to open the associated image list.
+
+
+## D-100 Character and artist area actions
+
+- Both the Character area and Artist area provide a consistent set of actions alongside the card list.
+- Character area actions: Add Character, Deduplicate, Export, Optimize.
+- Artist area actions: Add Artist, Deduplicate, Export, Optimize.
+- Export supports natural-language format or tag format.
+- Optimize supports natural-language optimization or tag optimization.
+- Deduplicate operates on images associated with the current character or artist context.
