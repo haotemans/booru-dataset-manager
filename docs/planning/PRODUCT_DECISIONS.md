@@ -800,3 +800,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** When the limit is enabled and an output exceeds it, notify the user and allow adjustment rather than silently degrading image quality or discarding the output. Any compression or format conversion must be explicit and consistent with D-078. Validate available disk space and the output file before replacing the current committed image.
 
 **Status:** User-confirmed policy; settings UI, output-size checks and related tests remain pending implementation.
+
+## D-080 — Rejected images are marked for deletion, with explicit confirmation
+
+**Decision:** The default action for images rejected during review is deletion, but deletion must not occur until the user explicitly confirms it. Rejection alone must never immediately delete files.
+
+**Behavior:** Clearly identify the rejected images and the deletion scope in a confirmation step before deleting. If the user cancels or declines confirmation, keep the images and their associated records unchanged. Avoid deleting unrelated files or data. Report deletion failures rather than treating them as successful.
+
+**Status:** User-confirmed policy; review actions, confirmation UI and safe deletion behavior remain pending implementation and testing.
