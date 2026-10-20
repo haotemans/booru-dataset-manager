@@ -1184,3 +1184,14 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Allow the unified deduplication task (pHash plus DINOv3 duplicate detection) to run concurrently with the background DINOv3 analysis queue for newly imported images.
 - Coordinate shared compute resources so concurrency does not block normal application interaction; keep task progress and pause/resume state independently visible.
 - Reuse valid cached DINOv3 embeddings where compatible, avoiding unnecessary repeated inference.
+
+
+## D-132: Continuous Duplicate Prevention and Automatic Background Deduplication
+
+- Enforce local byte-level uniqueness as soon as a downloaded image has been fully downloaded and validated: use a cryptographic content hash to reuse an existing identical media file and consolidate its valid associations instead of storing another copy.
+- Compute pHash for newly imported images in the background without requiring the user to start a manual deduplication scan.
+- Run DINOv3 duplicate analysis in the background as required by the existing two-signal deduplication rule, reusing compatible cached embeddings when available.
+- Automatically deduplicate pairs when both pHash (Hamming distance <= 2) and DINOv3 (cosine similarity >= 0.997) agree, applying the existing survivor-selection, association-preservation, and audit-log rules.
+- Candidates found by only one visual method remain pending manual review; they must not be automatically deleted.
+- Keep the manual deduplication command for scanning the existing library and processing outstanding candidates. It is not a prerequisite for checking newly downloaded images.
+- Coordinate background work automatically to keep the application responsive; expose progress and controls through the existing task model without requiring users to configure CPU/GPU priorities.
