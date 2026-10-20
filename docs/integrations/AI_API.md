@@ -10,23 +10,25 @@ Artist and character canonical names are removed from the AI rewrite input and m
 
 All AI API requests must be serialized as JSON. All accepted operation results must be parsed and validated as JSON; free-form prose, Markdown fences, or text scraping are not valid success responses.
 
-- Define a versioned schema per operation (visual assessment, crop proposal, tag optimization, caption generation). Include explicit operation name/version, stable item ID, required fields, types, enums, and numeric/string/array bounds.
+- Define a versioned schema per operation (visual assessment, crop proposal, tag optimization, caption generation). Include explicit operation/version, stable item ID, required fields, types, enums, and numeric/string/array bounds.
 - For batch requests, give every input item a stable unique ID and require each result to identify that same ID. Validate exact correspondence: unexpected, duplicate, missing, or mismatched IDs are item-level failures; never join responses to inputs solely by array order.
 - Use provider-native structured output or JSON Schema mode where supported. Maintain provider capability flags. If unavailable, still request strict JSON and use the same local parser/validator; do not claim the provider enforces a schema when it does not.
-- Parse with a real JSON parser, then validate schema and domain invariants. Reject malformed JSON, wrong types, out-of-range values, extra or missing required fields, invalid crop rectangles, and unsupported status values. Do not silently repair a response into a success.
-- Use bounded retry with a clear retry reason for transient transport errors and eligible malformed responses. Do not retry indefinitely. If a batch response is partial or one item is invalid, preserve accepted valid item results and retry only eligible failed items where possible.
-- Persist job and per-item states so interrupted batches can resume idempotently. A repeated result must not overwrite a human-reviewed choice or create duplicate accepted outputs.
+- Parse with a real JSON parser, then validate schema and domain invariants. Reject malformed JSON, wrong types, out-of-range values, invalid crop rectangles, and unsupported status values. Do not silently repair a response into a success.
+- On a failed request/window, do not retry the same batch and do not split it into smaller requests. Record the failure and advance the input window according to the sliding-window policy below.
+- If a syntactically valid response contains valid results for some items and invalid/missing results for others, persist the valid item results; mark only affected items as failed. Treat the window as failed for cursor advancement, without resending it. Stable item IDs and idempotent writes prevent overlap from duplicating results.
+- Persist job and per-item states so interrupted jobs can resume without resending already accepted work. Repeated results must not overwrite human-reviewed choices or create duplicate accepted outputs.
 - Record provider/model, schema version, request/job ID, attempt count, validation outcome and error category. Keep diagnostics redacted; cap raw response retention and never log image bytes, secrets or credential-bearing headers.
 - JSON validity is not semantic correctness. Apply protected-term checks and domain validation; vision-based aesthetic and crop proposals remain advisory and require human review.
 
 ## Batch sizing and sliding-window policy
 
-- Default to 8 items per API request; also support a batch size of 1. Keep the batch size configurable.
-- After a successful 8-item window, advance the window by 8. After a failed request/window, advance by 4, so the next window overlaps the previous one by 4 items.
-- Treat accepted results as item-level, idempotent records keyed by stable item ID. Overlapping windows must not duplicate writes or overwrite human-reviewed results.
-- For partial responses, retain valid item results and mark only failed/invalid/missing items as failed. The window failure policy must not discard valid results.
-- Apply bounded retries, then place exhausted failures in a visible retry/review queue. Persist the cursor and item states so restart/resume does not repeat accepted work.
-- The final request may contain fewer than 8 remaining items. Never fabricate padding entries; job completion requires every item to be completed or explicitly marked deferred/failed.
+- Default to 8 items per API request; also support a configurable batch size of 1.
+- On a fully successful batch, advance the input window by 8 (or by the configured batch size when set to 1).
+- On any batch/window failure—including transport/API failure, malformed JSON, schema validation failure, or a partial response with failed/missing item results—do not retry the same window and do not split it into single-item requests. Advance the input window by 4 items, producing a 4-item overlap for the default 8-item batch.
+- Preserve every valid result from a partially successful response. Record failures per item and continue from the advanced cursor; the overlapping window can provide another opportunity to process those items, but accepted results remain idempotent and are never written twice or used to overwrite human-reviewed data.
+- For a configured batch size of 1, a failed request still follows the no-retry rule; advance according to the configured window policy without creating an infinite loop.
+- Persist the cursor, job state and item outcomes. Restart/resume must not re-send accepted work solely because the previous process stopped.
+- The final request may contain fewer than the configured batch size of remaining items. Never fabricate padding entries. A job is complete only when every input item is completed or explicitly recorded as failed/deferred after the applicable processing windows.
 
 ## External vision API upload consent
 
@@ -52,4 +54,4 @@ A vision model may assess aesthetic completion, visual clutter and visible text,
 
 Treat model output as untrusted data. Validate schema, length, encoding, protected-term coverage, unauthorized additions, and output target. Do not allow model output to choose filesystem paths, SQL fragments, shell commands, or remote repository names. Use bounded request/response sizes and cancellation. A failed target must not overwrite its last valid version or undo another target's successful result.
 
-Acceptance tests: JSON serialization, strict JSON parsing, schema validation, unknown/duplicate/missing batch item IDs, malformed and oversized output, bounded retries, partial batch success, sliding-window advancement (8 on success, 4 on failure), overlap idempotency, single-item mode, resume behavior, key redaction, timeout, protected artist/character names, unknown special tags, no image upload by default, batch consent required on every external vision job, cancellation/no-dispatch behavior, consent audit redaction, target isolation, and reviewed-output preservation.
+Acceptance tests: JSON serialization, strict JSON parsing, schema validation, unknown/duplicate/missing batch item IDs, malformed and oversized output, no same-window retry, no batch splitting, partial batch result preservation, sliding-window advancement (full success advances 8; failure advances 4), overlap idempotency, single-item mode, resume behavior, key redaction, timeout, protected artist/character names, unknown special tags, no image upload by default, batch consent required on every external vision job, cancellation/no-dispatch behavior, consent audit redaction, target isolation, and reviewed-output preservation.

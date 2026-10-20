@@ -65,7 +65,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 - Prefer provider-supported structured output / JSON Schema or strict JSON mode when available. For providers without that capability, still request JSON and parse strictly.
 - Validate syntax, schema, required fields, numeric ranges, crop coordinates and image/item identity before accepting any result. Reject malformed or ambiguous results and mark affected items for bounded retry or human review.
 - Handle partial batch failure per item: preserve valid results, retry only eligible failed items with limits, and never let one malformed item corrupt or discard unrelated successful results.
-- Bound request/response sizes and batch concurrency; persist job/item state so batches can resume without duplicating already accepted work.
+- Bound request/response sizes and batch concurrency; persist job and item states so batches can resume without duplicating accepted work.
 - Keep diagnostics redacted; retain provider/model/schema versions and validation outcomes for auditability.
 - JSON validity is not semantic correctness. Protected-term checks remain required, and vision-based aesthetic/crop proposals remain advisory pending human review.
 
@@ -73,15 +73,17 @@ This file records user-confirmed product decisions. A decision is not a claim th
 
 ## D-007 — AI batch size and failure-window advancement
 
-**Decision:** The default AI request batch contains 8 items. Single-item processing must also be supported. When a batch fails, advance the input window by 4 items and continue, creating a 4-item overlap with the prior window.
+**Decision:** The default AI request batch contains 8 items. Single-item processing must also be supported. After any failed batch, do not retry the same batch or split it into smaller requests; advance the input window by 4 items.
 
 **Implications:**
-- For a successful batch, advance by 8 items. For a failed batch, advance by 4 items; do not reprocess already accepted item results just because a later window overlaps them.
-- Track state and outcome per item ID. Deduplicate accepted results by job and item ID so overlap cannot create duplicate writes or overwrite human-reviewed results.
-- Preserve valid per-item results from a partially successful response. Treat invalid/missing/failed item results as failures, rather than discarding unrelated valid results.
-- Support a batch size of 1 for providers/models or tasks that are more reliable with single-item requests. Batch size should be configurable, with 8 as the default.
-- Bound retries per item and per request. A failed window must not cause an infinite loop; persist the failure reason and leave exhausted items in a retry/review queue.
-- Handle the final window when fewer than 8 items remain without padding with fake items. Confirm every input item has a terminal or explicitly deferred state before marking the job complete.
+- A fully successful default 8-item window advances by 8. A failed window advances by 4, creating a 4-item overlap with the previous window.
+- Failure includes transport/API errors, malformed JSON, schema validation failure, and partial responses containing failed or missing item results.
+- Preserve valid item results from a partial response, and record invalid/missing items as failed. Never discard valid results just because another item failed.
+- Track each result by stable item ID and make writes idempotent. The overlap must not create duplicate results or overwrite human-reviewed choices.
+- Do not retry the failed request and do not split the batch into single-item requests. Record the failure reason and continue at the advanced cursor.
+- Support a configurable batch size of 1. For a failed one-item window, advance must still make progress and must not create an infinite loop; mark the failed item for later manual/retry-queue handling rather than automatically retrying it in the same run.
+- Persist cursor and per-item states for resume. The final request may contain fewer than the configured batch size; never add fake padding entries.
+- Mark the job complete only when each input item is completed or explicitly recorded as failed/deferred.
 
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
 
