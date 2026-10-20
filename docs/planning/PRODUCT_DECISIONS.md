@@ -739,3 +739,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Architecture:** Keep visual-recognition providers behind a tool/adapter interface rather than hard-coupling the editor to one model. Record the selected tool/model and relevant parameters when available so an edit can be continued or reproduced as far as dependencies allow. Do not invoke remote AI services without making the action and its applicable configuration clear to the user.
 
 **Status:** User-confirmed direction; provider/tool adapters, AI region proposals, mask editing and preview integration remain pending implementation and testing.
+
+## D-073 — User-selectable local and API visual-recognition providers
+
+**Decision:** Support both local visual-recognition models and configured AI API providers for editing assistance. Make the provider choice configurable in application settings. Default to local recognition where a suitable installed model is available, to reduce network traffic and API costs; allow users to choose a configured API provider when desired or when local capability is insufficient.
+
+**Behavior:** Clearly identify which provider will be used before a task runs. Do not silently fall back from local to a remote API, because that can incur network traffic or cost; ask for user consent or require an explicit fallback setting. If the selected provider is unavailable, explain the issue and keep manual editing available. Provider-specific credentials must use the application's secure credential handling and must not be written to ordinary logs or configuration files.
+
+**Status:** User-confirmed direction; provider settings, local model availability checks, provider adapters and explicit fallback behavior remain pending implementation and testing.
