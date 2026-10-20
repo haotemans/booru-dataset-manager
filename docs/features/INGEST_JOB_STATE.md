@@ -28,3 +28,10 @@ Progress reports completed/total items and current stage. When total is unknown 
 Ingestion jobs are finite and user-initiated. The user creates a job from source/search inputs; the job runs until it completes, is cancelled, fails into a persisted resumable state, or requires review. It must not restart or schedule itself after reaching a terminal state. Scheduled/continuous monitoring is not part of the initial ingestion workflow.
 
 Each job is a separately persisted, resumable work unit with a stable ID, immutable input snapshot, cursor/checkpoint, stage, progress and per-item outcomes. A failed/cancelled job must not invalidate items already committed successfully. Keep this contract independent of source adapter implementation so providers can be implemented and verified one at a time.
+
+
+## Independent DINOv3 analysis work
+
+Successful import is defined by validated media and provenance committed to managed storage/database; it does not wait for embedding or visual similarity analysis. Enqueue DINOv3 analysis by default after import as a separate persisted work unit. If the model/runtime is missing or analysis fails, retain the imported item and report analysis as pending, retryable, failed or requiring review independently of import status.
+
+Expose a separate batch-analysis/reanalysis action for existing library items. Key analysis results by media ID, model version and preprocessing version. Re-analysis creates versioned results and must not silently overwrite human-confirmed grouping or representative selections. Show import-job and analysis-job progress separately; users can still browse, review metadata and export an already imported item while its DINOv3 analysis is pending, subject to export filters.

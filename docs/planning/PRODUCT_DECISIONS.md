@@ -368,3 +368,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Automatic selection follows the existing preference order: aesthetic appeal/completion, fewer visual distractions, and preferably no visible text when other factors are comparable. Store the selected representative, selection mode, ranking/policy version, recommendation rationale and decision history. Manual choice overrides automatic selection. Keep all original media files and provenance in the library; “one representative” governs the representative-only dataset/export view and does not physically delete or erase unselected difference variants. Exports may offer an explicit all-variants option. Do not apply one representative to an entire broad association group unless its members are confirmed to be interchangeable for that selection purpose. Crop suggestions remain subject to explicit human approval.
 
 **Status:** User-confirmed policy; source relationship extraction, representative selection modes, export behavior, persistence, implementation and tests remain to be completed.
+
+
+## D-038 — Decouple ingestion from DINOv3 analysis
+
+**Decision:** After a media item has passed download validation, dimension checks, exact-deduplication and the media/metadata commit, enqueue DINOv3 embedding and visual-relation analysis by default as a separate background work unit. DINOv3 must not be a prerequisite for successful media ingestion. Users also have a separate batch-processing/reanalysis entry point for existing library items.
+
+**Implications:** If the model/runtime is unavailable, keep the item imported and mark analysis as pending with an actionable reason. If embedding or similarity analysis fails, retain the imported media, preserve any valid prior analysis and record a retryable/permanent analysis state independently. Re-analysis is versioned by model and preprocessing version and must not silently overwrite human-confirmed relationships or representative selections. Expose ingestion completion and DINOv3 analysis completion as separate progress/status values.
+
+**Status:** User-confirmed policy; queue, persistence, reanalysis UI, integration and tests remain to be implemented.

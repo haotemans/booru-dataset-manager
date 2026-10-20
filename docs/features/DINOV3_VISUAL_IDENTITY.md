@@ -119,3 +119,8 @@ For an explicit, trustworthy source-declared difference set, automatically creat
 - **Manual:** show the variants side by side and let the user choose one. A manual decision overrides the automatic choice and is recorded in history.
 
 Representative-only export includes the selected image for each eligible difference set. All variants remain in the managed library, and an explicit all-variants export remains available. Do not physically delete unselected images. This rule applies to source-confirmed difference sets or other groups whose members are eligible substitutes; it does not collapse an entire character, artist, or broad visual-association group to one image.
+
+
+## Independent analysis lifecycle
+
+DINOv3 analysis is queued by default after successful media import but runs as a separate, persisted work unit. Model/runtime unavailability leaves analysis pending and does not invalidate the import. Embedding or search errors are reported on the analysis job, not by rolling back media. Provide a separate batch analysis/reanalysis action for existing library items and for new model/preprocessing versions. Preserve older analysis outputs and never silently overwrite human-confirmed relation or representative decisions. Display ingest and analysis status independently.
