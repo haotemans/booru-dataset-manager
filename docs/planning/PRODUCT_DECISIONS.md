@@ -413,3 +413,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Never compare embeddings from incompatible versions as if they shared one space. Track per-image analysis status and version, index build status, errors and progress. Rebuild work is idempotent and bounded; newly ingested images must be scheduled for the target version while migration runs. Promotion requires coverage/integrity checks and retrieval evaluation. Retain prior version metadata and enough state to rebuild or roll back; garbage-collect old vectors only after successful promotion and an explicit retention policy.
 
 **Status:** User-confirmed architecture; implementation and operational thresholds remain to be completed.
+
+
+## D-043 — Group visual search results by relationship type
+
+**Decision:** Present visual retrieval candidates grouped by relationship type, then sort candidates within each group by calibrated confidence/relevance. Similarity score is not itself a relationship label and must not imply that two images are duplicates or interchangeable.
+
+**Implications:** Keep distinct groups for exact duplicates, resize/recompression near-duplicates, crop/content variations, difference/alternate artwork, alternate poses/frames, same subject in another scene, same artist, and similar composition/style where evidence supports those labels. Show the relationship type, confidence or ranking signal, and evidence/provenance where available. Only actions appropriate to the relationship type are enabled; broad visual similarity must not be treated as permission to collapse variants or select a representative image. Unknown/ambiguous relationships remain unclassified candidates for review.
+
+**Status:** User-confirmed presentation policy; UI implementation and usability validation remain to be completed.
