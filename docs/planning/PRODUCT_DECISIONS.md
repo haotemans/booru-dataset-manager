@@ -587,3 +587,16 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Storage policy:** Because complete image backups can be large, expose the backup destination and estimated/required space where practical. Do not silently delete source images, edited files, or restore points to make room. Retention cleanup may remove only older verified backup sets beyond the configured retention count, and must never remove the active library files.
 
 **Status:** User-confirmed requirements; backup format, storage destination, scheduling implementation, consistency strategy and restore UX remain to be designed and implemented.
+
+
+## D-058 — One local restore point with remote backup archival to ModelScope
+
+**Decision:** Keep only one latest verified full restore point locally. Send older restore points to ModelScope (魔搭) as remote backup archives, subject to successful upload and integrity verification.
+
+**Safety invariants:** Create and verify a new full restore point before replacing the previous local restore point. Never delete the previous local point until the new point is complete and verified. Never remove a local older backup until its remote upload has completed and the remote archive can be verified against its manifest/checksums. If authentication, connectivity, quota, upload, or verification fails, retain the local data and report that remote archival is incomplete; do not silently discard backups. Show upload and retention status to the user.
+
+**Restore scope:** Each full restore point must contain original images, derived/edited images (including inpainting/watermark-removal results and crops), database/library state, sidecar metadata, and provenance/version relationships required to restore edits and associate each variant with its source. Restore must validate the archive before replacing active library state and require explicit confirmation before destructive changes.
+
+**Configuration and limits:** The ModelScope destination/repository, authentication method, privacy/visibility, quota and large-file/upload constraints must be confirmed and implemented before relying on remote backups. Do not hard-code credentials in application configuration or logs. Make clear that remote backup is not complete until verification succeeds. If ModelScope is unavailable or unsuitable for the required file sizes or privacy expectations, preserve local backups and ask the user to resolve configuration rather than falling back to destructive cleanup.
+
+**Status:** User-confirmed retention and destination direction; ModelScope integration, secure authentication, archive format, upload/resume behavior, and remote restore remain pending implementation and feasibility validation.
