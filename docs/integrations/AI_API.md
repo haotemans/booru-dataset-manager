@@ -37,6 +37,7 @@ All AI API requests must be serialized as JSON. All accepted operation results m
 - A failed single-item request is recorded as failed/deferred for later manual handling; do not retry indefinitely.
 - Track stable item IDs and make writes idempotent. Overlapping main windows and recovery requests must not duplicate accepted results or overwrite human-reviewed data.
 - Persist the cursor, fallback level, job state and item outcomes. Restart/resume must not re-send accepted work solely because the previous process stopped.
+- A job is not complete while any item remains pending due solely to transient network failure. Keep the job resumable and preserve those item IDs in the recovery queue; resume recovery when connectivity returns. Completion requires every input item to have a successful result or an explicit terminal failed/deferred outcome after applicable content-processing fallbacks.
 - The final window may contain fewer items than the current batch size. Never fabricate padding entries. A job is complete only when every input item is completed or explicitly recorded as failed/deferred after the applicable fallback processing.
 
 

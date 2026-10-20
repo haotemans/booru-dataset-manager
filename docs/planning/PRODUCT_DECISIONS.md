@@ -90,7 +90,7 @@ This file records user-confirmed product decisions. A decision is not a claim th
 - Do not repeat an identical batch-processing failure indefinitely. At a tail, reduce batch size progressively: 8 → 4 → 2 → 1. Transient network failures use bounded same-batch retries with backoff, not batch shrinking. Within each fallback level, advance by that level's batch size. A failed 4-item fallback group is subdivided into 2-item groups; a failed 2-item group is subdivided into single-item groups.
 - A failed single-item request is recorded as failed/deferred for later manual handling; do not retry indefinitely.
 - Persist the main cursor, recovery groups, fallback level and per-item states for resume. The final window may contain fewer items than the current batch size; never add fake padding entries.
-- Mark the job complete only when each input item is completed or explicitly recorded as failed/deferred.
+- Mark the job complete only when every input item has a terminal outcome: successfully completed, or explicitly recorded as a final failed/deferred item after content-processing fallbacks. Items deferred solely because of transient network failure are non-terminal; keep the job resumable and not complete while any such item remains pending. Resume post-scan recovery when connectivity returns.
 
 **Status:** User-confirmed processing policy; scheduler, persistence and tests remain to be implemented.
 ## Deferred decisions
