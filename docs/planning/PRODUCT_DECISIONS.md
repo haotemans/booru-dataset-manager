@@ -808,3 +808,11 @@ Do not expand the first release with additional image-editing tools unless a lat
 **Behavior:** Clearly identify the rejected images and the deletion scope in a confirmation step before deleting. If the user cancels or declines confirmation, keep the images and their associated records unchanged. Avoid deleting unrelated files or data. Report deletion failures rather than treating them as successful.
 
 **Status:** User-confirmed policy; review actions, confirmation UI and safe deletion behavior remain pending implementation and testing.
+
+## D-081 — Batch confirmation for rejected-image deletion
+
+**Decision:** For batch review, collect rejected images into a pending-deletion list. After the batch review, show the full list and require one explicit confirmation before deleting the listed items.
+
+**Behavior:** The confirmation view must make the deletion scope clear. Cancelling leaves all listed images and their associated records unchanged. Do not delete items that are not in the confirmed list; report any deletion failures accurately.
+
+**Status:** User-confirmed policy; pending-deletion list, confirmation UI and deletion implementation remain pending implementation and testing.
