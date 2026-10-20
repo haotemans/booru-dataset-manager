@@ -395,3 +395,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Use persistent vector/index infrastructure and bounded top-k candidate queries rather than loading the full library's embeddings into memory for every image. The broad search may propose relationships but does not automatically establish identity or grouping except for trustworthy source-provided relations and separately validated near-duplicate automation. Keep exact duplicate, near duplicate, difference set, and semantic/visual association as distinct relation types. Index rebuilds and model/preprocessing upgrades must be resumable and versioned; if an index is unavailable or stale, report degraded analysis and schedule repair rather than silently claiming a complete search.
 
 **Status:** User-confirmed retrieval strategy; index technology, candidate limits, query budgets, implementation and performance tests remain to be specified.
+
+
+## D-041 — Confidence-tiered near-duplicate handling
+
+**Decision:** Exact duplicates are identified by content hash and database uniqueness constraints. For non-exact variants, use confidence-tiered handling: high-confidence resize/recompression near-duplicates may be automatically grouped only under a versioned policy validated against labeled examples; medium- and low-confidence candidates are presented for human confirmation. Preserve all files and provenance, and allow all automated decisions to be undone.
+
+**Implications:** Confidence must be calibrated on representative labeled data and include hard negatives such as crops that alter content, alternate artwork/difference images, different poses/scenes, and similar compositions. Do not hard-code an arbitrary similarity threshold. Human-confirmed decisions take precedence over automated grouping and must retain audit history. Near-duplicate grouping is distinct from source-confirmed difference-set association and must not collapse meaningful variants in export.
+
+**Status:** User-confirmed policy; calibration, confidence bands, implementation and tests remain to be completed.

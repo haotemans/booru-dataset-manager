@@ -42,3 +42,8 @@ For each source-confirmed difference set, the default is automatic selection of 
 ## Retrieval evaluation and scale
 
 Evaluate each retrieval layer separately: exact-hash correctness, source-relationship ingestion, near-duplicate recall/precision, and broad cross-source candidate recall with review workload. Include same-image variants, difference sets, same-character different-pose/scene cases, same-style hard negatives and unrelated images. Benchmark at realistic library sizes (including 100k and 1M items), measuring query latency, memory use, index build/rebuild time, and incremental update behavior. Candidate top-k and latency budgets should be chosen from measured results, not assumed. Verify that stale or failed indexes are surfaced as incomplete analysis.
+
+
+## Confidence calibration for near duplicates
+
+Calibrate separate confidence bands on a versioned labeled evaluation set. Measure false-positive rate for each hard-negative category, not only aggregate precision, and measure recall for resize/recompression positives across format, resolution and compression changes. Automatic grouping must be disabled unless the high-confidence band meets the project's explicit acceptance criteria. Medium/low-confidence pairs remain review candidates. Re-evaluate whenever model, preprocessing, distance metric or index implementation changes, and preserve the exact policy version with each decision.

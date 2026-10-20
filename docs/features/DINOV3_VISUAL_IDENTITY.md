@@ -138,3 +138,13 @@ For a newly imported image, run candidate discovery in layers:
 4. **Broad visual associations:** search across the entire library, including other providers, for potential related artwork, poses, scenes or subjects. These are candidates for review unless an explicit trustworthy source relation applies.
 
 Do not restrict cross-source discovery by provider. Use bounded top-k queries and index-backed search; do not load every embedding into memory per image. Persist model and preprocessing versions with vectors and results. Index rebuilds must be resumable. If the index is stale, unavailable or incompatible, show that visual search is incomplete and queue repair/reindexing rather than reporting a complete result.
+
+
+## Confidence-tiered near-duplicate decisions
+
+- **Exact match:** canonical content hash and database uniqueness decide byte-identical media.
+- **High confidence:** only resize/recompression-style near duplicates may be auto-grouped, after the versioned policy passes evaluation on labeled data.
+- **Medium or low confidence:** show candidates for human confirmation; do not auto-group.
+- **Uncalibrated or incompatible model/index:** do not auto-group; report analysis as pending/incomplete or require review.
+
+Do not invent universal numeric thresholds. Calibrate confidence bands using labeled positive pairs and hard negatives, including meaningful difference variants, crops, alternate poses/scenes, different identities and composition/style lookalikes. Keep original files, provenance and undo history. Human-confirmed relation decisions override automation until explicitly changed. Keep near-duplicate relations separate from broader difference-set associations and preserve meaningful variants in export.
