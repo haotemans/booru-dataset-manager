@@ -190,3 +190,10 @@ The initial target library size is up to 50,000 images. Do not design the initia
 ## Inference device selection
 
 Automatically detect supported GPU acceleration and use it only after the configured runtime and model initialize successfully on that device. If GPU support is absent, incompatible, or initialization/inference fails recoverably (including resource exhaustion), fall back to CPU when safe. Preserve committed valid results and never mark incomplete output as complete. Retry only affected work, report the selected device and fallback reason, and keep analysis failures independent of ingestion. The implementation must reflect the actual packaged inference runtime's capabilities; GPU availability is not proof of model/runtime compatibility. Benchmark CPU and supported accelerated paths on representative hardware before setting performance expectations.
+
+
+## Model distribution and storage
+
+The application manages DINOv3 model downloads; users do not need to fetch model artifacts manually. Model files are separate from the application installer and are stored in a dedicated model directory. Provide a sensible platform-appropriate default under the user's application data area, and allow the user to choose a different directory to control disk usage. Show the active model path and provide a way to change it. Download into temporary files, verify integrity against trusted published checksums or equivalent release metadata, and only promote the files into the active model location after verification succeeds. Interrupted or invalid downloads must not be treated as usable models; retain any previously working model until a replacement is verified. Keep model artifacts and versions identifiable so runtime compatibility and embedding migration policies can be enforced.
+
+**Status:** User-confirmed distribution policy; exact model artifact source, checksum metadata, directory UX, download recovery and implementation remain to be completed.

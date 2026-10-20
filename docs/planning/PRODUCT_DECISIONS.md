@@ -476,3 +476,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Treat out-of-memory and runtime/device failures as recoverable device failures where safe. Preserve already committed analysis results, avoid marking incomplete outputs as complete, and retry the affected work on CPU when feasible. Report the selected device and fallback reason in diagnostics/status. CPU fallback must remain bounded and must not block ingestion or unrelated desktop operations. Device/runtime support varies by packaged backend and hardware; implement against the selected runtime's actual capabilities rather than assuming universal GPU support.
 
 **Status:** User-confirmed policy; runtime-specific detection, fallback behavior and benchmarks remain to be completed.
+
+
+## D-050 — Application-managed DINOv3 model downloads
+
+**Decision:** The application downloads DINOv3 model artifacts separately from the application installer. Users may choose the model storage directory; the application provides a sensible platform-appropriate default under the user's application data area.
+
+**Implications:** Users should not have to manually download or place model files. Display the configured model path and allow it to be changed. Download to temporary files and verify integrity using trusted checksum/release metadata before making a model active. An interrupted or invalid download must not be considered usable, and a previously working model remains available until a replacement is verified. Keep artifact/version identity tied to runtime compatibility and versioned embedding migration.
+
+**Status:** User-confirmed policy; artifact source, checksum mechanism, path-selection UX, recovery behavior, implementation and tests remain to be completed.
