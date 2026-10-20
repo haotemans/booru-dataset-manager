@@ -1025,3 +1025,11 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - When a new character or artist is successfully added from Danbooru metadata, its card appears first in the relevant list.
 - Download activity alone does not reorder an existing character or artist; ordering reflects when the local record was added, not the latest image download time.
 - Keep the ordering deterministic across pagination and filtering; changing search terms does not mutate the underlying order.
+
+
+## D-110: Character and Artist Card Cover Images
+
+- Character and Artist cards display a cover image selected from images associated with that character or artist in the local library.
+- By default, use the most recently added associated image as the cover.
+- Cover selection is derived from existing local media; do not download an additional image solely to populate a card cover.
+- If no associated local image is available, show the standard empty-cover placeholder.
