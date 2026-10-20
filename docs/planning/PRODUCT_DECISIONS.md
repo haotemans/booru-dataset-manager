@@ -755,3 +755,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Behavior:** AI detection never directly triggers inpainting or changes the committed image. Users can edit or reject the proposed region and continue with manual selection if detection is unavailable or inaccurate.
 
 **Status:** User-confirmed workflow; region-review UI, selection-to-mask conversion and inpainting integration remain pending implementation and testing.
+
+## D-075 — Batch AI region detection with per-image approval
+
+**Decision:** Support running AI-assisted region detection across multiple images. Batch detection may prepare candidate regions/selections for review, but each image's proposed region must be reviewed and confirmed individually before inpainting is generated for that image. Each repaired image must then be explicitly approved before replacing its current committed output, consistent with D-068 and D-074.
+
+**Behavior:** Batch processing must not turn detection into unattended destructive editing. Rejected or failed items leave their current outputs unchanged; users can adjust individual selections and proceed manually. Show per-image progress and outcomes so failures do not obscure successful items.
+
+**Status:** User-confirmed workflow; batch scheduling, per-image review states, failure handling and UI remain pending implementation and testing.
