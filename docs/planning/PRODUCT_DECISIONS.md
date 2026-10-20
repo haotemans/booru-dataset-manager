@@ -1033,3 +1033,9 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - By default, use the most recently added associated image as the cover.
 - Cover selection is derived from existing local media; do not download an additional image solely to populate a card cover.
 - If no associated local image is available, show the standard empty-cover placeholder.
+
+
+## D-111: Automatic Cover Refresh
+
+- Character and Artist card covers update automatically to the most recently added associated local image.
+- No manual cover pinning or cover-selection control is included in the initial design.
