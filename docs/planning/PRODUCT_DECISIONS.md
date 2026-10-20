@@ -1053,3 +1053,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Character and Artist associated-image views include a Tag search field.
 - Search filters the images in the current character or artist context by their tags.
 - Filtering updates live as the user types, without requiring a submit action.
+
+
+## D-114: Export Scope Ignores Image-List Search Filters
+
+- When exporting from a Character or Artist context, the default "all images" option exports every locally associated image in that context.
+- The Tag search/filter currently applied to the visible image list does not narrow the "all images" export scope.
+- Users may explicitly choose a selected-image export when they want only specific images.
