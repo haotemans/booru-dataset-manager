@@ -1039,3 +1039,10 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 
 - Character and Artist card covers update automatically to the most recently added associated local image.
 - No manual cover pinning or cover-selection control is included in the initial design.
+
+
+## D-112: Associated Image Layout
+
+- Opening a Character or Artist card shows its associated local images.
+- Support both Grid and Masonry layouts for these images.
+- Grid is the default layout; users can switch to Masonry.
