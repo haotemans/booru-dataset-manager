@@ -152,3 +152,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 - Whether automatic representative recommendations are enabled by default for newly discovered groups.
 - Whether a visual group can contain different crops/poses/frames versus only near-duplicate versions. The relation types must remain distinct even if groups share one UI.
 - Which DINOv3 artifact/runtime and nearest-neighbor index meet license, compatibility, memory and latency requirements.
+
+
+## D-014 — Serial request pacing after HTTP 429
+
+**Decision:** After a provider profile enters serial mode following HTTP 429, apply a configurable minimum interval between request starts, defaulting to 1 second. This interval remains in force after the cooldown expires and while requests are serial; it is separate from the 429 cooldown and any server-provided `Retry-After` delay.
+
+**Implications:** Requests for the affected profile must not overlap while active concurrency is 1, and the scheduler must enforce the configured spacing between request starts. The 429 cooldown follows D-013: use `Retry-After` when present, otherwise 5 minutes; a new 429 resets the active concurrency to 1 and restarts the cooldown. Keep pacing configuration scoped to the provider profile.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
