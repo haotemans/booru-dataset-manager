@@ -550,3 +550,16 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Safety requirements:** Use a database-consistent snapshot/backup mechanism rather than copying a live database naively. Never overwrite the only valid backup with a failed backup. Validate backup completion and report failures clearly. Restore must explain which current state will be replaced, preserve a recoverable pre-restore snapshot where practical, and not silently delete media or model files. Backup retention must delete only backups created and managed by this application. Exact scheduling behavior, backup format, compatibility policy and implementation remain to be specified.
 
 **Status:** User-confirmed product direction; implementation pending.
+
+
+## D-057 — Automatic database and metadata backups
+
+**Decision:** The application automatically backs up the database and essential library/task metadata once per day, retaining the seven most recent successful backups. Provide a manual “Back up now” action and a restore entry point as well.
+
+**Scope:** Routine backups do not duplicate original media files or downloaded model artifacts. The backup must contain enough database and metadata state to restore the library's records and task state consistently, and must use a database-consistent snapshot mechanism rather than copying a live database unsafely. Write backups atomically where practical, validate backup completion, and never replace a known-good backup with a partial one. Surface backup failures and the timestamp of the last successful backup in the UI.
+
+**Storage and restore safeguards:** Keep backups in a designated backup location under the managed root by default, while making the location visible. Retention removes only older application-created backup files and must not delete user media or exports. Before restoring, explain that current database/library state will be replaced, require explicit confirmation, and create a safety backup of the current state where feasible. Clarify that media and model files are not included, so a metadata restore alone cannot recover deleted originals.
+
+**Defaults:** Daily schedule; retain seven most recent successful backups. Exact scheduling behavior when the application is not running, backup format, storage limits and implementation remain to be specified.
+
+**Status:** User-confirmed product direction; implementation pending.
