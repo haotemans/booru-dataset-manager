@@ -126,3 +126,15 @@ Representative-only export includes the selected image for each eligible differe
 ## Independent analysis lifecycle
 
 DINOv3 analysis is queued by default after successful media import but runs as a separate, persisted work unit. Model/runtime unavailability leaves analysis pending and does not invalidate the import. Embedding or search errors are reported on the analysis job, not by rolling back media. Provide a separate batch analysis/reanalysis action for existing library items and for new model/preprocessing versions. Preserve older analysis outputs and never silently overwrite human-confirmed relation or representative decisions. Display ingest and analysis status independently.
+
+
+## Layered candidate retrieval
+
+For a newly imported image, run candidate discovery in layers:
+
+1. **Exact duplicate:** use the canonical content hash and database uniqueness constraint; do not rely on embeddings.
+2. **Known source relationships:** attach trustworthy provider-declared difference-set relationships and provenance when available.
+3. **Near-duplicate candidates:** query a persistent, indexed embedding/search structure for high-similarity candidates. Automatic grouping is allowed only under the separately evaluated near-duplicate policy.
+4. **Broad visual associations:** search across the entire library, including other providers, for potential related artwork, poses, scenes or subjects. These are candidates for review unless an explicit trustworthy source relation applies.
+
+Do not restrict cross-source discovery by provider. Use bounded top-k queries and index-backed search; do not load every embedding into memory per image. Persist model and preprocessing versions with vectors and results. Index rebuilds must be resumable. If the index is stale, unavailable or incompatible, show that visual search is incomplete and queue repair/reindexing rather than reporting a complete result.

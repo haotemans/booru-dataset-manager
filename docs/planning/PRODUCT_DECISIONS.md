@@ -386,3 +386,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Use vision-based aesthetic assessment and quality evidence to rank candidates. Prioritize overall visual appeal and degree of completion; use visual clutter, distracting artifacts and visible text as supporting factors rather than rigid rejection rules. Do not substitute resolution, source priority, file size or DINOv3 similarity for aesthetic quality. If the assessment service is unavailable or cannot provide a sufficiently reliable ranking, leave the group marked as needing representative selection instead of silently choosing arbitrarily. Preserve all original variants, record selection rationale and model/prompt/policy versions, and keep manual overrides with audit history. Crop proposals still require explicit human approval.
 
 **Status:** User-confirmed policy; aesthetic-ranking implementation, evaluation, fallback state and tests remain to be completed.
+
+
+## D-040 — Tiered, indexed visual candidate retrieval
+
+**Decision:** Use a layered retrieval strategy for each newly imported image. First reconcile exact duplicates through the hash/database uniqueness path and inspect known source-confirmed difference-set relationships; then retrieve indexed high-similarity near-duplicate candidates; finally search the broader library for cross-source visual-association candidates. Provider/source boundaries must not prevent cross-source discovery.
+
+**Implications:** Use persistent vector/index infrastructure and bounded top-k candidate queries rather than loading the full library's embeddings into memory for every image. The broad search may propose relationships but does not automatically establish identity or grouping except for trustworthy source-provided relations and separately validated near-duplicate automation. Keep exact duplicate, near duplicate, difference set, and semantic/visual association as distinct relation types. Index rebuilds and model/preprocessing upgrades must be resumable and versioned; if an index is unavailable or stale, report degraded analysis and schedule repair rather than silently claiming a complete search.
+
+**Status:** User-confirmed retrieval strategy; index technology, candidate limits, query budgets, implementation and performance tests remain to be specified.

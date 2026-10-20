@@ -37,3 +37,8 @@ For source-confirmed difference sets, evaluate automatic representative ranking 
 ## Aesthetic-first representative ranking
 
 For each source-confirmed difference set, the default is automatic selection of the single most aesthetically appealing image. Evaluate agreement with human preferences using top-1 accuracy/agreement, pairwise preference agreement, and disagreement analysis grouped by content type and common failure mode. Aesthetic quality and degree of completion are primary; distraction, text and technical defects are supporting evidence. Do not treat resolution, source priority, file size or embedding similarity as proxies for aesthetic appeal. If the model cannot produce a sufficiently reliable ranking, leave the representative unset and request manual selection. Human overrides must be preserved and excluded from being silently overwritten by later runs.
+
+
+## Retrieval evaluation and scale
+
+Evaluate each retrieval layer separately: exact-hash correctness, source-relationship ingestion, near-duplicate recall/precision, and broad cross-source candidate recall with review workload. Include same-image variants, difference sets, same-character different-pose/scene cases, same-style hard negatives and unrelated images. Benchmark at realistic library sizes (including 100k and 1M items), measuring query latency, memory use, index build/rebuild time, and incremental update behavior. Candidate top-k and latency budgets should be chosen from measured results, not assumed. Verify that stale or failed indexes are surfaced as incomplete analysis.
