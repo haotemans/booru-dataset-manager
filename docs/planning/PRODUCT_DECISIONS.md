@@ -1105,3 +1105,12 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Before removing a duplicate file entry, preserve all valid character, artist, tag, and other metadata associations by consolidating them onto the surviving media record.
 - Do not automatically delete pHash near-duplicate candidates; show them for user review and require explicit confirmation before deletion.
 - DINOv3 similarity candidates also remain review-only.
+
+
+## D-121: Combined pHash and DINOv3 Deduplication
+
+- Use pHash as the first-stage detector for exact-looking and near-identical images. Treat Hamming distance <= 2 as the strict pHash candidate threshold.
+- Use DINOv3 as a complementary second-stage detector to find visually related images that pHash may miss, including images with meaningful visual differences.
+- Combine candidate results from both methods in the deduplication review workflow. Neither signal alone proves that two images should be deleted.
+- Keep pHash near-duplicate and DINOv3 candidates review-only; require explicit user confirmation before deletion. Only byte-for-byte identical files confirmed by a cryptographic content hash qualify for automatic deduplication.
+- Preserve valid shared metadata and character/artist/tag associations when consolidating exact duplicate records.
