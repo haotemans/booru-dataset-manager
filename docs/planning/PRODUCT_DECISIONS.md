@@ -278,3 +278,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Group cooldown and adaptive concurrency state are shared across all group members. Other in-flight requests are not cancelled solely because a member triggered 429; they may complete, but no new group requests dispatch until cooldown expires. Configurations outside the group are unaffected. The 429 resets the shared group's recovery progress.
 
 **Status:** User-confirmed policy; scheduler integration, persistence, and tests remain to be completed.
+
+
+## D-028 — Default maximum concurrency for a new shared rate-limit group
+
+**Decision:** A newly created shared rate-limit group defaults to a group-wide maximum concurrency of 2, regardless of the sum or highest value of member configurations' individual maximums. Users may explicitly increase or decrease the group maximum.
+
+**Implications:** Creating a shared group must not silently increase aggregate request pressure. Each member remains constrained by its own configured/effective limit as well as the group's aggregate/effective limit. The group's default maximum is independent of member count and member-level settings. Existing HTTP 429 cooldown and gradual recovery rules remain in force.
+
+**Status:** User-confirmed policy; settings UI, persistence, scheduler integration, and tests remain to be completed.

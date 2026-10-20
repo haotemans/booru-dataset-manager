@@ -83,3 +83,8 @@ Each API configuration retains its own configured maximum concurrency. A shared 
 ### HTTP 429 behavior for shared rate-limit groups
 
 An HTTP 429 from any member configuration places the entire explicitly shared rate-limit group into cooldown. No member may dispatch new requests until the cooldown expires. In-flight requests are not cancelled solely because another member received 429. After cooldown, the group resumes at active concurrency 1 and gradually recovers using the shared success counter. Honor Retry-After when present, otherwise use the configured default cooldown. Retry the request that received 429 at most once; if it fails again, defer its affected IDs to recovery. Configurations outside the group are unaffected.
+
+
+### Default group concurrency maximum
+
+A newly created shared rate-limit group defaults to an aggregate maximum concurrency of 2, regardless of the individual maxima or the number of member configurations. Users can change the group maximum explicitly. Requests must still satisfy both member-level and group-level effective limits; group creation does not silently increase aggregate concurrency.
