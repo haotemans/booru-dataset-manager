@@ -161,3 +161,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Requests for the affected profile must not overlap while active concurrency is 1, and the scheduler must enforce the configured spacing between request starts. The 429 cooldown follows D-013: use `Retry-After` when present, otherwise 5 minutes; a new 429 resets the active concurrency to 1 and restarts the cooldown. Keep pacing configuration scoped to the provider profile.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-015 — Serial request interval timing
+
+**Decision:** The minimum request interval in serial mode is configurable, defaults to 1 second, and is measured from the start of the previous request to the start of the next request. If the previous request itself takes at least the configured interval, do not add extra waiting time after it completes.
+
+**Implications:** The scheduler enforces request-start spacing rather than a fixed post-completion sleep. This interval is separate from the HTTP 429 cooldown and applies while the profile is in serial mode. A new 429 still resets the active concurrency limit to 1 and restarts the cooldown.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
