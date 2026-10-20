@@ -1008,3 +1008,12 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 
 - Character and Artist cards use an adaptive grid layout.
 - The number of cards per row adjusts automatically to the available window width.
+
+
+## D-108 Pagination for Character and Artist cards
+
+- Character and Artist card lists use pagination rather than infinite scrolling.
+- Default page size is 50 cards; users can choose 20, 50, or 100 cards per page.
+- Provide previous/next controls and direct page-number navigation.
+- Tag search filters results immediately and resets pagination to the first page.
+- Render/load only the current page of cards to control resource usage.
