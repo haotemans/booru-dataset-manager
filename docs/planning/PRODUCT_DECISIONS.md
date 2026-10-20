@@ -705,3 +705,11 @@ When a daily, weekly or monthly tier overlaps, a single restore point may satisf
 **Safety:** Validate the new output and ensure it is readable before replacement. Perform the final replacement atomically where supported so an interrupted write does not leave a partial output. Keep the current output until the replacement is ready and confirmed.
 
 **Status:** User-confirmed behavior; preview lifecycle, atomic replacement and cleanup remain pending implementation and testing.
+
+## D-069 — Unified image editing tools in the review page
+
+**Decision:** Integrate image editing into the existing review page rather than creating separate editing screens. Provide a unified editing workspace there, with selectable tools such as watermark removal and inpainting, and support previewing the result before the user confirms replacement of the current output.
+
+**Workflow:** Keep the review context visible while editing so the user can assess the image and decide whether to accept the result. Reuse the existing source re-fetch, saved edit parameters/masks, preview lifecycle and safe replacement rules. Do not create extra retained image versions as part of the editing workflow.
+
+**Status:** User-confirmed direction; review-page layout, tool switching, editor integration and interaction details remain pending implementation and testing.
