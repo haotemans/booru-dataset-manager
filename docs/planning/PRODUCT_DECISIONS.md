@@ -197,3 +197,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** A task cannot bypass a cooldown by issuing requests through another worker that uses the same profile. Other provider profiles remain independent. Persist profile-level cooldown and active concurrency state so task pause/resume or application restart does not inadvertently bypass the gate.
 
 **Status:** User-confirmed policy; implementation and tests remain to be completed.
+
+
+## D-019 — Persisted cooldown deadline across restarts
+
+**Decision:** Persist an absolute cooldown deadline for each provider profile. On application restart, wait only until that deadline; if it has already passed, the cooldown is considered elapsed and the scheduler may resume according to the existing serial-first recovery policy.
+
+**Implications:** Persist the deadline in durable storage with the profile-level rate-limit state. Account for system clock changes defensively: if the wall clock is moved backward or the deadline cannot be trusted, fail conservatively by retaining serial mode and re-establishing a safe cooldown rather than raising concurrency unexpectedly. Do not reset the cooldown to a full duration on every restart.
+
+**Status:** User-confirmed policy; implementation and tests remain to be completed.
