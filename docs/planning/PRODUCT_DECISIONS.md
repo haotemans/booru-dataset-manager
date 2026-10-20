@@ -921,3 +921,10 @@ Implementation pending: confidence/evidence rules, correction suggestions, and r
 Run fast, deterministic tag normalization during image import so ingestion is not delayed by complex checks. Defer source-site metadata lookups, character-variant relationship checks, and ambiguous conflict detection to background processing. Background work must not block core import, must respect Danbooru rate limits and cache lookup results, and must expose pending/failed/unresolved states. Apply only unambiguous, verified automatic corrections; present uncertain corrections for user confirmation. Preserve raw source tags and provenance independently from normalized tags.
 
 Implementation pending: staged normalization pipeline, background task state/retry handling, and UI status.
+
+
+## D-096 Use the agreed primary application navigation
+
+The primary UI navigation consists of seven areas: Dashboard, Artist, Character, Tag Management, API Configuration, Logs, and System Settings. Centralized tag normalization review, unresolved tags, and tag-conflict handling belong in Tag Management. Character identity and variant relationships belong in Character. Image review may provide contextual tag warnings and shortcuts into relevant management workflows, but should not require a separate top-level tag-conflict page. Dashboard summarizes library/task status; Logs expose operational records and failures; System Settings owns application-wide paths, models, backup, and other system-level options; API Configuration owns AI/API provider settings.
+
+Implementation pending: navigation shell, page ownership, and cross-page links.
