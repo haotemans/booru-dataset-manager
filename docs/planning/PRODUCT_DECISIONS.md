@@ -914,3 +914,10 @@ Implementation pending: variant exclusivity metadata/rules, conflict detection, 
 When resolving tag conflicts, automatically correct cases only when a deterministic, verified rule or authoritative Danbooru metadata makes the correction unambiguous. For example, remove a redundant general character tag when a verified specific variant tag is present. For potentially mutually exclusive specific variants, automatically select/remove a tag only if authoritative metadata or a confirmed rule identifies the correct outcome. If evidence is insufficient or ambiguous, show a recommended correction for user confirmation. Preserve original source tags and provenance; do not let speculative AI guesses trigger destructive normalization.
 
 Implementation pending: confidence/evidence rules, correction suggestions, and review workflow.
+
+
+## D-095 Run tag normalization in two stages
+
+Run fast, deterministic tag normalization during image import so ingestion is not delayed by complex checks. Defer source-site metadata lookups, character-variant relationship checks, and ambiguous conflict detection to background processing. Background work must not block core import, must respect Danbooru rate limits and cache lookup results, and must expose pending/failed/unresolved states. Apply only unambiguous, verified automatic corrections; present uncertain corrections for user confirmation. Preserve raw source tags and provenance independently from normalized tags.
+
+Implementation pending: staged normalization pipeline, background task state/retry handling, and UI status.
