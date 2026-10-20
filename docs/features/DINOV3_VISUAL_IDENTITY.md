@@ -148,3 +148,10 @@ Do not restrict cross-source discovery by provider. Use bounded top-k queries an
 - **Uncalibrated or incompatible model/index:** do not auto-group; report analysis as pending/incomplete or require review.
 
 Do not invent universal numeric thresholds. Calibrate confidence bands using labeled positive pairs and hard negatives, including meaningful difference variants, crops, alternate poses/scenes, different identities and composition/style lookalikes. Keep original files, provenance and undo history. Human-confirmed relation decisions override automation until explicitly changed. Keep near-duplicate relations separate from broader difference-set associations and preserve meaningful variants in export.
+
+
+## Model and embedding version migration
+
+Treat the model artifact/version, runtime/export format, preprocessing parameters, embedding dimensions/normalization and distance metric as a compatibility identity. Persist that identity with each embedding and index. Do not compare incompatible embedding spaces directly.
+
+For upgrades, keep the active index serving queries while a resumable background job computes the target-version embeddings and builds a separate index. Ingested media must also be queued for the target version during migration. Track per-item and overall progress, failures, retries and coverage. Validate embedding/index integrity and retrieval quality before an atomic active-index switch. On interruption or validation failure, keep the previous index active and resume or retry the target build. Preserve rollback capability until the new index is accepted; do not delete prior vectors prematurely.

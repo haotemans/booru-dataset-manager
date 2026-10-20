@@ -47,3 +47,8 @@ Evaluate each retrieval layer separately: exact-hash correctness, source-relatio
 ## Confidence calibration for near duplicates
 
 Calibrate separate confidence bands on a versioned labeled evaluation set. Measure false-positive rate for each hard-negative category, not only aggregate precision, and measure recall for resize/recompression positives across format, resolution and compression changes. Automatic grouping must be disabled unless the high-confidence band meets the project's explicit acceptance criteria. Medium/low-confidence pairs remain review candidates. Re-evaluate whenever model, preprocessing, distance metric or index implementation changes, and preserve the exact policy version with each decision.
+
+
+## Upgrade acceptance and promotion checks
+
+A target-version index must not become active solely because the build job reports completion. Validate expected embedding coverage, absence of incompatible vectors, index integrity, and retrieval quality on a versioned evaluation set (including near-duplicate positives and hard negatives). Record model/runtime/preprocessing/index versions and evaluation results. Promotion is an atomic switch; failure leaves the old index active. Re-run evaluation when the model artifact, preprocessing, embedding normalization, metric or index implementation changes.

@@ -404,3 +404,12 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Implications:** Confidence must be calibrated on representative labeled data and include hard negatives such as crops that alter content, alternate artwork/difference images, different poses/scenes, and similar compositions. Do not hard-code an arbitrary similarity threshold. Human-confirmed decisions take precedence over automated grouping and must retain audit history. Near-duplicate grouping is distinct from source-confirmed difference-set association and must not collapse meaningful variants in export.
 
 **Status:** User-confirmed policy; calibration, confidence bands, implementation and tests remain to be completed.
+
+
+## D-042 — Versioned visual embeddings and background migration
+
+**Decision:** Model, exported runtime/model artifact, preprocessing configuration and embedding schema are versioned together. Upgrades retain the currently active embedding/index while a new version is built in the background. Queries continue using the active compatible index until the new index is validated and atomically promoted. Interrupted or failed rebuilds are resumable; the old index remains available for rollback.
+
+**Implications:** Never compare embeddings from incompatible versions as if they shared one space. Track per-image analysis status and version, index build status, errors and progress. Rebuild work is idempotent and bounded; newly ingested images must be scheduled for the target version while migration runs. Promotion requires coverage/integrity checks and retrieval evaluation. Retain prior version metadata and enough state to rebuild or roll back; garbage-collect old vectors only after successful promotion and an explicit retention policy.
+
+**Status:** User-confirmed architecture; implementation and operational thresholds remain to be completed.
