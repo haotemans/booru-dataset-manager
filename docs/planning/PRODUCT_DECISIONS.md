@@ -631,3 +631,17 @@ This file records user-confirmed product decisions. A decision is not a claim th
 **Upload and recovery:** Uploads should be resumable where supported, verify each object after upload, and commit a snapshot manifest only after all referenced objects are present and verified. Interrupted uploads must not create a valid-looking complete restore point or trigger cleanup of the only valid local copy. Backups remain unencrypted at the application layer and target a private ModelScope repository as separately decided; actual ModelScope object, quota and API capabilities must be validated before implementation.
 
 **Status:** User-confirmed design direction; object layout, database snapshot/delta format, ModelScope API feasibility, restore-chain limits, remote garbage collection and failure-injection tests remain to be designed and implemented.
+
+
+## D-062 — Tiered retention for remote incremental restore points
+
+**Decision:** Use tiered retention for verified remote restore points in the private ModelScope repository:
+- Keep one daily restore point for each of the most recent 7 days.
+- Keep one weekly restore point for each of the most recent 4 weeks.
+- Keep one monthly restore point for each of the most recent 12 months.
+
+When a daily, weekly or monthly tier overlaps, a single restore point may satisfy multiple tiers. Prefer the most recent verified restore point within the relevant period. Retention applies to logical restore points, while content-addressed file objects may be shared across snapshots.
+
+**Deletion safety:** Remove an obsolete restore point only after confirming that it is outside all retention tiers and not otherwise pinned by the user. Then garbage-collect an object only if no retained restore point or active library state references it, and only after a safety grace period and verified inventory. The latest verified local restore point must remain protected. If the system cannot establish reachability or upload/restore status, retain the data and report cleanup as incomplete.
+
+**Status:** User-confirmed retention policy; scheduler, tier selection, user-pinned restore points and reference-safe garbage collection remain pending implementation and testing.
