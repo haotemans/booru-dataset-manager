@@ -63,8 +63,8 @@ pub(super) fn prepare(
     }
     Ok(PreparedImage {
         id,
-        width,
-        height,
+        width: rgb.width(),
+        height: rgb.height(),
         data_url: format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)),
     })
 }

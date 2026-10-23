@@ -141,12 +141,15 @@ pub fn python_command() -> Command {
                 "python".into()
             }
         });
-    let mut command = Command::new(python);
     #[cfg(windows)]
-    {
+    let command = {
         use std::os::windows::process::CommandExt;
+        let mut command = Command::new(python);
         command.creation_flags(0x08000000);
-    }
+        command
+    };
+    #[cfg(not(windows))]
+    let command = Command::new(python);
     command
 }
 
