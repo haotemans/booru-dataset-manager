@@ -4,6 +4,8 @@
 
 Workspace compiles; dependency boundaries enforced; CI runs format, tests and clippy. Record actual CI status. No feature may be called verified without a passing check or attached evidence.
 
+The collection catalog slice is now implemented: Danbooru Tag metadata lookup, explicit add confirmation, SQLite v1 records, duplicate reuse, restart loading and empty-record deletion. Offline validation passes; successful live/authenticated lookup remains unverified. This does not satisfy the media-core or provider-ingestion exit gates below. See [implementation status](IMPLEMENTATION_STATUS.md) and [collection workflow](../features/COLLECTION_CATALOG.md).
+
 ## P1 — durable media core
 
 Implement SQLite migrations, media/source entities, managed filesystem storage, atomic sidecar writes, orphan recovery, original-dimension gate and database-enforced MD5 duplicate prevention. Exit gate: integration tests cover interrupted download/import, duplicate races, unknown dimensions and database restart.

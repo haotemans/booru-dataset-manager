@@ -7,4 +7,20 @@ rust-version.workspace = true
 [dependencies]
 bdm-domain = { path = "../domain" }
 bdm-ports = { path = "../ports" }
+bdm-config = { path = "../config" }
+base64 = "0.22"
 thiserror.workspace = true
+serde.workspace = true
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+sha2 = "0.10"
+md-5 = "0.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+tempfile = "3"
+
+[dev-dependencies]
+bdm-application = { path = "../application" }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"] }

@@ -6,8 +6,28 @@ members = ["apps/desktop", "crates/domain", "crates/ports", "crates/application"
 version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
-rust-version = "1.78"
+rust-version = "1.88"
 
 [workspace.dependencies]
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
+
+# Keep the distributed development executable fast for full-resolution image edits.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+[profile.dev.package.moxcms]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

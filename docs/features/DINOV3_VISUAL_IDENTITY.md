@@ -1,5 +1,11 @@
 # DINOv3 visual identity and representative selection
 
+Background/content-variant review (2026-10-22): “筛查背景／内容变化的相似图” defaults on for new scans with an adjustable DINOv3 review threshold (default 0.95, range 0.85–0.995). Presets 0.95/0.92/0.90 and the numeric control persist across restarts; each job snapshots its setting. This is candidate retrieval only, not automatic subject segmentation or identity proof. Whole-image features can still miss heavy background changes or confuse different poses. Automatic deletion retains pHash ≤2 AND compatible cosine ≥0.997. Small libraries (up to 2,000 feature rows) use streamed exact cosine comparison across compatible cached features; larger libraries add one-bit adjacent LSH buckets with existing retrieval caps and remain approximate. Automatic import batches search the full cached library; manual scans retain their selected scope. Human rejections survive rescans. No new model or inference is required when cached vectors are valid.
+
+Dashboard now shows per-job automatic removals and discovered-pair counts, one latest completed job and collapsed history, with direct review/rescan entry points. Old jobs explicitly lack statistics. Candidates are sorted by cosine, paginated five per page, shown in larger paired previews with dimensions and original-view entry restricted to the pair. The review threshold can be lowered when variants are missing, with increased false positives expected; only explicit review actions delete those candidates.
+
+Current implementation uses the final product decisions D-123–132: pHash distance ≤2 AND compatible DINOv3 cosine ≥0.997 permit permanent deduplication with survivor ranking, association consolidation and audit history. A single signal remains review-only. These later decisions supersede the older non-destructive duplicate-grouping policy below; meaningful difference sets, broad associations and crop proposals remain separate. See [current delivery and verification](../planning/WORKFLOW_DELIVERY.md) for implemented scope and pending evaluation.
+
 ## Separate concepts
 
 Do not collapse these concepts into one `duplicate` boolean:
@@ -189,7 +195,7 @@ The initial target library size is up to 50,000 images. Do not design the initia
 
 ## Inference device selection
 
-Automatically detect supported GPU acceleration and use it only after the configured runtime and model initialize successfully on that device. If GPU support is absent, incompatible, or initialization/inference fails recoverably (including resource exhaustion), fall back to CPU when safe. Preserve committed valid results and never mark incomplete output as complete. Retry only affected work, report the selected device and fallback reason, and keep analysis failures independent of ingestion. The implementation must reflect the actual packaged inference runtime's capabilities; GPU availability is not proof of model/runtime compatibility. Benchmark CPU and supported accelerated paths on representative hardware before setting performance expectations.
+Use CPU for local DINOv3 inference, as requested on 2026-10-23, even when the installed PyTorch supports CUDA. Do not automatically probe or select CUDA. Preserve committed valid results and never mark incomplete output as complete. Retry only affected work, report the selected device, and keep analysis failures independent of ingestion. Benchmark CPU on representative hardware before setting performance expectations.
 
 
 ## Model distribution and storage

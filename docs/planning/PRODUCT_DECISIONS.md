@@ -902,16 +902,16 @@ Tag normalization should support semantic redundancy rules for character tags, u
 Implementation pending: character/variant relationship source, redundancy rules, and safe normalization behavior.
 
 
-## D-093 Flag potentially conflicting specific variants of the same character
+## D-093 Preserve coexisting character tags and specific variants
 
-When multiple mutually exclusive specific variant/costume tags for the same character appear on one image, do not assume all are valid and do not silently choose one. Use verified Danbooru tag relationships where available to identify likely conflicts, then flag the image for review. Preserve the source tags and avoid automatic destructive removal until the conflict is resolved. This rule is distinct from D-092: a specific variant can replace a redundant general character tag, but multiple specific variants may indicate tagging error and require review.
+User clarification (2026-10-22): an image can depict multiple characters and multiple forms or costumes of the same character. Preserve all specific character tags and unrelated general character tags. Only the verified general→specific relationship in D-092 authorizes removal of its corresponding redundant general tag. Do not infer a conflict or require review merely because several specific variants co-occur, even when an old rule assigned them to an exclusivity group.
 
-Implementation pending: variant exclusivity metadata/rules, conflict detection, and review UI.
+Implemented: co-occurrence no longer produces character-variant conflict warnings; the Character page has no exclusivity-group controls. Legacy group values remain readable without driving normalization.
 
 
 ## D-094 Auto-correct only well-supported tag conflicts
 
-When resolving tag conflicts, automatically correct cases only when a deterministic, verified rule or authoritative Danbooru metadata makes the correction unambiguous. For example, remove a redundant general character tag when a verified specific variant tag is present. For potentially mutually exclusive specific variants, automatically select/remove a tag only if authoritative metadata or a confirmed rule identifies the correct outcome. If evidence is insufficient or ambiguous, show a recommended correction for user confirmation. Preserve original source tags and provenance; do not let speculative AI guesses trigger destructive normalization.
+When resolving tag conflicts, automatically correct cases only when a deterministic, verified rule or authoritative Danbooru metadata makes the correction unambiguous. For example, remove a redundant general character tag when a verified specific variant tag is present. Preserve all coexisting specific character tags under D-093; their shared identity or co-occurrence does not establish a tagging error. Preserve original source tags and provenance; do not let speculative AI guesses trigger destructive normalization.
 
 Implementation pending: confidence/evidence rules, correction suggestions, and review workflow.
 
@@ -932,9 +932,9 @@ Implementation pending: navigation shell, page ownership, and cross-page links.
 
 ## D-097 Automatically discover character-variant relationships with manual correction
 
-The Character area should automatically discover candidate relationships between canonical character tags and specific variant/costume tags using Danbooru tag metadata and other verifiable relationships where available. Users can manually correct, add, or remove relationships. Do not assume Danbooru supplies complete semantic character-variant relationships; distinguish verified relationships from inferred candidates, and avoid applying destructive tag normalization based solely on an uncertain candidate. Feed only sufficiently verified relationships into automatic redundant-tag removal and conflict detection.
+The Character area should automatically discover candidate relationships between canonical character tags and specific variant/costume tags using Danbooru tag metadata and other verifiable relationships where available. Users can manually correct, add, or remove relationships. Do not assume Danbooru supplies complete semantic character-variant relationships; distinguish verified relationships from inferred candidates, and avoid applying destructive tag normalization based solely on an uncertain candidate. Feed only sufficiently verified relationships into automatic redundant-tag removal while preserving coexisting character variants under D-093.
 
-Implementation pending: relationship discovery, confidence/provenance, and character relationship editing UI.
+Implementation update (2026-10-22): active, exact Danbooru character-to-character implications are sufficient evidence for automatic redundant-tag removal, subject to canonical category checks, cycle prevention and persistent human overrides. Cached source-backed candidates are processed locally without repeated per-row confirmation. Inferred relationships still require confirmation; shared base identity alone does not establish exclusivity. The user requested automatic handling of the discovered relations; network refresh remains explicit.
 
 
 ## D-098 Artist and character card navigation; no artist merging
@@ -1202,3 +1202,44 @@ Implementation pending: relationship discovery, confidence/provenance, and chara
 - Automatically retry image downloads that fail, rather than requiring the user to manually restart them.
 - Retry only the images that failed; do not redownload images that were successfully downloaded and validated.
 - Preserve successful downloads and their library records while retries are in progress.
+
+## D-134: Deleting an Artist or Character Also Deletes Its Images
+
+- Deleting an artist/character means the user no longer wants its associated images; do not merely detach the record and leave hidden or dashboard-only media behind.
+- Artist and character views reference the same unique image. Delete the union of images associated with the selected records once, along with image-owned data and all references from other views, even if another artist/character also references an affected image.
+- Preserve unselected artist/character records and unrelated images; recalculate their local counts and covers. Do not recursively delete the other records' images or an entire visual identity group.
+- Before confirmation, show the selected record count and affected unique-image count, plus the affected image list. Cancellation changes neither records nor images. The confirmed scope must include the reviewed record and image IDs.
+- This supersedes the earlier UI interpretation of record deletion as association-only removal. Actual file/sidecar/database cleanup follows the permanent-deletion contract; the current sample implementation remains memory-only.
+
+## D-135: Download Static Images Only by Default
+
+- Default downloads exclude all GIF files, video formats such as WebM/MP4, and other animated images such as APNG and animated WebP/AVIF. Accept only confirmed static original images; unknown type is skipped.
+- Check original-media type before transfer and verify actual format/animation after transfer before committing to the library. Do not download a static thumbnail or extract a frame as a substitute for an excluded original.
+- Record type exclusions as skips rather than failed downloads; do not retry them or count them toward eligible-image targets. Provider Tag API totals remain unchanged.
+- Current code implements the default configuration, preference compatibility and domain type gate. Actual provider discovery/download/decoding remain pending.
+
+## D-136 — Explicit optional second confirmation for image edits
+
+User-requested on 2026-10-22: provide one persistent, explicit switch for whether cropping and watermark inpainting require a second confirmation. Default on preserves preview then confirm. Turning it off changes the execution buttons to Crop and save / Remove watermark and save; clicking runs the operation and saves a validated successful result without a second click. This supersedes D-068's unconditional second-confirmation requirement for these tools only. The initial action remains explicit; drawing a selection alone saves nothing. Snapshot the chosen mode when starting work. Cancel, switch/close before result delivery, invalid results and failed commits must not claim success. Existing source-format, hash, atomic-journal and provenance rules remain. Deletion and generated-text confirmations are unaffected. The edit panel and System Settings share the switch; old preferences default to on.
+
+2026-10-22 responsiveness follow-up: the explicit save runs on a background worker and skips display-preview work in direct mode. Cancel/switch/close before durable intent prevents publication; after a recovery journal has been published, finish the already-authorized edit consistently and track its completion globally. Do not claim cancellation after a successful durable save or discard its metadata update merely because another image is open.
+
+## D-137 — Review candidates for background/content variants
+
+2026-10-22 user feedback: the current deduplication misses images with the same main subject and a changed background. Add a separate adjustable similarity review threshold, persistent in preferences and fixed per scan. Start with 0.95 as a review-only default; support 0.85–0.995 and convenient lower presets. Preserve D-123's strict pHash ≤2 AND cosine ≥0.997 automatic-removal rule. Broad candidates must be inspected rather than equated with automatic duplicates. Reuse valid cached embeddings and improve retrieval recall across batches; avoid silently clearing human rejection decisions. Show detected/removed counts and directly accessible paired review, with compact completed-task history. Whole-image cosine still cannot establish exact foreground identity; foreground segmentation and calibrated recall remain future work.
+
+## D-138 — CPU inference and thumbnail-first review
+
+User-requested on 2026-10-23: local DINOv3 and LaMa inference use CPU even when CUDA is available; do not automatically probe or select CUDA. Opening image review shows the cached thumbnail without decoding the original. Explicitly click Load original for background full-resolution decoding, or Use thumbnail to release it. Switching images or closing review releases the original and resets to thumbnails; stale decode replies must not upload an old image. Original-load failures wait for an explicit retry. The system-viewer Open original action remains available. Crop/inpainting execution still reads source pixels when explicitly requested, and viewport/mask coordinates continue to use source dimensions.
+
+## D-139 — Keep automatically applied character relations out of the collection view
+
+User-requested on 2026-10-23: automatically processed relations must not occupy the character page or imply a second review. Keep applied rules effective; remove their list, counts, status, refresh controls and manual form from that page. Show only unresolved ambiguous relations requiring a decision. Put optional inspection, source refresh, offline retry and manual correction in System Settings → Character relations → Character relation settings. The settings dialog opens only on request; old saved disclosure states cannot restore applied lists on the character page. Preserve existing source processing, validation and manual-removal persistence.
+
+## D-140 — Explicit original-loading preference for review
+
+User-requested on 2026-10-23: add a persistent System Settings → Image viewing → Automatically load originals during review checkbox, default off for new and legacy preferences. Turning it on loads originals in the background when opening review or changing images. Preserve per-image manual loading/thumbnail override without starting another load on idle frames; changing images follows the saved default. Close releases the original; failures retain explicit retry. Explain that crop/inpainting selections made on thumbnails map to original dimensions and saved edits update original files, while zoom/pan only change the view. Keep preview status outside the image canvas. CPU inference remains unchanged.
+
+## D-141: Discover artists from downloaded character images
+
+2026-10-23: User requested less interface copy, more visual controls, better performance and correction of missing artist cards. All artist tags from imported posts automatically create local artist records and associate the same unique media. Existing source provenance is backfilled locally without redownloading. Unknown remote identity/count remain explicit, and future source lookup upgrades the same local record. Settings explanations move to hover, controls retain accessible labels and no new overlays cover artwork. Visible thumbnails decode through bounded background work, counts/covers are cached, and import refreshes are coalesced. This does not automatically expand character collections or start downloads/text optimization.
