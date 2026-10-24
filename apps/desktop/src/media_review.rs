@@ -415,25 +415,6 @@ impl BdmApp {
                                     self.form_error = error;
                                 }
                             }
-                            let can_redownload = !self.demo
-                                && !self.is_capture()
-                                && !self.ingest_active()
-                                && !self.workflow_active()
-                                && self.ingest.stored.get(&id).is_some_and(|stored| {
-                                    stored.edit.is_none() && stored.post.file_url.is_some()
-                                })
-                                && self.media_review.redownload.is_none();
-                            if ui
-                                .add_enabled(can_redownload, egui::Button::new("重新下载原图"))
-                                .on_hover_text(
-                                    "从来源地址重新下载，校验通过后替换当前文件并保留旧文件备份。",
-                                )
-                                .clicked()
-                            {
-                                if let Err(error) = self.start_redownload(ctx, id) {
-                                    self.form_error = error;
-                                }
-                            }
                             ui.checkbox(&mut self.media_review.auto_advance, "判断后自动下一张");
                             ui.label(
                                 RichText::new("← → 切图    滚轮缩放    双击适应")
