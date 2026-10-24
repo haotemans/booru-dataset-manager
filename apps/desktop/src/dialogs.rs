@@ -358,7 +358,7 @@ impl BdmApp {
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.label("每批数量");
+            ui.label("批量发送数量（每次请求）");
             ui.add(egui::DragValue::new(&mut self.profile_draft.request.batch_size).range(1..=8));
             ui.label("超时");
             ui.add(

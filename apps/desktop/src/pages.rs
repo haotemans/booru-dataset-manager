@@ -192,8 +192,14 @@ impl BdmApp {
                 ui.label(RichText::new(&profile.endpoint).size(13.0).color(MUTED));
                 ui.label(
                     RichText::new(format!(
-                        "每批 {}  ·  超时 {} 秒  ·  {}  ·  {}",
-                        profile.request.batch_size,
+                        "批量发送：每次 {} 张图片",
+                        profile.request.batch_size
+                    ))
+                    .strong(),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "超时 {} 秒  ·  {}  ·  {}",
                         profile.request.timeout_seconds,
                         profile.request.json_output.description(),
                         if profile.request.send_images {
