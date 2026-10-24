@@ -272,6 +272,13 @@ impl BdmApp {
                         self.notify(ui.ctx(), &message);
                     }
                 }
+                if !self.image_editor.error.is_empty() {
+                    ui.label(
+                        RichText::new(&self.image_editor.error)
+                            .size(12.0)
+                            .color(DANGER),
+                    );
+                }
                 if self.media_review.redownload.is_some() {
                     ui.label(
                         RichText::new("正在下载原图并校验，完成后会自动替换当前文件…")
@@ -587,13 +594,6 @@ impl BdmApp {
                     {
                         self.editor_start(ui.ctx(), id, false);
                     }
-                }
-                if !self.image_editor.error.is_empty() {
-                    ui.label(
-                        RichText::new(&self.image_editor.error)
-                            .size(12.0)
-                            .color(DANGER),
-                    );
                 }
             });
     }
