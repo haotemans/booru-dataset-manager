@@ -772,7 +772,7 @@ impl BdmApp {
         Ok(())
     }
 
-    fn editor_apply_saved(
+    pub(crate) fn editor_apply_saved(
         &mut self,
         ctx: &egui::Context,
         mut media: bdm_domain::ingest::StoredMedia,

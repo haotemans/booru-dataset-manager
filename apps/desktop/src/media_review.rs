@@ -398,7 +398,11 @@ impl BdmApp {
                                 },
                             );
                         });
-                        if media.edit.is_some()
+                        if self
+                            .ingest
+                            .stored
+                            .get(&id)
+                            .is_some_and(|stored| stored.edit.is_some())
                             && ui
                                 .button("恢复编辑前版本")
                                 .on_hover_text("撤销最近一次裁剪或去水印，从编辑前文件重新开始。")
