@@ -352,15 +352,36 @@ impl BdmApp {
             &mut self.profile_draft.group,
             "留空时独立限流",
         );
+        ui.group(|ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("API 批量发送").strong());
+                egui::ComboBox::from_id_salt("api_batch_size")
+                    .selected_text(format!(
+                        "每次请求 {} 张图片",
+                        self.profile_draft.request.batch_size
+                    ))
+                    .show_ui(ui, |ui| {
+                        for size in 1..=8 {
+                            ui.selectable_value(
+                                &mut self.profile_draft.request.batch_size,
+                                size,
+                                format!("{} 张图片", size),
+                            );
+                        }
+                    });
+            });
+            ui.label(
+                RichText::new("控制一次 API 请求发送几张图片；不会改变最大并发。")
+                    .size(12.0)
+                    .color(MUTED),
+            );
+        });
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.label("最大并发");
             ui.add(egui::DragValue::new(&mut self.profile_draft.concurrency).range(1..=16));
-            ui.separator();
-            ui.label("批量（每次请求）");
-            ui.add(egui::DragValue::new(&mut self.profile_draft.request.batch_size).range(1..=8));
-        })
-        .response
-        .on_hover_text("每次 API 请求同时发送的图片数量，范围 1–8");
+        });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.label("超时");
