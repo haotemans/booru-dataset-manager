@@ -545,6 +545,11 @@ pub fn preview(
     // Preserve unselected pixels exactly and feather the repair at the mask edge.
     let mut composed = decoded.to_rgba8();
     let repair = result.to_rgba8();
+    if !repair_quality_ok(&composed, &repair, &mask_image) {
+        return Err(IngestError::StorageDetails(
+            "模型预览出现异常噪声，已阻止替换原图；请缩小选区或切换修复模型后重试。".into(),
+        ));
+    }
     let weights = mask_edge_weights(&mask_image);
     for (x, y, pixel) in composed.enumerate_pixels_mut() {
         if mask_image.get_pixel(x, y)[0] > 0 {
@@ -574,6 +579,55 @@ pub fn preview(
         regions,
         crop: None,
     })
+}
+
+fn repair_quality_ok(
+    original: &image::RgbaImage,
+    repaired: &image::RgbaImage,
+    mask: &image::GrayImage,
+) -> bool {
+    let mut original_gradient = 0u64;
+    let mut repaired_gradient = 0u64;
+    let mut samples = 0u64;
+    for y in 1..original.height() {
+        for x in 1..original.width() {
+            if mask.get_pixel(x, y)[0] == 0 {
+                continue;
+            }
+            let left = mask.get_pixel(x - 1, y)[0] > 0;
+            let above = mask.get_pixel(x, y - 1)[0] > 0;
+            if !left && !above {
+                continue;
+            }
+            for channel in 0..3 {
+                let original_pixel = original.get_pixel(x, y)[channel] as i32;
+                let repaired_pixel = repaired.get_pixel(x, y)[channel] as i32;
+                if left {
+                    original_gradient += (original_pixel
+                        - original.get_pixel(x - 1, y)[channel] as i32)
+                        .unsigned_abs() as u64;
+                    repaired_gradient += (repaired_pixel
+                        - repaired.get_pixel(x - 1, y)[channel] as i32)
+                        .unsigned_abs() as u64;
+                }
+                if above {
+                    original_gradient += (original_pixel
+                        - original.get_pixel(x, y - 1)[channel] as i32)
+                        .unsigned_abs() as u64;
+                    repaired_gradient += (repaired_pixel
+                        - repaired.get_pixel(x, y - 1)[channel] as i32)
+                        .unsigned_abs() as u64;
+                }
+                samples += (if left { 1 } else { 0 }) + (if above { 1 } else { 0 });
+            }
+        }
+    }
+    if samples < 32 {
+        return true;
+    }
+    let original_average = original_gradient as f32 / samples as f32;
+    let repaired_average = repaired_gradient as f32 / samples as f32;
+    repaired_average <= original_average * 3.5 + 35.0
 }
 
 fn mask_edge_weights(mask: &image::GrayImage) -> Vec<f32> {

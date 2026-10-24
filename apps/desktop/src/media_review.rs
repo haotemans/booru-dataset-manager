@@ -506,7 +506,11 @@ impl BdmApp {
         close
     }
 
-    fn start_redownload(&mut self, ctx: &egui::Context, id: usize) -> Result<(), String> {
+    pub(crate) fn start_redownload(
+        &mut self,
+        ctx: &egui::Context,
+        id: usize,
+    ) -> Result<(), String> {
         let path = self
             .catalog
             .path

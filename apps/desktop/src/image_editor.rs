@@ -236,6 +236,33 @@ impl BdmApp {
                     })
                     .font(medium(16.0)),
                 );
+                let source_available = self
+                    .ingest
+                    .stored
+                    .get(&id)
+                    .is_some_and(|media| media.post.file_url.is_some());
+                let can_redownload = real
+                    && !busy
+                    && !self.ingest_active()
+                    && !self.workflow_active()
+                    && self.image_editor.preview.is_none()
+                    && self.media_review.redownload.is_none();
+                if ui
+                    .add_enabled(can_redownload && source_available, egui::Button::new("重新下载原图"))
+                    .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。")
+                    .clicked()
+                {
+                    if let Err(error) = self.start_redownload(ui.ctx(), id) {
+                        self.image_editor.error = error;
+                    }
+                }
+                if !source_available {
+                    ui.label(
+                        RichText::new("当前记录没有来源原图地址，无法自动下载。")
+                            .size(11.0)
+                            .color(MUTED),
+                    );
+                }
                 ui.add_enabled_ui(!busy && self.image_editor.preview.is_none(), |ui| {
                     ui.checkbox(&mut self.prefs.confirm_image_edits, "编辑后二次确认")
                         .on_hover_text("裁剪和去水印共用；关闭后点击执行按钮即处理并替换当前图片。设置自动记住。删除确认不受影响。");
