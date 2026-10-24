@@ -256,6 +256,13 @@ impl BdmApp {
                         self.image_editor.error = error;
                     }
                 }
+                if self.media_review.redownload.is_some() {
+                    ui.label(
+                        RichText::new("正在下载原图并校验，完成后会自动替换当前文件…")
+                            .size(11.0)
+                            .color(ACCENT),
+                    );
+                }
                 if !source_available {
                     ui.label(
                         RichText::new("当前记录没有来源原图地址，无法自动下载。")

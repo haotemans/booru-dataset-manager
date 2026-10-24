@@ -525,6 +525,7 @@ impl BdmApp {
             .map_err(|_| "无法启动重新下载任务。".to_owned())?;
         self.form_error.clear();
         self.media_review.redownload = Some((id, receiver));
+        self.notify(ctx, "已开始下载原图，请稍候…");
         Ok(())
     }
 
@@ -547,9 +548,12 @@ impl BdmApp {
         match result {
             Ok(media) => {
                 self.editor_apply_saved(ctx, media);
-                self.notify(ctx, "原图已重新下载并替换，旧文件已保留备份。");
+                self.notify(ctx, "原图下载完成，已替换当前图片；旧文件已保留备份。");
             }
-            Err(error) => self.form_error = error,
+            Err(error) => {
+                self.form_error = error.clone();
+                self.notify(ctx, &format!("原图下载失败：{error}"));
+            }
         }
     }
 
