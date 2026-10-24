@@ -248,12 +248,18 @@ impl BdmApp {
                     && self.image_editor.preview.is_none()
                     && self.media_review.redownload.is_none();
                 if ui
-                    .add_enabled(can_redownload && source_available, egui::Button::new("重新下载原图"))
+                    .add_enabled(can_redownload, egui::Button::new("重新下载原图"))
                     .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。")
                     .clicked()
                 {
-                    if let Err(error) = self.start_redownload(ui.ctx(), id) {
+                    if !source_available {
+                        let error = "当前记录没有来源原图地址，无法自动下载。".to_owned();
+                        self.image_editor.error = error.clone();
+                        self.notify(ui.ctx(), &error);
+                    } else if let Err(error) = self.start_redownload(ui.ctx(), id) {
                         self.image_editor.error = error;
+                        let message = self.image_editor.error.clone();
+                        self.notify(ui.ctx(), &message);
                     }
                 }
                 if self.media_review.redownload.is_some() {
