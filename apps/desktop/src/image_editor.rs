@@ -241,21 +241,29 @@ impl BdmApp {
                     .stored
                     .get(&id)
                     .is_some_and(|media| media.post.file_url.is_some());
-                let can_redownload = real
-                    && !busy
-                    && !self.ingest_active()
-                    && !self.workflow_active()
-                    && self.image_editor.preview.is_none()
-                    && self.media_review.redownload.is_none();
-                if ui
-                    .add_enabled(can_redownload, egui::Button::new("重新下载原图"))
+                let redownload_button = ui
+                    .add_enabled(real, egui::Button::new("重新下载原图"))
                     .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。")
-                    .clicked()
-                {
-                    if !source_available {
-                        let error = "当前记录没有来源原图地址，无法自动下载。".to_owned();
-                        self.image_editor.error = error.clone();
-                        self.notify(ui.ctx(), &error);
+                    .clicked();
+                if redownload_button {
+                    let blocked = if busy {
+                        Some("当前有图片处理任务正在运行，请等待完成。")
+                    } else if self.ingest_active() {
+                        Some("当前正在导入图片，请等待导入完成。")
+                    } else if self.workflow_active() {
+                        Some("当前有工作流正在运行，请等待完成。")
+                    } else if self.image_editor.preview.is_some() {
+                        Some("当前存在未保存的编辑预览，请先确认或放弃预览。")
+                    } else if self.media_review.redownload.is_some() {
+                        Some("原图下载已经在进行中，请稍候。")
+                    } else if !source_available {
+                        Some("当前记录没有来源原图地址，无法自动下载。")
+                    } else {
+                        None
+                    };
+                    if let Some(error) = blocked {
+                        self.image_editor.error = error.to_owned();
+                        self.notify(ui.ctx(), error);
                     } else if let Err(error) = self.start_redownload(ui.ctx(), id) {
                         self.image_editor.error = error;
                         let message = self.image_editor.error.clone();
