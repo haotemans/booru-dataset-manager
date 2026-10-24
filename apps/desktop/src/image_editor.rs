@@ -242,11 +242,13 @@ impl BdmApp {
                     .get(&id)
                     .is_some_and(|media| media.post.file_url.is_some());
                 let redownload_button = ui
-                    .add_enabled(real, egui::Button::new("重新下载原图"))
+                    .add(egui::Button::new("重新下载原图"))
                     .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。")
                     .clicked();
                 if redownload_button {
-                    let blocked = if busy {
+                    let blocked = if !real {
+                        Some("当前处于示例预览模式，不能下载真实原图。")
+                    } else if busy {
                         Some("当前有图片处理任务正在运行，请等待完成。")
                     } else if self.ingest_active() {
                         Some("当前正在导入图片，请等待导入完成。")
