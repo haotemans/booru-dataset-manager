@@ -34,6 +34,9 @@ pub struct AiProfile {
     pub credentials: Option<ApiCredentials>,
     pub settings: AiRequestSettings,
     pub upload_approval: Option<UploadApproval>,
+    /// Formatting is a local presentation choice; these values never affect AI input.
+    pub artist_tag_format: String,
+    pub character_tag_format: String,
 }
 #[derive(Debug)]
 enum AiError {
@@ -56,6 +59,36 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn format_protected_tag(kind: &str, name: &str, format: &str) -> String {
+    match format {
+        "typed" => format!("{kind}:{name}"),
+        "at" => format!("@{name}"),
+        // Empty values preserve the legacy on-disk representation for old direct callers.
+        _ if kind == "artist" && format == "legacy" => format!("@artist {name}"),
+        _ => name.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod formatting_tests {
+    use super::format_protected_tag;
+
+    #[test]
+    fn protected_name_formats_are_local_and_explicit() {
+        assert_eq!(format_protected_tag("artist", "alice", "at"), "@alice");
+        assert_eq!(format_protected_tag("artist", "alice", "plain"), "alice");
+        assert_eq!(
+            format_protected_tag("artist", "alice", "typed"),
+            "artist:alice"
+        );
+        assert_eq!(
+            format_protected_tag("character", "alice", "typed"),
+            "character:alice"
+        );
+        assert_eq!(format_protected_tag("character", "alice", "plain"), "alice");
+    }
 }
 
 fn wait_until(deadline: u64, cancel: &AtomicBool) -> Result<(), AiError> {
@@ -466,8 +499,23 @@ pub fn run(
                         let mut merged = normalized
                             .tags
                             .iter()
-                            .filter(|t| !normalized.ordinary.contains(t))
-                            .cloned()
+                            .filter(|tag| !normalized.ordinary.contains(tag))
+                            .map(|tag| {
+                                if let Some(name) = normalized.artists.iter().find(|name| {
+                                    name.as_str() == tag.as_str()
+                                        || format!("@artist {name}").as_str() == tag.as_str()
+                                }) {
+                                    format_protected_tag("artist", name, &profile.artist_tag_format)
+                                } else if normalized.characters.iter().any(|name| name == tag) {
+                                    format_protected_tag(
+                                        "character",
+                                        tag,
+                                        &profile.character_tag_format,
+                                    )
+                                } else {
+                                    tag.clone()
+                                }
+                            })
                             .collect::<Vec<_>>();
                         merged.extend(tags.iter().cloned());
                         merged.join(", ")

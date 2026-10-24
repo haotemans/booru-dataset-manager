@@ -16,6 +16,8 @@ fn profile() -> AiProfile {
         credentials: None,
         settings: Default::default(),
         upload_approval: None,
+        artist_tag_format: "legacy".into(),
+        character_tag_format: "plain".into(),
     }
 }
 

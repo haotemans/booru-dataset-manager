@@ -319,6 +319,53 @@ impl BdmApp {
         ui.add_space(16.0);
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
+            setting_header(ui, "tag", "优化标签格式");
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("画师名和角色名不会发送给 AI，只在本地合并到优化标签时使用以下格式。")
+                    .size(12.0)
+                    .color(MUTED),
+            );
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label("画师名");
+                egui::ComboBox::from_id_salt("artist_tag_format")
+                    .selected_text(self.prefs.artist_tag_format.artist_label())
+                    .show_ui(ui, |ui| {
+                        for format in [
+                            ProtectedTagFormat::At,
+                            ProtectedTagFormat::Plain,
+                            ProtectedTagFormat::Typed,
+                        ] {
+                            ui.selectable_value(
+                                &mut self.prefs.artist_tag_format,
+                                format,
+                                format.artist_label(),
+                            );
+                        }
+                    });
+                ui.label("角色名");
+                egui::ComboBox::from_id_salt("character_tag_format")
+                    .selected_text(self.prefs.character_tag_format.character_label())
+                    .show_ui(ui, |ui| {
+                        for format in [ProtectedTagFormat::Plain, ProtectedTagFormat::Typed] {
+                            ui.selectable_value(
+                                &mut self.prefs.character_tag_format,
+                                format,
+                                format.character_label(),
+                            );
+                        }
+                    });
+            });
+            ui.label(
+                RichText::new("例如：画师可输出 @name、name 或 artist:name；角色可输出 name 或 character:name。")
+                    .size(12.0)
+                    .color(MUTED),
+            );
+        });
+        ui.add_space(16.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             setting_header(ui, "download", "下载范围");
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {

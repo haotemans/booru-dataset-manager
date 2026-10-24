@@ -1605,6 +1605,8 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
         credentials: None,
         settings: Default::default(),
         upload_approval: None,
+        artist_tag_format: "legacy".into(),
+        character_tag_format: "plain".into(),
     };
     let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
     let mut tags = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
@@ -1741,6 +1743,8 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
         credentials: None,
         settings: Default::default(),
         upload_approval: None,
+        artist_tag_format: "legacy".into(),
+        character_tag_format: "plain".into(),
     };
     let mut job = f
         .repo

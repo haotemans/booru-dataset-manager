@@ -53,6 +53,44 @@ pub enum GalleryLayout {
     Masonry,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProtectedTagFormat {
+    #[default]
+    Plain,
+    At,
+    Typed,
+}
+impl ProtectedTagFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Plain => "xxx",
+            Self::At => "@xxx",
+            Self::Typed => "类型:xxx",
+        }
+    }
+    pub fn artist_label(self) -> &'static str {
+        match self {
+            Self::Plain => "xxx",
+            Self::At => "@xxx",
+            Self::Typed => "artist:xxx",
+        }
+    }
+    pub fn character_label(self) -> &'static str {
+        match self {
+            Self::Plain => "xxx",
+            Self::At => "@xxx",
+            Self::Typed => "character:xxx",
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::At => "at",
+            Self::Typed => "typed",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
@@ -72,6 +110,13 @@ pub struct Preferences {
     pub auto_load_review_original: bool,
     pub similar_image_review: bool,
     pub review_similarity: f32,
+    #[serde(default = "default_artist_tag_format")]
+    pub artist_tag_format: ProtectedTagFormat,
+    #[serde(default)]
+    pub character_tag_format: ProtectedTagFormat,
+}
+fn default_artist_tag_format() -> ProtectedTagFormat {
+    ProtectedTagFormat::At
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -90,6 +135,8 @@ impl Default for Preferences {
             auto_load_review_original: false,
             similar_image_review: true,
             review_similarity: 0.95,
+            artist_tag_format: default_artist_tag_format(),
+            character_tag_format: ProtectedTagFormat::Plain,
         }
     }
 }

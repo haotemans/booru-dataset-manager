@@ -946,6 +946,8 @@ impl BdmApp {
                 credentials,
                 settings: profile.request.clone(),
                 upload_approval: approval,
+                artist_tag_format: self.prefs.artist_tag_format.key().into(),
+                character_tag_format: self.prefs.character_tag_format.key().into(),
             })
         } else {
             None
