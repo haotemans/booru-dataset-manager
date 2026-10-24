@@ -13,7 +13,7 @@ pub struct ReviewState {
     pub auto_advance: bool,
     canvas_id: Option<usize>,
     pub(crate) view: CanvasView,
-    redownload: Option<(usize, Receiver<Result<StoredMedia, String>>)>,
+    pub(crate) redownload: Option<(usize, Receiver<Result<StoredMedia, String>>)>,
     #[cfg(test)]
     window: Option<Rect>,
     #[cfg(test)]
