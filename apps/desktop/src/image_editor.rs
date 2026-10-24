@@ -357,6 +357,11 @@ impl BdmApp {
                                 });
                             ui.add_space(8.0);
                             ui.label(RichText::new("选区工具").size(12.0).color(MUTED));
+                            ui.label(
+                                RichText::new("去水印时请覆盖水印本体及四周约 8–16 px；先生成预览，确认没有新纹理后再替换。")
+                                    .size(12.0)
+                                    .color(MUTED),
+                            );
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
                                 let width = (ui.available_width() - 12.0) / 4.0;
@@ -747,6 +752,23 @@ impl BdmApp {
             })));
             repaint.request_repaint();
         });
+        Ok(())
+    }
+
+    pub(crate) fn restore_last_edit(
+        &mut self,
+        ctx: &egui::Context,
+        id: usize,
+    ) -> Result<(), String> {
+        if self.demo || self.is_capture() || self.ingest_active() || self.workflow_active() {
+            return Err("当前无法恢复编辑，请等待其他任务结束。".into());
+        }
+        let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
+        let media = bdm_infrastructure::catalog::SqliteCatalog::open(&path)
+            .map_err(|e| e.to_string())?
+            .restore_last_edit(id as i64)
+            .map_err(|e| e.to_string())?;
+        self.editor_apply_saved(ctx, media);
         Ok(())
     }
 

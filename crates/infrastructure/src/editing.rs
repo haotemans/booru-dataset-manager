@@ -573,6 +573,7 @@ struct Journal {
     image: PathBuf,
     thumbnail: PathBuf,
     mask: PathBuf,
+    source: PathBuf,
 }
 
 fn staged(path: &Path, bytes: &[u8]) -> Result<(), IngestError> {
@@ -632,12 +633,14 @@ impl SqliteCatalog {
         storage(image::load_from_memory(&bytes))?;
         let pending = directory.join(".repair-output");
         let thumbnail = directory.join(".repair-thumbnail");
+        let source = directory.join(".edit-source");
         let mask = if preview.crop.is_some() {
             PathBuf::new()
         } else {
             directory.join(".repair-mask")
         };
         staged(&pending, &bytes)?;
+        staged(&source, &storage(fs::read(&media.path))?)?;
         let mut thumb_bytes = std::io::Cursor::new(Vec::new());
         storage(
             image
@@ -682,10 +685,16 @@ impl SqliteCatalog {
             image: pending,
             thumbnail,
             mask,
+            source,
         };
         // Cancellation is safe before durable intent. Once published, finish the journaled edit.
         if cancel.load(Ordering::Relaxed) {
-            for path in [&journal.image, &journal.thumbnail, &journal.mask] {
+            for path in [
+                &journal.image,
+                &journal.thumbnail,
+                &journal.mask,
+                &journal.source,
+            ] {
                 if !path.as_os_str().is_empty() {
                     storage(fs::remove_file(path))?;
                 }
@@ -746,6 +755,7 @@ impl SqliteCatalog {
             (&journal.image, &media.path),
             (&journal.thumbnail, &media.thumbnail),
         ];
+        promotions.push((&journal.source, &directory.join(".edit-source")));
         if record.operation == "inpainting" {
             promotions.push((&journal.mask, &record.mask));
         }
@@ -811,6 +821,72 @@ impl SqliteCatalog {
             storage(fs::remove_file(intent))?;
         }
         Ok(())
+    }
+
+    pub fn restore_last_edit(&mut self, id: i64) -> Result<StoredMedia, IngestError> {
+        let lock = self.media_lock.clone();
+        let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
+        let mut media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
+        let edit = media.edit.clone().ok_or(IngestError::InvalidMedia)?;
+        let directory = media.path.parent().ok_or(IngestError::Storage)?;
+        let source = directory.join(".edit-source");
+        if !source.is_file() || hash(&source)? != edit.parent_sha256 {
+            return Err(IngestError::Integrity);
+        }
+        let bytes = storage(fs::read(&source))?;
+        let restored = storage(image::load_from_memory(&bytes))?;
+        let thumbnail = restored.thumbnail(320, 320);
+        let pending = directory.join(".restore-output");
+        let pending_thumbnail = directory.join(".restore-thumbnail");
+        staged(&pending, &bytes)?;
+        let mut thumb = std::io::Cursor::new(Vec::new());
+        storage(thumbnail.write_to(&mut thumb, ImageFormat::Png))?;
+        staged(&pending_thumbnail, thumb.get_ref())?;
+        storage(
+            tempfile::NamedTempFile::new_in(directory).and_then(|mut file| {
+                file.write_all(&storage(fs::read(&pending))?)?;
+                file.as_file().sync_all()?;
+                file.persist(&media.path).map_err(|e| e.error)?;
+                Ok(())
+            }),
+        )?;
+        storage(
+            tempfile::NamedTempFile::new_in(directory).and_then(|mut file| {
+                file.write_all(&storage(fs::read(&pending_thumbnail))?)?;
+                file.as_file().sync_all()?;
+                file.persist(&media.thumbnail).map_err(|e| e.error)?;
+                Ok(())
+            }),
+        )?;
+        storage(fs::remove_file(&pending))?;
+        storage(fs::remove_file(&pending_thumbnail))?;
+        storage(fs::remove_file(&source))?;
+        media.sha256 = edit.parent_sha256;
+        media.edit = None;
+        let tx = storage(
+            self.connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
+        )?;
+        storage(tx.execute(
+            "UPDATE media SET metadata=?2 WHERE id=?1",
+            params![media.id, storage(serde_json::to_string(&media))?],
+        ))?;
+        for table in ["visual_features", "visual_buckets", "media_quality"] {
+            storage(tx.execute(
+                &format!("DELETE FROM {table} WHERE media_id=?1"),
+                [media.id],
+            ))?;
+        }
+        storage(tx.execute(
+            "UPDATE analysis_jobs SET state='pending',reason='edit restored' WHERE media_id=?1",
+            [media.id],
+        ))?;
+        storage(tx.execute(
+            "INSERT INTO audit_log(action,metadata) VALUES('edit_restore',?1)",
+            [format!("media_id={}", media.id)],
+        ))?;
+        storage(tx.commit())?;
+        Ok(media)
     }
 
     pub fn recover_repairs(&mut self) -> Result<(), IngestError> {

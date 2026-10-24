@@ -393,6 +393,16 @@ impl BdmApp {
                                 },
                             );
                         });
+                        if media.edit.is_some()
+                            && ui
+                                .button("恢复编辑前版本")
+                                .on_hover_text("撤销最近一次裁剪或去水印，从编辑前文件重新开始。")
+                                .clicked()
+                        {
+                            if let Err(error) = self.restore_last_edit(ui.ctx(), id) {
+                                self.form_error = error;
+                            }
+                        }
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.media_review.auto_advance, "判断后自动下一张");
                             ui.label(
