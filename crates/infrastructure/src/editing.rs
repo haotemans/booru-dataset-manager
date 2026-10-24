@@ -3,7 +3,7 @@ use bdm_domain::{
     editing::{CropRect, EditRecord, MaskRegion},
     ingest::StoredMedia,
 };
-use bdm_ports::IngestError;
+use bdm_ports::{IngestError, MediaProvider};
 use image::{GenericImageView, ImageFormat};
 use rusqlite::params;
 use sha2::{Digest, Sha256};
@@ -583,6 +583,130 @@ fn staged(path: &Path, bytes: &[u8]) -> Result<(), IngestError> {
 }
 
 impl SqliteCatalog {
+    pub fn redownload_original(
+        &mut self,
+        id: i64,
+        provider: &dyn MediaProvider,
+        cancel: &AtomicBool,
+    ) -> Result<StoredMedia, IngestError> {
+        let media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
+        if media.edit.is_some() {
+            return Err(IngestError::StorageDetails(
+                "当前图片有未完成编辑，请先恢复编辑前版本。".into(),
+            ));
+        }
+        let directory = media.path.parent().ok_or(IngestError::Storage)?;
+        let staging = storage(
+            tempfile::Builder::new()
+                .prefix(".redownload-")
+                .tempdir_in(directory),
+        )?;
+        let downloaded = staging
+            .path()
+            .join(format!("original.{}", media.post.file_ext));
+        provider.download(&media.post, &downloaded, cancel)?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(IngestError::Cancelled);
+        }
+        let bytes = storage(fs::read(&downloaded))?;
+        if bytes.len() as u64 != media.post.file_size || bytes.len() > 64 * 1024 * 1024 {
+            return Err(IngestError::InvalidMedia);
+        }
+        if format!("{:x}", md5::Md5::digest(&bytes)) != media.post.md5 {
+            return Err(IngestError::Integrity);
+        }
+        let decoded = crate::ingest::validate(&bytes, &media.post, media.minimum_short_side)?;
+        let source_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let (stored_image, stored_bytes) =
+            if media.flatten_transparency && crate::ingest::has_transparency(&decoded) {
+                let flattened = crate::ingest::flatten_on_white(&decoded);
+                let format = match media.post.file_ext.as_str() {
+                    "png" => ImageFormat::Png,
+                    "webp" => ImageFormat::WebP,
+                    _ => ImageFormat::Jpeg,
+                };
+                let mut encoded = std::io::Cursor::new(Vec::new());
+                flattened
+                    .write_to(&mut encoded, format)
+                    .map_err(|_| IngestError::InvalidMedia)?;
+                (flattened, encoded.into_inner())
+            } else {
+                (decoded, bytes)
+            };
+        let staged_image = staging.path().join("replacement");
+        storage(fs::write(&staged_image, &stored_bytes))?;
+        let staged_thumbnail = staging.path().join("preview.png");
+        storage(
+            stored_image
+                .thumbnail(384, 384)
+                .save_with_format(&staged_thumbnail, ImageFormat::Png),
+        )?;
+        let backup = directory.join(format!(
+            ".redownload-backup-{}-{}",
+            media.sha256.get(..16).unwrap_or("current"),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs())
+        ));
+        let lock = self.media_lock.clone();
+        let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
+        let current = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
+        if current.sha256 != media.sha256 || current.edit.is_some() {
+            return Err(IngestError::StorageDetails(
+                "图片在下载期间发生变化，请重新执行下载。".into(),
+            ));
+        }
+        if media.path.is_file() {
+            storage(fs::copy(&media.path, &backup))?;
+        }
+        let replacement = storage(tempfile::NamedTempFile::new_in(directory))?;
+        storage(fs::copy(&staged_image, replacement.path()))?;
+        storage(replacement.persist(&media.path).map_err(|e| e.error))?;
+        let replacement_thumbnail = storage(tempfile::NamedTempFile::new_in(directory))?;
+        storage(fs::copy(&staged_thumbnail, replacement_thumbnail.path()))?;
+        storage(
+            replacement_thumbnail
+                .persist(&media.thumbnail)
+                .map_err(|e| e.error),
+        )?;
+
+        let mut updated = media;
+        updated.sha256 = format!("{:x}", Sha256::digest(&stored_bytes));
+        updated.source_sha256 = source_sha256;
+        let tx = storage(
+            self.connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
+        )?;
+        storage(tx.execute(
+            "UPDATE media SET metadata=?2 WHERE id=?1",
+            params![updated.id, storage(serde_json::to_string(&updated))?],
+        ))?;
+        for table in ["visual_features", "visual_buckets", "media_quality"] {
+            storage(tx.execute(
+                &format!("DELETE FROM {table} WHERE media_id=?1"),
+                [updated.id],
+            ))?;
+        }
+        storage(tx.execute(
+            "DELETE FROM duplicate_candidates WHERE first_id=?1 OR second_id=?1",
+            [updated.id],
+        ))?;
+        storage(tx.execute(
+            "UPDATE analysis_jobs SET state='pending',reason='original redownloaded' WHERE media_id=?1",
+            [updated.id],
+        ))?;
+        storage(tx.execute(
+            "INSERT INTO audit_log(action,metadata) VALUES('original_redownload',?1)",
+            [format!(
+                "media_id={};backup={}",
+                updated.id,
+                backup.display()
+            )],
+        ))?;
+        storage(tx.commit())?;
+        Ok(updated)
+    }
+
     pub fn commit_repair(
         &mut self,
         id: i64,
@@ -755,7 +879,8 @@ impl SqliteCatalog {
             (&journal.image, &media.path),
             (&journal.thumbnail, &media.thumbnail),
         ];
-        promotions.push((&journal.source, &directory.join(".edit-source")));
+        let source_target = directory.join(".edit-source");
+        promotions.push((&journal.source, &source_target));
         if record.operation == "inpainting" {
             promotions.push((&journal.mask, &record.mask));
         }
@@ -842,9 +967,11 @@ impl SqliteCatalog {
         let mut thumb = std::io::Cursor::new(Vec::new());
         storage(thumbnail.write_to(&mut thumb, ImageFormat::Png))?;
         staged(&pending_thumbnail, thumb.get_ref())?;
+        let pending_bytes = storage(fs::read(&pending))?;
+        let pending_thumbnail_bytes = storage(fs::read(&pending_thumbnail))?;
         storage(
             tempfile::NamedTempFile::new_in(directory).and_then(|mut file| {
-                file.write_all(&storage(fs::read(&pending))?)?;
+                file.write_all(&pending_bytes)?;
                 file.as_file().sync_all()?;
                 file.persist(&media.path).map_err(|e| e.error)?;
                 Ok(())
@@ -852,7 +979,7 @@ impl SqliteCatalog {
         )?;
         storage(
             tempfile::NamedTempFile::new_in(directory).and_then(|mut file| {
-                file.write_all(&storage(fs::read(&pending_thumbnail))?)?;
+                file.write_all(&pending_thumbnail_bytes)?;
                 file.as_file().sync_all()?;
                 file.persist(&media.thumbnail).map_err(|e| e.error)?;
                 Ok(())

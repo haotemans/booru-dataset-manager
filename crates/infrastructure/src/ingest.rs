@@ -43,7 +43,7 @@ pub(crate) fn storage<T, E: std::fmt::Debug + 'static>(
     })
 }
 
-fn validate(
+pub(crate) fn validate(
     bytes: &[u8],
     post: &SourcePost,
     minimum_short_side: u32,
@@ -100,11 +100,11 @@ fn durable_write(path: &Path, bytes: &[u8]) -> Result<(), IngestError> {
     storage(file.sync_all())
 }
 
-fn has_transparency(image: &image::DynamicImage) -> bool {
+pub(crate) fn has_transparency(image: &image::DynamicImage) -> bool {
     image.to_rgba8().pixels().any(|pixel| pixel[3] < 255)
 }
 
-fn flatten_on_white(image: &image::DynamicImage) -> image::DynamicImage {
+pub(crate) fn flatten_on_white(image: &image::DynamicImage) -> image::DynamicImage {
     let rgba = image.to_rgba8();
     let rgb = image::RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
         let pixel = rgba.get_pixel(x, y).0;

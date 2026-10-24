@@ -4,13 +4,16 @@ use crate::{
     theme::*,
     widgets::*,
 };
+use bdm_domain::ingest::StoredMedia;
 use eframe::egui::{self, vec2, Rect, RichText, Sense};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 pub struct ReviewState {
     pub tab: usize,
     pub auto_advance: bool,
     canvas_id: Option<usize>,
     pub(crate) view: CanvasView,
+    redownload: Option<(usize, Receiver<Result<StoredMedia, String>>)>,
     #[cfg(test)]
     window: Option<Rect>,
     #[cfg(test)]
@@ -30,6 +33,7 @@ impl Default for ReviewState {
             auto_advance: true,
             canvas_id: None,
             view: CanvasView::default(),
+            redownload: None,
             #[cfg(test)]
             window: None,
             #[cfg(test)]
@@ -166,6 +170,7 @@ impl BdmApp {
     }
 
     pub(crate) fn show_media_review(&mut self, ctx: &egui::Context, id: usize) -> bool {
+        self.poll_redownload(ctx);
         let Some(media) = self.library.media.iter().find(|m| m.id == id).cloned() else {
             return true;
         };
@@ -403,6 +408,25 @@ impl BdmApp {
                                 self.form_error = error;
                             }
                         }
+                        let can_redownload = !self.demo
+                            && !self.is_capture()
+                            && !self.ingest_active()
+                            && !self.workflow_active()
+                            && self.ingest.stored.get(&id).is_some_and(|stored| {
+                                stored.edit.is_none() && stored.post.file_url.is_some()
+                            })
+                            && self.media_review.redownload.is_none();
+                        if ui
+                            .add_enabled(can_redownload, egui::Button::new("重新下载原图"))
+                            .on_hover_text(
+                                "从来源地址重新下载，校验通过后替换当前文件并保留旧文件备份。",
+                            )
+                            .clicked()
+                        {
+                            if let Err(error) = self.start_redownload(ctx, id) {
+                                self.form_error = error;
+                            }
+                        }
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.media_review.auto_advance, "判断后自动下一张");
                             ui.label(
@@ -474,6 +498,68 @@ impl BdmApp {
         #[cfg(not(test))]
         let _ = response;
         close
+    }
+
+    fn start_redownload(&mut self, ctx: &egui::Context, id: usize) -> Result<(), String> {
+        let path = self
+            .catalog
+            .path
+            .clone()
+            .ok_or("本地数据库未打开。".to_owned())?;
+        let credentials = self
+            .saved_danbooru_credentials()
+            .map_err(|error| error.to_string())?;
+        let (sender, receiver) = mpsc::channel();
+        let repaint = ctx.clone();
+        std::thread::Builder::new()
+            .name("redownload-original".into())
+            .spawn(move || {
+                let result = bdm_infrastructure::catalog::SqliteCatalog::open(&path)
+                    .map_err(|error| error.to_string())
+                    .and_then(|mut repo| {
+                        bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
+                            .map_err(|error| error.to_string())
+                            .and_then(|provider| {
+                                repo.redownload_original(
+                                    id as i64,
+                                    &provider,
+                                    &std::sync::atomic::AtomicBool::new(false),
+                                )
+                                .map_err(|error| error.to_string())
+                            })
+                    });
+                let _ = sender.send(result);
+                repaint.request_repaint();
+            })
+            .map_err(|_| "无法启动重新下载任务。".to_owned())?;
+        self.form_error.clear();
+        self.media_review.redownload = Some((id, receiver));
+        Ok(())
+    }
+
+    fn poll_redownload(&mut self, ctx: &egui::Context) {
+        let Some((_id, receiver)) = &self.media_review.redownload else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                return;
+            }
+            Err(TryRecvError::Disconnected) => Err("重新下载任务意外结束。".into()),
+        };
+        self.media_review
+            .redownload
+            .take()
+            .expect("redownload task");
+        match result {
+            Ok(media) => {
+                self.editor_apply_saved(ctx, media);
+                self.notify(ctx, "原图已重新下载并替换，旧文件已保留备份。");
+            }
+            Err(error) => self.form_error = error,
+        }
     }
 
     fn review_canvas(&mut self, ui: &mut egui::Ui, media: &Media, rect: Rect) {
