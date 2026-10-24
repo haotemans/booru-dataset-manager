@@ -8,6 +8,7 @@ use image::{GenericImageView, ImageFormat};
 use rusqlite::params;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::VecDeque,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -541,13 +542,21 @@ pub fn preview(
     if result.dimensions() != (width, height) {
         return Err(IngestError::Integrity);
     }
-    // Preserve original alpha and unselected pixels exactly in the lossless preview.
+    // Preserve unselected pixels exactly and feather the repair at the mask edge.
     let mut composed = decoded.to_rgba8();
     let repair = result.to_rgba8();
+    let weights = mask_edge_weights(&mask_image);
     for (x, y, pixel) in composed.enumerate_pixels_mut() {
         if mask_image.get_pixel(x, y)[0] > 0 {
             let alpha = pixel[3];
-            *pixel = *repair.get_pixel(x, y);
+            let feather = weights[(y * width + x) as usize];
+            let repaired = repair.get_pixel(x, y);
+            for channel in 0..3 {
+                pixel[channel] = ((f32::from(pixel[channel]) * (1.0 - feather)
+                    + f32::from(repaired[channel]) * feather)
+                    .round()
+                    .clamp(0.0, 255.0)) as u8;
+            }
             pixel[3] = alpha;
         }
     }
@@ -565,6 +574,61 @@ pub fn preview(
         regions,
         crop: None,
     })
+}
+
+fn mask_edge_weights(mask: &image::GrayImage) -> Vec<f32> {
+    const FEATHER: i32 = 8;
+    let width = mask.width() as i32;
+    let height = mask.height() as i32;
+    let mut distances = vec![FEATHER + 1; (width * height) as usize];
+    let mut queue = VecDeque::new();
+    for y in 0..height {
+        for x in 0..width {
+            if mask.get_pixel(x as u32, y as u32)[0] == 0 {
+                continue;
+            }
+            let edge = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                .iter()
+                .any(|&(nx, ny)| {
+                    nx < 0
+                        || ny < 0
+                        || nx >= width
+                        || ny >= height
+                        || mask.get_pixel(nx as u32, ny as u32)[0] == 0
+                });
+            if edge {
+                distances[(y * width + x) as usize] = 1;
+                queue.push_back((x, y));
+            }
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let distance = distances[(y * width + x) as usize];
+        if distance >= FEATHER {
+            continue;
+        }
+        for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+            if nx < 0 || ny < 0 || nx >= width || ny >= height {
+                continue;
+            }
+            let index = (ny * width + nx) as usize;
+            if mask.get_pixel(nx as u32, ny as u32)[0] > 0 && distances[index] > distance + 1 {
+                distances[index] = distance + 1;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+    distances
+        .into_iter()
+        .map(|distance| {
+            if distance > FEATHER {
+                1.0
+            } else {
+                // Keep most of the repair at the edge while removing a hard color seam.
+                (0.45 + 0.55 * distance as f32 / FEATHER as f32).clamp(0.0, 1.0)
+            }
+        })
+        .collect()
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
