@@ -434,8 +434,6 @@ impl BdmApp {
                                     self.form_error = error;
                                 }
                             }
-                        });
-                        ui.horizontal(|ui| {
                             ui.checkbox(&mut self.media_review.auto_advance, "判断后自动下一张");
                             ui.label(
                                 RichText::new("← → 切图    滚轮缩放    双击适应")
