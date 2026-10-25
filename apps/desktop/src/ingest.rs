@@ -787,71 +787,78 @@ impl BdmApp {
 
     pub fn ingestion_status(&mut self, ui: &mut egui::Ui) {
         if let Some(error) = &self.ingest.error {
-            ui.colored_label(DANGER, error);
+            ui.add(egui::Label::new(RichText::new(error).size(12.0).color(DANGER)).wrap());
         }
         if self.ingest.jobs.is_empty() {
             return;
         }
         card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             section(ui, "图片下载", "");
-            for job in self.ingest.jobs.clone().into_iter().rev().take(6) {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(&job.tag).strong());
-                    ui.label(format!("短边 ≥ {} px", job.minimum_short_side));
-                    let state = match job.state.as_str() {
-                        "completed" => "完成",
-                        "running" => "下载中",
-                        "cancelled" => "已取消",
-                        "interrupted" => "中断",
-                        "queued" => "等待",
-                        "deferred" => "有待补试图片",
-                        _ => "失败",
-                    };
-                    badge(
-                        ui,
-                        state,
-                        if job.state == "completed" {
-                            ACCENT
-                        } else if job.state == "failed" {
-                            DANGER
-                        } else {
-                            MUTED
-                        },
-                    );
-                    for (kind, count, label, color) in [
-                        ("search", job.progress.examined, "检查", MUTED),
-                        ("image", job.progress.imported, "入库", ACCENT),
-                        ("layers", job.progress.duplicates, "复用", MUTED),
-                        ("forward", job.progress.skipped, "跳过", MUTED),
-                        (
-                            "close",
-                            job.progress.failed,
-                            "失败",
-                            if job.progress.failed > 0 {
-                                DANGER
-                            } else {
-                                MUTED
-                            },
-                        ),
-                    ] {
-                        icon_stat(ui, kind, count, label, color);
-                    }
-                    if !self.ingest_active()
-                        && job.state != "completed"
-                        && ui.button("继续").clicked()
-                    {
-                        if let Err(e) = self.start_ingest(ui.ctx(), Some(job.id)) {
-                            self.ingest.error = Some(e);
-                        }
-                    }
-                });
-                if let Some(error) = &job.error {
-                    ui.colored_label(AMBER, error);
+            ui.add_space(10.0);
+            for (index, job) in self
+                .ingest
+                .jobs
+                .clone()
+                .into_iter()
+                .rev()
+                .take(6)
+                .enumerate()
+            {
+                if index > 0 {
+                    ui.separator();
+                    ui.add_space(6.0);
                 }
-            }
-            if self.ingest_active() && ui.button("取消下载").clicked() {
-                if let Some(cancel) = &self.ingest.cancel {
-                    cancel.store(true, Ordering::Relaxed);
+                let (state, color) = task_state(&job.state);
+                let active = self.ingest_active();
+                let action = if self.demo || self.is_capture() {
+                    None
+                } else if active && job.state == "running" {
+                    Some("暂停")
+                } else if !active && job.state != "completed" {
+                    Some("继续")
+                } else {
+                    None
+                };
+                let clicked = task_row(
+                    ui,
+                    TaskRow {
+                        kind: "image",
+                        title: &job.tag,
+                        subtitle: &format!("短边 ≥ {} px", job.minimum_short_side),
+                        state,
+                        color,
+                        action,
+                        error: job.error.as_deref(),
+                    },
+                    |ui| {
+                        for (label, value, color) in [
+                            ("检查", job.progress.examined, MUTED),
+                            ("入库", job.progress.imported, ACCENT),
+                            ("复用", job.progress.duplicates, MUTED),
+                            ("跳过", job.progress.skipped, MUTED),
+                            (
+                                "失败",
+                                job.progress.failed,
+                                if job.progress.failed > 0 {
+                                    DANGER
+                                } else {
+                                    MUTED
+                                },
+                            ),
+                        ] {
+                            task_metric(ui, label, value, color);
+                        }
+                    },
+                );
+                if clicked {
+                    if active {
+                        if let Some(cancel) = &self.ingest.cancel {
+                            cancel.store(true, Ordering::Relaxed);
+                        }
+                    } else if let Err(error) = self.start_ingest(ui.ctx(), Some(job.id)) {
+                        self.ingest.error = Some(error);
+                    }
                 }
             }
         });

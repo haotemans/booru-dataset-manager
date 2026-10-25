@@ -1219,6 +1219,9 @@ impl BdmApp {
             ui.add(egui::Label::new(RichText::new(error).color(AMBER)).wrap());
         }
         let jobs = self.actionable_workflows();
+        let has_active_row = jobs.iter().any(|job| {
+            job.state == "running" && self.workflows.active_kind.as_deref() == Some(&job.kind)
+        });
         let pairs = self.pending_similarity_pairs();
         if jobs.is_empty()
             && pairs.is_empty()
@@ -1229,114 +1232,116 @@ impl BdmApp {
         }
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            for job in jobs {
-                ui.horizontal_wrapped(|ui| {
-                    let kind = if job.kind.starts_with("dedup") {
-                        "layers"
-                    } else if job.kind == "export" {
-                        "download"
+            section(ui, "数据处理", "");
+            ui.add_space(10.0);
+            for (index, job) in jobs.into_iter().enumerate() {
+                if index > 0 {
+                    ui.separator();
+                    ui.add_space(6.0);
+                }
+                let (kind, title) = if job.kind.starts_with("dedup") {
+                    ("layers", "去重")
+                } else if job.kind == "export" {
+                    ("download", "导出")
+                } else {
+                    ("spark", "文本优化")
+                };
+                let subtitle = if job.kind == "optimize" {
+                    if job.mode == "caption" {
+                        "自然语言"
                     } else {
-                        "spark"
-                    };
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
-                    icon(ui, rect, kind, ACCENT);
-                    if job.state == "running" {
-                        ui.spinner();
+                        "标签"
                     }
-                    ui.label(if job.kind.starts_with("dedup") {
-                        "去重"
-                    } else if job.kind == "export" {
-                        "导出"
-                    } else {
-                        "文本优化"
-                    });
-                    if job.kind == "optimize" {
-                        ui.label(
-                            RichText::new(if job.mode == "caption" {
-                                "自然语言"
-                            } else {
-                                "标签"
-                            })
-                            .size(12.0)
-                            .color(MUTED),
-                        );
-                    }
-                    let state = match job.state.as_str() {
-                        "running" => "处理中",
-                        "paused" | "interrupted" => "已暂停",
-                        "needs_model" => "模型未就绪",
-                        "queued" => "等待",
-                        _ => "未完成",
-                    };
-                    ui.label(RichText::new(state).size(12.0).color(MUTED));
-                    ui.add(
-                        egui::ProgressBar::new(
-                            if job.kind == "optimize" {
-                                job.ids
-                                    .iter()
-                                    .filter(|id| job.accepted.contains(id))
-                                    .count()
-                            } else {
-                                job.cursor.min(job.ids.len())
-                            } as f32
-                                / job.ids.len().max(1) as f32,
-                        )
-                        .desired_width(130.0)
-                        .text(if job.kind == "optimize" {
-                            format!(
-                                "成功 {} / {}",
-                                job.ids
-                                    .iter()
-                                    .filter(|id| job.accepted.contains(id))
-                                    .count(),
-                                job.ids.len()
-                            )
+                } else {
+                    ""
+                };
+                let (state, color) = task_state(&job.state);
+                let active = self.workflow_active();
+                let action = if self.demo || self.is_capture() {
+                    None
+                } else if active
+                    && job.state == "running"
+                    && self.workflows.active_kind.as_deref() == Some(&job.kind)
+                {
+                    Some("暂停")
+                } else if !active {
+                    Some("继续")
+                } else {
+                    None
+                };
+                let clicked = task_row(
+                    ui,
+                    TaskRow {
+                        kind,
+                        title,
+                        subtitle,
+                        state,
+                        color,
+                        action,
+                        error: job.error.as_deref(),
+                    },
+                    |ui| {
+                        if job.kind == "optimize" {
+                            let accepted = job
+                                .ids
+                                .iter()
+                                .filter(|id| job.accepted.contains(id))
+                                .count();
+                            task_metric(
+                                ui,
+                                "成功",
+                                format!("{accepted} / {}", job.ids.len()),
+                                ACCENT,
+                            );
+                            if !job.deferred.is_empty() {
+                                task_metric(ui, "待重试", job.deferred.len(), AMBER);
+                            }
                         } else {
-                            format!("{} / {}", job.cursor, job.ids.len())
-                        }),
-                    );
-                    if job.kind == "optimize" && !job.deferred.is_empty() {
-                        ui.label(
-                            RichText::new(format!("待重试 {}", job.deferred.len()))
-                                .size(12.0)
-                                .color(AMBER),
-                        );
-                    }
-                    if !self.workflow_active()
-                        && !self.demo
-                        && !self.is_capture()
-                        && icon_button(ui, "forward", "继续", false).clicked()
-                    {
-                        if let Err(error) =
-                            self.start_workflow(ui.ctx(), &job.kind, Vec::new(), Some(job.id))
-                        {
-                            self.workflows.error = Some(error);
+                            task_metric(
+                                ui,
+                                "进度",
+                                format!("{} / {}", job.cursor, job.ids.len()),
+                                MUTED,
+                            );
+                            if !job.deferred.is_empty() {
+                                task_metric(ui, "待重试", job.deferred.len(), AMBER);
+                            }
                         }
-                    }
-                    if let Some(error) = &job.error {
-                        let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                        icon(ui, rect, "logs", AMBER);
-                        response.on_hover_text(error);
-                    }
-                });
-                if job.kind == "optimize" {
-                    if let Some(error) = &job.error {
-                        ui.label(RichText::new(error).size(12.0).color(AMBER));
+                    },
+                );
+                if clicked {
+                    if active {
+                        self.pause_processing();
+                    } else if let Err(error) =
+                        self.start_workflow(ui.ctx(), &job.kind, Vec::new(), Some(job.id))
+                    {
+                        self.workflows.error = Some(error);
                     }
                 }
             }
-            if self.workflow_active() {
-                ui.horizontal(|ui| {
-                    if self.workflows.metadata_active {
+            if self.workflow_active() && !has_active_row {
+                let clicked = task_row(
+                    ui,
+                    TaskRow {
+                        kind: "layers",
+                        title: if self.workflows.metadata_active {
+                            "更新标签"
+                        } else {
+                            "后台处理"
+                        },
+                        subtitle: "",
+                        state: "进行中",
+                        color: ACCENT,
+                        action: Some("暂停"),
+                        error: None,
+                    },
+                    |ui| {
                         ui.spinner();
-                        ui.label("更新标签");
-                    }
-                    if icon_button(ui, "pause", "暂停处理", false).clicked() {
-                        self.pause_processing();
-                    }
-                });
+                    },
+                );
+                if clicked {
+                    self.pause_processing();
+                }
             }
             if !pairs.is_empty() {
                 ui.horizontal(|ui| {

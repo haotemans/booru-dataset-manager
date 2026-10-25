@@ -378,6 +378,53 @@ impl BdmApp {
         let Some(dir) = self.capture_dir.clone() else {
             return;
         };
+        let task_status = std::env::args().any(|arg| arg == "--capture-task-status");
+        if task_status && self.capture_step == 0 && self.capture_frames == 0 {
+            self.prefs.page = Page::Dashboard;
+            self.library = crate::model::Library::demo();
+            self.ingest.jobs = ["phoenix_reffaella", "z3zz4"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, tag)| bdm_domain::ingest::IngestJob {
+                    id: index as i64 + 1,
+                    tag: tag.into(),
+                    state: "completed".into(),
+                    progress: bdm_domain::ingest::IngestProgress {
+                        examined: 1129,
+                        imported: 1021,
+                        duplicates: 3,
+                        skipped: 105,
+                        ..Default::default()
+                    },
+                    minimum_short_side: 800,
+                    collection_id: 1,
+                    root: Default::default(),
+                    flatten_transparency: true,
+                    before_id: None,
+                    error: None,
+                    failed_posts: Vec::new(),
+                })
+                .collect();
+            self.workflows.jobs = ["dedup", "optimize", "export"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| bdm_infrastructure::workflows::WorkflowJob {
+                    id: index as i64 + 1,
+                    kind: kind.into(),
+                    ids: vec![3, 8],
+                    cursor: 2,
+                    state: "paused".into(),
+                    mode: "caption".into(),
+                    deferred: vec![3, 8],
+                    error: if kind == "optimize" {
+                        Some("API 服务端内容过滤拦截，未生成有效结果。".into())
+                    } else {
+                        None
+                    },
+                    ..Default::default()
+                })
+                .collect();
+        }
         if self.capture_step == 0
             && self.capture_frames == 0
             && std::env::args().any(|arg| {
@@ -424,7 +471,15 @@ impl BdmApp {
                 }
             }
         }
-        if self.capture_step >= if review_layout { 44 } else { 57 } {
+        if self.capture_step
+            >= if task_status {
+                1
+            } else if review_layout {
+                44
+            } else {
+                57
+            }
+        {
             let _ = std::fs::write(
                 dir.join("capture.complete"),
                 format!(
@@ -531,6 +586,14 @@ impl BdmApp {
                 self.capture_step += 1;
                 self.capture_frames = 0;
                 self.capture_waiting = false;
+                if task_status {
+                    let _ = std::fs::write(
+                        dir.join("capture.complete"),
+                        "Task status capture completed",
+                    );
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    return;
+                }
                 match self.capture_step {
                     1 => self.toggle_demo(),
                     2 => self.navigate(Page::Artist),
