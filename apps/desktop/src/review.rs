@@ -21,6 +21,7 @@ impl BdmApp {
     }
 
     pub fn open_media(&mut self, id: usize) {
+        crate::diagnostics::event(format!("review_open media={id}"));
         self.form_error.clear();
         self.media_review.reset_canvas();
         self.review_order = if self.gallery {

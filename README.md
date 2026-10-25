@@ -14,6 +14,8 @@ In the crop/inpainting panel, **重新下载原图** immediately opens a status 
 
 Use Rust 1.88 or newer and a native platform linker (MSVC Build Tools on Windows, or a configured MinGW toolchain).
 
+Runtime diagnostics are saved locally in `data/logs/desktop.log`; Rust panics also produce `data/logs/crash-<timestamp>-<pid>.log` with the source location and a forced backtrace. Recent crop actions include the media ID, image dimensions, ratio and selection bounds. Logs include startup/build identity and normal exit; an abrupt native/OS termination may leave only the last recorded action. Logs are not uploaded. The previous runtime log is retained as `desktop.previous.log` when the file exceeds 5 MiB at startup. Keep the Actions package's `bdm_desktop.pdb` beside `bdm-desktop.exe` for Windows stack symbols.
+
 ```powershell
 cargo run --locked -p bdm-desktop
 # Explicitly enter the in-memory sample preview:

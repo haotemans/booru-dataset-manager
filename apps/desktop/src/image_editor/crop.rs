@@ -48,11 +48,15 @@ impl CropState {
         let ratio = self.ratio_value(size).unwrap_or(size.x / size.y);
         let width = size.x.min(size.y * ratio);
         let dimensions = vec2(width, width / ratio);
-        self.selection = Some(Rect::from_center_size(
-            pos2(size.x / 2.0, size.y / 2.0),
-            dimensions,
-        ));
+        self.selection = Some(
+            Rect::from_center_size(pos2(size.x / 2.0, size.y / 2.0), dimensions)
+                .intersect(Rect::from_min_size(egui::Pos2::ZERO, size)),
+        );
         self.drag = None;
+        crate::diagnostics::event(format!(
+            "crop_centered ratio={} dimensions={size:?} selection={:?}",
+            self.ratio, self.selection
+        ));
     }
     pub fn canvas(
         &mut self,
@@ -85,6 +89,10 @@ impl CropState {
                     } else {
                         (origin, Rect::NOTHING, false)
                     });
+                    crate::diagnostics::event(format!(
+                        "crop_drag_start ratio={} dimensions={size:?} drag={:?} selection={:?}",
+                        self.ratio, self.drag, self.selection
+                    ));
                 }
             }
             if response.dragged_by(egui::PointerButton::Primary) {
@@ -101,6 +109,10 @@ impl CropState {
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary) {
+                crate::diagnostics::event(format!(
+                    "crop_drag_stop ratio={} dimensions={size:?} selection={:?}",
+                    self.ratio, self.selection
+                ));
                 self.drag = None;
             }
         }
@@ -175,12 +187,106 @@ fn bounded(anchor: egui::Pos2, pointer: egui::Pos2, size: Vec2, ratio: Option<f3
     Rect::from_two_pos(anchor, end.to_pos2())
 }
 fn moved(r: Rect, delta: Vec2, size: Vec2) -> Rect {
-    r.translate(delta.clamp(-r.min.to_vec2(), size - r.max.to_vec2()))
+    // A centered, full-height/width crop can exceed the image by a float ULP.
+    // Clamping a delta against that rectangle creates inverted min/max limits
+    // and f32::clamp panics. Bound the size first, then clamp the new origin to
+    // nonnegative travel; this also handles a frame holding an older rectangle.
+    let dimensions = r.size().min(size).max(Vec2::ZERO);
+    let travel = (size - dimensions).max(Vec2::ZERO);
+    let origin = (r.min.to_vec2() + delta).clamp(Vec2::ZERO, travel);
+    Rect::from_min_size(origin.to_pos2(), dimensions)
+        .intersect(Rect::from_min_size(egui::Pos2::ZERO, size))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn centered_ratios_can_be_moved_at_image_boundaries() {
+        for width in (1..5000).step_by(37) {
+            for height in (1..5000).step_by(53) {
+                let size = vec2(width as f32, height as f32);
+                for ratio in 0..RATIOS.len() {
+                    let mut crop = CropState {
+                        ratio,
+                        ..Default::default()
+                    };
+                    crop.center(size);
+                    let rect = crop.selection.unwrap();
+                    assert!(
+                        Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(rect),
+                        "centered crop outside {width}x{height}, ratio {ratio}"
+                    );
+                    let translated = moved(rect, vec2(1.0, 1.0), size);
+                    assert!(translated.is_finite(), "{width}x{height}, ratio {ratio}");
+                    assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(translated));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sixteen_nine_crop_can_be_dragged_after_ratio_selection() {
+        let ctx = egui::Context::default();
+        let size = vec2(8507.0, 3902.0);
+        let mut crop = CropState {
+            ratio: 6,
+            ..Default::default()
+        };
+        crop.center(size);
+        let selected_size = crop.selection.unwrap().size();
+        let image = Rect::from_min_size(pos2(20.0, 20.0), size * (800.0 / size.x));
+        let origin = image.center();
+        let destination = origin + vec2(24.0, 8.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![],
+            vec![],
+            vec![egui::Event::PointerMoved(origin), button(origin, true)],
+            vec![egui::Event::PointerMoved(destination)],
+            vec![button(destination, false)],
+        ] {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1050.0, 720.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let response = ui.interact(
+                            image,
+                            ui.id().with("crop-test"),
+                            egui::Sense::click_and_drag(),
+                        );
+                        crop.canvas(ui, &response, image, size, true);
+                    });
+                },
+            );
+            ctx.tessellate(output.shapes, output.pixels_per_point);
+        }
+        let rect = crop.selection.unwrap();
+        assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(rect));
+        assert!((rect.size() - selected_size).length() < 0.002);
+        assert!(rect.center().x > size.x * 0.5);
+    }
+
+    #[test]
+    fn moving_a_crop_with_roundoff_outside_the_image_does_not_panic() {
+        let size = vec2(2800.0, 3800.0);
+        let rect = Rect::from_min_max(pos2(133.0, -0.00012207031), pos2(2667.0, 3800.0));
+        for delta in [Vec2::ZERO, vec2(1.0, 1.0), vec2(-5000.0, 5000.0)] {
+            let next = moved(rect, delta, size);
+            assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(next));
+            assert!((next.width() - rect.width()).abs() < 0.001);
+        }
+    }
+
     #[test]
     fn ratios_stay_inside_image_for_all_directions_and_moves_keep_size() {
         let size = vec2(1600.0, 900.0);

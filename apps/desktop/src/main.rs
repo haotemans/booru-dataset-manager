@@ -5,6 +5,7 @@ mod api_profiles;
 mod app;
 mod catalog;
 mod collections;
+mod diagnostics;
 mod dialogs;
 mod gallery;
 mod image_editor;
@@ -33,8 +34,17 @@ fn main() -> eframe::Result<()> {
         .position(|arg| arg == "--capture")
         .and_then(|i| args.get(i + 1));
     let capture = capture_path.is_some();
+    let log_directory = capture_path
+        .map(|path| std::path::Path::new(path).join("logs"))
+        .unwrap_or_else(|| paths::data_directory().join("logs"));
+    if let Err(error) = diagnostics::install(&log_directory) {
+        eprintln!(
+            "Unable to initialize diagnostics at {}: {error}",
+            log_directory.display()
+        );
+    }
     let compact = std::env::args().any(|arg| arg == "--compact");
-    eframe::run_native(
+    let result = eframe::run_native(
         "Booru Dataset Manager",
         eframe::NativeOptions {
             persistence_path: Some(
@@ -53,5 +63,10 @@ fn main() -> eframe::Result<()> {
             ..Default::default()
         },
         Box::new(|cc| Ok(Box::new(app::BdmApp::new(cc)))),
-    )
+    );
+    match &result {
+        Ok(()) => diagnostics::event("shutdown result=ok"),
+        Err(error) => diagnostics::event(format!("shutdown result=error error={error}")),
+    }
+    result
 }

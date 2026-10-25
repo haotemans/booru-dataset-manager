@@ -298,7 +298,7 @@ impl BdmApp {
                             ui.set_width(ui.available_width());
                             ui.label(RichText::new("裁剪比例").size(12.0).color(MUTED));
                             let old = self.image_editor.crop.ratio;
-                            egui::ComboBox::from_id_salt("crop-ratio")
+                            let picker = egui::ComboBox::from_id_salt("crop-ratio")
                                 .width(ui.available_width() - 24.0)
                                 .selected_text(crop::RATIOS[old].0)
                                 .show_ui(ui, |ui| {
@@ -310,10 +310,14 @@ impl BdmApp {
                                         );
                                     }
                                 });
-                            if old != self.image_editor.crop.ratio
-                                && self.image_editor.crop.selection.is_some()
-                            {
-                                self.image_editor.crop.center(dimensions);
+                            if picker.response.clicked() {
+                                crate::diagnostics::event(format!("crop_ratio_menu media={id} dimensions={dimensions:?} selection={:?}", self.image_editor.crop.selection));
+                            }
+                            if old != self.image_editor.crop.ratio {
+                                crate::diagnostics::event(format!("crop_ratio media={id} from={} to={} dimensions={dimensions:?} selection={:?}", crop::RATIOS[old].0, crop::RATIOS[self.image_editor.crop.ratio].0, self.image_editor.crop.selection));
+                                if self.image_editor.crop.selection.is_some() {
+                                    self.image_editor.crop.center(dimensions);
+                                }
                             }
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
@@ -326,6 +330,7 @@ impl BdmApp {
                                     )
                                     .clicked()
                                 {
+                                    crate::diagnostics::event(format!("crop_center media={id} dimensions={dimensions:?}"));
                                     self.image_editor.crop.center(dimensions);
                                 }
                                 if ui
@@ -335,6 +340,7 @@ impl BdmApp {
                                     )
                                     .clicked()
                                 {
+                                    crate::diagnostics::event(format!("crop_clear media={id}"));
                                     self.image_editor.crop.selection = None;
                                 }
                             });
@@ -601,6 +607,9 @@ impl BdmApp {
             let d = m.dimensions();
             self.image_editor.crop.pixels(vec2(d.0 as f32, d.1 as f32))
         });
+        crate::diagnostics::event(format!(
+            "editor_start media={id} cropping={cropping} install={install} crop={crop:?}"
+        ));
         let cancel = Arc::new(AtomicBool::new(false));
         let thread_cancel = cancel.clone();
         let repaint = ctx.clone();

@@ -304,6 +304,9 @@ impl BdmApp {
                             .inner
                             .on_hover_text("Inpainting · 局部修复");
                         if button.clicked() {
+                            crate::diagnostics::event(format!(
+                                "editor_tab media={id} tab=inpainting"
+                            ));
                             self.image_editor.visible = true;
                             self.image_editor.cropping = false;
                         }
@@ -325,6 +328,10 @@ impl BdmApp {
                             .inner
                             .clicked()
                         {
+                            crate::diagnostics::event(format!(
+                                "editor_tab media={id} tab=crop dimensions={}x{}",
+                                media.width, media.height
+                            ));
                             self.image_editor.visible = true;
                             self.image_editor.cropping = true;
                         }

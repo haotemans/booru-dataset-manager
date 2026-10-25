@@ -30,5 +30,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bdm-desktop-windows
-          path: target/debug/bdm-desktop.exe
+          path: |
+            target/debug/bdm-desktop.exe
+            target/debug/bdm_desktop.pdb
           if-no-files-found: error
