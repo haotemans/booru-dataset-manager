@@ -28,6 +28,10 @@ pub struct ReviewState {
     canvas: Option<Rect>,
     #[cfg(test)]
     pub(crate) load_original_button: Option<Rect>,
+    #[cfg(test)]
+    pub(crate) redownload_confirm_button: Option<Rect>,
+    #[cfg(test)]
+    pub(crate) redownload_cancel_button: Option<Rect>,
 }
 
 impl Default for ReviewState {
@@ -52,6 +56,10 @@ impl Default for ReviewState {
             canvas: None,
             #[cfg(test)]
             load_original_button: None,
+            #[cfg(test)]
+            redownload_confirm_button: None,
+            #[cfg(test)]
+            redownload_cancel_button: None,
         }
     }
 }

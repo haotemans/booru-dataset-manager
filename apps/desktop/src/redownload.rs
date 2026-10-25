@@ -4,7 +4,8 @@ use std::sync::mpsc::{self, TryRecvError};
 
 pub(crate) struct RedownloadNotice {
     pub(crate) id: usize,
-    // None while downloading; retain the outcome until the user dismisses it.
+    pub(crate) confirming: bool,
+    // None during confirmation or download; retain outcomes until dismissed.
     pub(crate) result: Option<Result<(), String>>,
 }
 
@@ -19,6 +20,7 @@ impl BdmApp {
         self.image_editor.visible = true;
         self.image_editor.cropping = false;
         self.media_review.redownload_notice = Some(RedownloadNotice {
+            confirming: std::env::args().any(|arg| arg == "--capture-redownload-confirmation"),
             id: 3,
             result: None,
         });
@@ -27,11 +29,31 @@ impl BdmApp {
     pub(crate) fn request_redownload(&mut self, ctx: &egui::Context, id: usize) {
         if let Some((active_id, _)) = &self.media_review.redownload {
             self.media_review.redownload_notice = Some(RedownloadNotice {
+                confirming: false,
                 id: *active_id,
                 result: None,
             });
             return;
         }
+        self.media_review.redownload_notice = Some(RedownloadNotice {
+            id,
+            confirming: true,
+            result: None,
+        });
+        crate::diagnostics::event(format!("redownload_confirmation_open media={id}"));
+        ctx.request_repaint();
+    }
+
+    pub(crate) fn confirm_redownload(&mut self, ctx: &egui::Context, id: usize) {
+        if !self
+            .media_review
+            .redownload_notice
+            .as_ref()
+            .is_some_and(|notice| notice.id == id && notice.confirming)
+        {
+            return;
+        }
+        crate::diagnostics::event(format!("redownload_confirmed media={id}"));
         self.image_editor.error.clear();
         self.form_error.clear();
         let result = self.start_redownload(ctx, id);
@@ -40,6 +62,7 @@ impl BdmApp {
             self.notify(ctx, error);
         }
         self.media_review.redownload_notice = Some(RedownloadNotice {
+            confirming: false,
             id,
             result: result.err().map(Err),
         });
@@ -132,6 +155,7 @@ impl BdmApp {
             }
         };
         self.media_review.redownload_notice = Some(RedownloadNotice {
+            confirming: false,
             id,
             result: Some(outcome),
         });
@@ -141,8 +165,11 @@ impl BdmApp {
         let Some(notice) = &self.media_review.redownload_notice else {
             return;
         };
-        let running = notice.result.is_none();
+        let id = notice.id;
+        let confirming = notice.confirming;
+        let running = !confirming && notice.result.is_none();
         let mut close = false;
+        let mut confirm = false;
         egui::Window::new("重新下载原图")
             .id(egui::Id::new("redownload_notice"))
             .order(egui::Order::Tooltip)
@@ -161,33 +188,56 @@ impl BdmApp {
                         .color(MUTED),
                 );
                 ui.add_space(12.0);
-                match &notice.result {
-                    None => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("正在下载原图并校验…");
-                        });
-                        ui.label("校验通过后替换当前图片，并保留当前文件备份。");
+                if confirming {
+                    ui.label(RichText::new("确认重新下载原图？").font(medium(15.0)));
+                    ui.label("来源原图将替换当前图片，撤销当前裁剪和局部修复结果。");
+                    ui.label("替换前会保留当前文件备份。");
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        let accept = ui.button("确认重新下载");
+                        let cancel = ui.button("取消");
+                        #[cfg(test)]
+                        {
+                            self.media_review.redownload_confirm_button = Some(accept.rect);
+                            self.media_review.redownload_cancel_button = Some(cancel.rect);
+                        }
+                        confirm = accept.clicked();
+                        close = cancel.clicked();
+                    });
+                } else {
+                    match &notice.result {
+                        None => {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("正在下载原图并校验…");
+                            });
+                            ui.label("校验通过后替换当前图片，并保留当前文件备份。");
+                        }
+                        Some(Ok(())) => {
+                            ui.label(RichText::new("原图下载完成").color(ACCENT));
+                            ui.label("已替换当前图片并刷新预览，旧文件已保留备份。");
+                        }
+                        Some(Err(error)) => {
+                            ui.label(RichText::new("未能完成原图下载").color(DANGER));
+                            ui.label(error);
+                        }
                     }
-                    Some(Ok(())) => {
-                        ui.label(RichText::new("原图下载完成").color(ACCENT));
-                        ui.label("已替换当前图片并刷新预览，旧文件已保留备份。");
-                    }
-                    Some(Err(error)) => {
-                        ui.label(RichText::new("未能完成原图下载").color(DANGER));
-                        ui.label(error);
-                    }
+                    ui.add_space(16.0);
+                    close = ui
+                        .add_enabled(!running, egui::Button::new("关闭"))
+                        .clicked();
                 }
-                ui.add_space(16.0);
-                close = ui
-                    .add_enabled(!running, egui::Button::new("关闭"))
-                    .clicked();
             });
         // Escape belongs to this popup, never to the underlying review window.
         let escape =
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         if !running && (close || escape) {
+            crate::diagnostics::event(format!(
+                "redownload_popup_closed media={id} confirming={confirming}"
+            ));
             self.media_review.redownload_notice = None;
+        } else if confirming && confirm {
+            self.confirm_redownload(ctx, id);
         }
     }
 }
@@ -230,24 +280,13 @@ mod tests {
     }
 
     #[test]
-    fn redownload_click_shows_popup_and_toast_over_review_and_escape_only_closes_popup() {
-        for cropping in [false, true] {
-            let ctx = egui::Context::default();
-            crate::theme::setup(&ctx);
-            let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
-            app.open_media(3);
-            app.image_editor.visible = true;
-            app.image_editor.cropping = cropping;
-            app.prefs.confirm_image_edits = false;
-            for _ in 0..3 {
-                frame(&ctx, &mut app, vec![]);
-            }
-            let pos = app.image_editor.redownload_button.unwrap().center();
-            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(pos)]);
+    fn redownload_click_requires_confirmation_and_cancel_preserves_review() {
+        fn click(ctx: &egui::Context, app: &mut BdmApp, pos: egui::Pos2) {
+            frame(ctx, app, vec![egui::Event::PointerMoved(pos)]);
             for pressed in [true, false] {
                 frame(
-                    &ctx,
-                    &mut app,
+                    ctx,
+                    app,
                     vec![egui::Event::PointerButton {
                         pos,
                         button: egui::PointerButton::Primary,
@@ -256,10 +295,28 @@ mod tests {
                     }],
                 );
             }
-            assert!(matches!(
-                app.media_review.redownload_notice.as_ref().unwrap().result,
-                Some(Err(_))
-            ));
+        }
+        for cropping in [false, true] {
+            let ctx = egui::Context::default();
+            crate::theme::setup(&ctx);
+            let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
+            app.open_media(3);
+            app.image_editor.visible = true;
+            app.image_editor.cropping = cropping;
+            app.prefs.confirm_image_edits = false;
+            let before = app.library.media.clone();
+            for _ in 0..3 {
+                frame(&ctx, &mut app, vec![]);
+            }
+            let pos = app.image_editor.redownload_button.unwrap().center();
+            click(&ctx, &mut app, pos);
+            assert!(
+                app.media_review
+                    .redownload_notice
+                    .as_ref()
+                    .unwrap()
+                    .confirming
+            );
             assert!(app.media_review.redownload.is_none());
             let output = frame(&ctx, &mut app, vec![]);
             let popup =
@@ -269,12 +326,54 @@ mod tests {
             assert!(output
                 .shapes
                 .iter()
-                .any(|shape| text_in(&shape.shape, "未能完成原图下载")));
-            assert!(
-                ctx.memory(|memory| memory.area_rect(egui::Id::new("toast")))
-                    .is_some(),
-                "review must render global notifications"
+                .any(|shape| text_in(&shape.shape, "确认重新下载原图")));
+            frame(
+                &ctx,
+                &mut app,
+                vec![key(egui::Key::ArrowRight), key(egui::Key::Num3)],
             );
+            assert!(matches!(app.dialog, Some(Dialog::Media(3))));
+            assert_eq!(app.library.media, before);
+            let cancel = app.media_review.redownload_cancel_button.unwrap().center();
+            click(&ctx, &mut app, cancel);
+            assert!(app.media_review.redownload_notice.is_none());
+            assert!(app.media_review.redownload.is_none());
+            assert_eq!(app.library.media, before);
+
+            app.request_redownload(&ctx, 3);
+            frame(&ctx, &mut app, vec![]);
+            frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+            assert!(app.media_review.redownload_notice.is_none());
+            assert!(matches!(app.dialog, Some(Dialog::Media(3))));
+            assert!(app.media_review.redownload.is_none());
+
+            app.request_redownload(&ctx, 3);
+            for _ in 0..3 {
+                frame(&ctx, &mut app, vec![]);
+            }
+            let confirm = app.media_review.redownload_confirm_button.unwrap().center();
+            click(&ctx, &mut app, confirm);
+            // Demo mode is rejected only after the explicit confirmation.
+            assert!(
+                !app.media_review
+                    .redownload_notice
+                    .as_ref()
+                    .unwrap()
+                    .confirming
+            );
+            assert!(matches!(
+                app.media_review.redownload_notice.as_ref().unwrap().result,
+                Some(Err(_))
+            ));
+            let output = frame(&ctx, &mut app, vec![]);
+            assert!(output
+                .shapes
+                .iter()
+                .any(|shape| text_in(&shape.shape, "未能完成原图下载")));
+            assert!(ctx
+                .memory(|memory| memory.area_rect(egui::Id::new("toast")))
+                .is_some());
+            assert_eq!(app.library.media, before);
             frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
             assert!(app.media_review.redownload_notice.is_none());
             assert!(matches!(app.dialog, Some(Dialog::Media(3))));

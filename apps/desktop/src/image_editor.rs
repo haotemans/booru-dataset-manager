@@ -258,6 +258,17 @@ impl BdmApp {
             }
         });
         if let Some(ratio) = chosen {
+            if active && self.image_editor.crop.ratio == ratio {
+                self.image_editor.crop.selection = None;
+                self.image_editor.visible = false;
+                self.image_editor.cropping = false;
+                self.image_editor.error.clear();
+                crate::diagnostics::event(format!(
+                    "crop_ratio_cancelled media={id} ratio={}",
+                    crop::RATIOS[ratio].0
+                ));
+                return;
+            }
             self.image_editor.reset(id);
             self.image_editor.visible = true;
             self.image_editor.cropping = true;
@@ -1148,6 +1159,70 @@ mod tests {
         assert!(!app.image_editor.active());
     }
     #[test]
+    fn clicking_the_selected_ratio_cancels_without_writing_the_image() {
+        fn frame(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1050.0, 720.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.shell(ctx),
+            );
+        }
+        fn click_ratio(ctx: &egui::Context, app: &mut BdmApp, ratio: usize) {
+            let pos = app
+                .image_editor
+                .crop_ratio_choices
+                .iter()
+                .find(|(index, _)| *index == ratio)
+                .unwrap()
+                .1
+                .center();
+            frame(ctx, app, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(
+                    ctx,
+                    app,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    }],
+                );
+            }
+            frame(ctx, app, vec![]);
+        }
+        let (_directory, mut app, media) = imported_app();
+        app.image_editor.visible = false;
+        let before = std::fs::read(&media.path).unwrap();
+        let metadata = app.ingest.stored[&(media.id as usize)].clone();
+        let ctx = egui::Context::default();
+        crate::theme::setup(&ctx);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        for ratio in [6, 0, crop::RATIOS.len() - 1] {
+            click_ratio(&ctx, &mut app, ratio);
+            assert!(app.image_editor.visible && app.image_editor.cropping);
+            assert!(app.image_editor.crop.selection.is_some());
+            click_ratio(&ctx, &mut app, ratio);
+            assert!(!app.image_editor.visible);
+            assert!(app.image_editor.crop.selection.is_none());
+            assert!(!app.image_editor.active());
+            assert_eq!(std::fs::read(&media.path).unwrap(), before);
+            assert_eq!(app.ingest.stored[&(media.id as usize)], metadata);
+        }
+        click_ratio(&ctx, &mut app, 6);
+        click_ratio(&ctx, &mut app, 8);
+        assert!(app.image_editor.visible && app.image_editor.cropping);
+        assert_eq!(app.image_editor.crop.ratio, 8);
+        assert!(app.image_editor.crop.selection.is_some());
+        assert_eq!(std::fs::read(&media.path).unwrap(), before);
+    }
+
+    #[test]
     fn crop_confirmation_saves_in_one_click_independently_of_inpainting_confirmation() {
         fn render(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) {
             let _ = ctx.run(
@@ -1211,6 +1286,8 @@ mod tests {
         let original = std::fs::read(&media.path).unwrap();
         // The fixture's synthetic host is rejected locally by the provider, without network IO.
         app.request_redownload(&ctx, id);
+        assert!(app.media_review.redownload.is_none());
+        app.confirm_redownload(&ctx, id);
         assert!(app.media_review.redownload.is_some());
         assert!(app
             .media_review

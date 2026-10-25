@@ -380,7 +380,12 @@ impl BdmApp {
         };
         if self.capture_step == 0
             && self.capture_frames == 0
-            && std::env::args().any(|arg| arg == "--capture-redownload")
+            && std::env::args().any(|arg| {
+                matches!(
+                    arg.as_str(),
+                    "--capture-redownload" | "--capture-redownload-confirmation"
+                )
+            })
         {
             self.capture_step = 54;
             self.capture_redownload_notice();
@@ -497,7 +502,17 @@ impl BdmApp {
                 ];
                 if let Err(error) = std::fs::create_dir_all(&dir).and_then(|_| {
                     image::save_buffer(
-                        dir.join(format!("{}.png", names[self.capture_step])),
+                        dir.join(format!(
+                            "{}.png",
+                            if self.capture_step == 54
+                                && std::env::args()
+                                    .any(|arg| arg == "--capture-redownload-confirmation")
+                            {
+                                "55-redownload-confirmation"
+                            } else {
+                                names[self.capture_step]
+                            }
+                        )),
                         &image
                             .pixels
                             .iter()
@@ -922,11 +937,13 @@ impl BdmApp {
                     54 => self.capture_redownload_notice(),
                     55 => {
                         if let Some(notice) = &mut self.media_review.redownload_notice {
+                            notice.confirming = false;
                             notice.result = Some(Err("来源暂时不可用，请稍后重试。".into()));
                         }
                     }
                     56 => {
                         if let Some(notice) = &mut self.media_review.redownload_notice {
+                            notice.confirming = false;
                             notice.result = Some(Ok(()));
                         }
                     }
