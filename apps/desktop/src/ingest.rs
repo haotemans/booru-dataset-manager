@@ -811,9 +811,7 @@ impl BdmApp {
                 }
                 let (state, color) = task_state(&job.state);
                 let active = self.ingest_active();
-                let action = if self.demo || self.is_capture() {
-                    None
-                } else if active && job.state == "running" {
+                let action = if active && job.state == "running" {
                     Some("暂停")
                 } else if !active && job.state != "completed" {
                     Some("继续")
@@ -829,6 +827,7 @@ impl BdmApp {
                         state,
                         color,
                         action,
+                        enabled: !self.demo && !self.is_capture(),
                         error: job.error.as_deref(),
                     },
                     |ui| {

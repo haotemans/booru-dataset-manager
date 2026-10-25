@@ -1257,9 +1257,7 @@ impl BdmApp {
                 };
                 let (state, color) = task_state(&job.state);
                 let active = self.workflow_active();
-                let action = if self.demo || self.is_capture() {
-                    None
-                } else if active
+                let action = if active
                     && job.state == "running"
                     && self.workflows.active_kind.as_deref() == Some(&job.kind)
                 {
@@ -1278,6 +1276,7 @@ impl BdmApp {
                         state,
                         color,
                         action,
+                        enabled: !self.demo && !self.is_capture(),
                         error: job.error.as_deref(),
                     },
                     |ui| {
@@ -1333,6 +1332,7 @@ impl BdmApp {
                         state: "进行中",
                         color: ACCENT,
                         action: Some("暂停"),
+                        enabled: !self.demo && !self.is_capture(),
                         error: None,
                     },
                     |ui| {

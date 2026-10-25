@@ -94,6 +94,7 @@ pub struct TaskRow<'a> {
     pub state: &'a str,
     pub color: Color32,
     pub action: Option<&'a str>,
+    pub enabled: bool,
     pub error: Option<&'a str>,
 }
 
@@ -113,63 +114,78 @@ pub fn task_state(state: &str) -> (&'static str, Color32) {
 
 /// Shared task hierarchy: identity, fixed status/action columns, then readable metrics.
 pub fn task_row(ui: &mut Ui, row: TaskRow<'_>, details: impl FnOnce(&mut Ui)) -> bool {
-    let mut clicked = false;
-    let title_width = (ui.available_width() - 170.0).max(80.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        ui.allocate_ui_with_layout(
-            vec2(title_width, 30.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                icon(ui, rect.shrink(2.0), row.kind, ACCENT);
-                ui.add(egui::Label::new(RichText::new(row.title).font(medium(13.0))).truncate())
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 22.0;
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().button_padding = vec2(10.0, 4.0);
+        let mut clicked = false;
+        let title_width = (ui.available_width() - 170.0).max(80.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.allocate_ui_with_layout(
+                vec2(title_width, 30.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_width(title_width);
+                    let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+                    icon(ui, rect.shrink(2.0), row.kind, ACCENT);
+                    ui.add(
+                        egui::Label::new(RichText::new(row.title).font(medium(13.0))).truncate(),
+                    )
                     .on_hover_text(row.title);
-            },
-        );
-        ui.allocate_ui_with_layout(
-            vec2(80.0, 30.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                badge(ui, row.state, row.color);
-            },
-        );
-        ui.allocate_ui_with_layout(
-            vec2(74.0, 30.0),
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                if let Some(action) = row.action {
-                    clicked = ui
-                        .add_sized(
-                            [64.0, 28.0],
-                            egui::Button::new(RichText::new(action).size(12.0)).rounding(5.0),
-                        )
-                        .clicked();
-                }
-            },
-        );
-    });
-    egui::Frame::none()
-        .inner_margin(egui::Margin {
-            left: 28.0,
-            right: 0.0,
-            top: 2.0,
-            bottom: 8.0,
-        })
-        .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(16.0, 6.0);
-                if !row.subtitle.is_empty() {
-                    ui.label(RichText::new(row.subtitle).size(12.0).color(MUTED));
-                }
-                details(ui);
-            });
-            if let Some(error) = row.error {
-                ui.add_space(4.0);
-                ui.add(egui::Label::new(RichText::new(error).size(12.0).color(AMBER)).wrap());
-            }
+                },
+            );
+            ui.allocate_ui_with_layout(
+                vec2(80.0, 30.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_width(80.0);
+                    badge(ui, row.state, row.color);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                vec2(74.0, 30.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    ui.set_width(74.0);
+                    if let Some(action) = row.action {
+                        clicked = ui
+                            .add_enabled_ui(row.enabled, |ui| {
+                                ui.add_sized(
+                                    [64.0, 28.0],
+                                    egui::Button::new(RichText::new(action).size(12.0))
+                                        .rounding(5.0),
+                                )
+                            })
+                            .inner
+                            .clicked();
+                    }
+                },
+            );
         });
-    clicked
+        egui::Frame::none()
+            .inner_margin(egui::Margin {
+                left: 28.0,
+                right: 0.0,
+                top: 2.0,
+                bottom: 8.0,
+            })
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(16.0, 6.0);
+                    if !row.subtitle.is_empty() {
+                        ui.label(RichText::new(row.subtitle).size(12.0).color(MUTED));
+                    }
+                    details(ui);
+                });
+                if let Some(error) = row.error {
+                    ui.add_space(4.0);
+                    ui.add(egui::Label::new(RichText::new(error).size(12.0).color(AMBER)).wrap());
+                }
+            });
+        clicked
+    })
+    .inner
 }
 
 pub fn task_metric(ui: &mut Ui, label: &str, value: impl std::fmt::Display, color: Color32) {
