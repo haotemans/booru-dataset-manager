@@ -44,6 +44,10 @@ fn main() -> eframe::Result<()> {
         );
     }
     let compact = std::env::args().any(|arg| arg == "--compact");
+    diagnostics::event(format!(
+        "analysis_python program={:?}",
+        bdm_infrastructure::visual::python_command().get_program()
+    ));
     let result = eframe::run_native(
         "Booru Dataset Manager",
         eframe::NativeOptions {

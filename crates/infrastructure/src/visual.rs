@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::{
     collections::BTreeSet,
     io::{BufRead, BufReader, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -129,18 +129,34 @@ fn candidate_features(
     ids.into_iter().take(512).map(|other|storage(repo.connection.query_row("SELECT media_id,phash,embedding FROM visual_features WHERE version=?1 AND media_id=?2",params![VERSION,other],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))))).collect()
 }
 
-pub fn python_command() -> Command {
-    let python = std::env::var_os("BDM_ANALYSIS_PYTHON")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let development = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/analysis-runtime/Scripts/python.exe");
-            if development.is_file() {
-                development
-            } else {
-                "python".into()
+fn analysis_python(executable: Option<&Path>, override_path: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = override_path {
+        return path;
+    }
+    let runtime = if cfg!(windows) {
+        "Scripts/python.exe"
+    } else {
+        "bin/python"
+    };
+    if let Some(parent) = executable.and_then(Path::parent) {
+        for directory in parent.ancestors() {
+            for relative in ["analysis-runtime", "target/analysis-runtime"] {
+                let candidate = directory.join(relative).join(runtime);
+                if candidate.is_file() {
+                    return candidate;
+                }
             }
-        });
+        }
+    }
+    "python".into()
+}
+
+pub fn python_command() -> Command {
+    let executable = std::env::current_exe().ok();
+    let python = analysis_python(
+        executable.as_deref(),
+        std::env::var_os("BDM_ANALYSIS_PYTHON").map(PathBuf::from),
+    );
     #[cfg(windows)]
     let command = {
         use std::os::windows::process::CommandExt;
@@ -514,6 +530,50 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn packaged_python_resolution_uses_the_installed_location_and_honors_overrides() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = root
+            .path()
+            .join("target/analysis-runtime")
+            .join(if cfg!(windows) {
+                "Scripts/python.exe"
+            } else {
+                "bin/python"
+            });
+        std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        std::fs::write(&runtime, b"test fixture").unwrap();
+        for relative in [
+            "target/debug/bdm-desktop.exe",
+            "target/actions-fixture/bdm-desktop.exe",
+        ] {
+            let exe = root.path().join(relative);
+            assert_eq!(super::analysis_python(Some(&exe), None), runtime);
+        }
+        let explicit = root.path().join("custom/python.exe");
+        assert_eq!(
+            super::analysis_python(Some(&root.path().join("app.exe")), Some(explicit.clone())),
+            explicit
+        );
+        let installed = root
+            .path()
+            .join("portable/analysis-runtime")
+            .join(if cfg!(windows) {
+                "Scripts/python.exe"
+            } else {
+                "bin/python"
+            });
+        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::fs::write(&installed, b"test fixture").unwrap();
+        assert_eq!(
+            super::analysis_python(Some(&root.path().join("portable/app.exe")), None),
+            installed
+        );
+        assert_eq!(
+            super::analysis_python(None, None),
+            std::path::PathBuf::from("python")
+        );
+    }
     use super::*;
     use bdm_ports::IngestRepository;
     use sha2::Digest;
