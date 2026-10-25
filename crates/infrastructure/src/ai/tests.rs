@@ -42,6 +42,7 @@ fn server(responses: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<
                     Err(e) => panic!("{e}"),
                 }
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(10)))
                 .unwrap();
@@ -334,4 +335,92 @@ fn client_configuration_errors_pause_without_failing_items() {
     assert_eq!(job.state, "paused");
     assert_eq!(job.cursor, 0);
     assert!(job.deferred.is_empty());
+    assert!(job.error.as_ref().unwrap().contains("API"));
+    assert!(job.analysis_errors.contains_key(&media.id));
+}
+
+#[test]
+fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
+    let mut f = crate::workflow_tests::fixture();
+    let cancel = AtomicBool::new(false);
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let blocked = json!({"choices":[{"finish_reason":"content_filter","message":{"content":""}}]});
+    let (endpoint, worker) = server(vec![(200, blocked.clone()), (200, blocked)]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    profile.settings.batch_size = 1;
+    let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
+    job.mode = "caption".into();
+    run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
+    assert_eq!(worker.join().unwrap().len(), 2);
+    assert_eq!(job.state, "deferred");
+    assert!(job.accepted.is_empty());
+    assert_eq!(job.deferred, vec![media.id]);
+    assert!(job.error.as_ref().unwrap().contains("content_filter"));
+    assert_eq!(job.analysis_errors[&media.id].len(), 2);
+    assert!(!media.path.with_extension("txt").exists());
+    let persisted = f
+        .repo
+        .list_workflows()
+        .unwrap()
+        .into_iter()
+        .find(|j| j.id == job.id)
+        .unwrap();
+    assert_eq!(persisted.analysis_errors, job.analysis_errors);
+    let count: i64 = f
+        .repo
+        .connection
+        .query_row(
+            "SELECT count(*) FROM audit_log WHERE action='api_batch_failure'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+
+    let (endpoint, worker) = server(vec![(
+        200,
+        response(json!([{"id":media.id,"caption":"A landscape."}])),
+    )]);
+    profile.endpoint = endpoint;
+    run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
+    assert_eq!(worker.join().unwrap().len(), 1);
+    assert_eq!(job.state, "completed");
+    assert!(job.accepted.contains(&media.id));
+    assert!(job.deferred.is_empty());
+    assert!(job.analysis_errors.is_empty());
+    assert!(job.error.is_none());
+}
+
+#[test]
+fn explicit_api_refusal_does_not_log_remote_text() {
+    let (endpoint, worker) = server(vec![(
+        200,
+        json!({"choices":[{"finish_reason":"stop","message":{"content":null,"refusal":"remote-sensitive-detail"}}]}),
+    )]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    let error = request(
+        &Client::new(),
+        &profile,
+        &[json!({"id":1,"tags":[]})],
+        &[],
+        "caption",
+        &AtomicBool::new(false),
+    )
+    .err()
+    .unwrap();
+    assert!(matches!(error, AiError::ContentFiltered));
+    assert!(!error.message().contains("remote-sensitive-detail"));
+    assert_eq!(worker.join().unwrap().len(), 1);
 }

@@ -584,6 +584,17 @@ mod tests {
                 ..Default::default()
             })
             .collect();
+        let optimize = app
+            .workflows
+            .jobs
+            .iter_mut()
+            .find(|job| job.kind == "optimize")
+            .unwrap();
+        optimize.mode = "caption".into();
+        optimize.cursor = 2;
+        optimize.deferred = vec![3, 8];
+        optimize.accepted.insert(9999); // Results outside this scope are not successes.
+        optimize.error = Some("API content_filter：未生成成功".into());
         let source = app.library.media.clone();
         for page in [Page::Dashboard, Page::Artist, Page::Character] {
             for gallery in [false, true] {
@@ -627,6 +638,10 @@ mod tests {
                     "去重",
                     "文本优化",
                     "导出",
+                    "自然语言",
+                    "成功 0 / 2",
+                    "待重试 2",
+                    "API content_filter：未生成成功",
                 ] {
                     assert_eq!(
                         visible.iter().any(|text| text == label),
@@ -636,11 +651,8 @@ mod tests {
                 }
                 assert_eq!(app.ingest.jobs.len(), 1);
                 assert_eq!(app.workflows.jobs.len(), 3);
-                assert!(app
-                    .workflows
-                    .jobs
-                    .iter()
-                    .all(|job| job.state == "paused" && job.cursor == 0));
+                assert!(app.workflows.jobs.iter().all(|job| job.state == "paused"
+                    && job.cursor == if job.kind == "optimize" { 2 } else { 0 }));
                 assert_eq!(app.library.media, source);
             }
         }

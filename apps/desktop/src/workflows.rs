@@ -1251,6 +1251,17 @@ impl BdmApp {
                     } else {
                         "文本优化"
                     });
+                    if job.kind == "optimize" {
+                        ui.label(
+                            RichText::new(if job.mode == "caption" {
+                                "自然语言"
+                            } else {
+                                "标签"
+                            })
+                            .size(12.0)
+                            .color(MUTED),
+                        );
+                    }
                     let state = match job.state.as_str() {
                         "running" => "处理中",
                         "paused" | "interrupted" => "已暂停",
@@ -1261,15 +1272,37 @@ impl BdmApp {
                     ui.label(RichText::new(state).size(12.0).color(MUTED));
                     ui.add(
                         egui::ProgressBar::new(
-                            job.cursor.min(job.ids.len()) as f32 / job.ids.len().max(1) as f32,
+                            if job.kind == "optimize" {
+                                job.ids
+                                    .iter()
+                                    .filter(|id| job.accepted.contains(id))
+                                    .count()
+                            } else {
+                                job.cursor.min(job.ids.len())
+                            } as f32
+                                / job.ids.len().max(1) as f32,
                         )
                         .desired_width(130.0)
-                        .text(format!(
-                            "{} / {}",
-                            job.cursor,
-                            job.ids.len()
-                        )),
+                        .text(if job.kind == "optimize" {
+                            format!(
+                                "成功 {} / {}",
+                                job.ids
+                                    .iter()
+                                    .filter(|id| job.accepted.contains(id))
+                                    .count(),
+                                job.ids.len()
+                            )
+                        } else {
+                            format!("{} / {}", job.cursor, job.ids.len())
+                        }),
                     );
+                    if job.kind == "optimize" && !job.deferred.is_empty() {
+                        ui.label(
+                            RichText::new(format!("待重试 {}", job.deferred.len()))
+                                .size(12.0)
+                                .color(AMBER),
+                        );
+                    }
                     if !self.workflow_active()
                         && !self.demo
                         && !self.is_capture()
@@ -1288,6 +1321,11 @@ impl BdmApp {
                         response.on_hover_text(error);
                     }
                 });
+                if job.kind == "optimize" {
+                    if let Some(error) = &job.error {
+                        ui.label(RichText::new(error).size(12.0).color(AMBER));
+                    }
+                }
             }
             if self.workflow_active() {
                 ui.horizontal(|ui| {
@@ -1359,9 +1397,15 @@ impl BdmApp {
             } else {
                 &job.ids[job.cursor.min(job.ids.len())..]
             };
-            let relevant = remaining.iter().any(|id| {
-                valid.contains(id) && !covered.get(&job.kind).is_some_and(|ids| ids.contains(id))
-            });
+            let relevant = remaining
+                .iter()
+                .chain(&job.deferred)
+                .chain(&job.recovery)
+                .any(|id| {
+                    valid.contains(id)
+                        && !job.accepted.contains(id)
+                        && !covered.get(&job.kind).is_some_and(|ids| ids.contains(id))
+                });
             if (relevant
                 || (self.workflow_active()
                     && self.workflows.active_kind.as_deref() == Some(&job.kind)
@@ -1410,7 +1454,24 @@ impl BdmApp {
                                         MUTED
                                     },
                                 );
-                                ui.label(format!("{} / {}", job.cursor, job.ids.len()));
+                                if job.kind == "optimize" {
+                                    ui.label(format!(
+                                        "{} · 成功 {} / {} · 待重试 {}",
+                                        if job.mode == "caption" {
+                                            "自然语言"
+                                        } else {
+                                            "标签"
+                                        },
+                                        job.ids
+                                            .iter()
+                                            .filter(|id| job.accepted.contains(id))
+                                            .count(),
+                                        job.ids.len(),
+                                        job.deferred.len()
+                                    ));
+                                } else {
+                                    ui.label(format!("{} / {}", job.cursor, job.ids.len()));
+                                }
                                 if job.dedup_stats_recorded {
                                     icon_stat(
                                         ui,

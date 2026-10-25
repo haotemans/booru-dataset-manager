@@ -42,10 +42,41 @@ pub struct AiProfile {
 enum AiError {
     Transport,
     Content,
+    ContentFiltered,
     Configuration,
     Image,
     RateLimited(u64),
     Cancelled,
+}
+
+impl AiError {
+    fn message(&self) -> String {
+        match self {
+            Self::ContentFiltered => {
+                "API 服务端内容过滤拦截（content_filter / refusal），未返回描述；尚未生成成功。"
+                    .into()
+            }
+            Self::Content => "API 返回内容为空、格式无效或不符合任务要求，未生成有效结果。".into(),
+            Self::Transport => "API 网络连接、请求超时或服务端错误，未生成有效结果。".into(),
+            Self::Configuration => "API 认证、权限、模型或服务地址无效；修正配置后继续。".into(),
+            Self::Image => "图片读取或压缩失败；未发送该图片。".into(),
+            Self::RateLimited(seconds) => {
+                format!("API 请求受限；服务要求等待 {seconds} 秒后重试。")
+            }
+            Self::Cancelled => "任务已暂停。".into(),
+        }
+    }
+}
+
+fn record_failure(job: &mut WorkflowJob, ids: &[i64], message: &str) {
+    job.error = Some(message.into());
+    for id in ids {
+        let history = job.analysis_errors.entry(*id).or_default();
+        history.push(message.into());
+        if history.len() > 8 {
+            history.remove(0);
+        }
+    }
 }
 #[derive(Default, Serialize, Deserialize)]
 struct RateState {
@@ -177,6 +208,16 @@ fn request(
         return Err(AiError::Content);
     }
     let response: Value = serde_json::from_slice(&bytes).map_err(|_| AiError::Content)?;
+    if response
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        == Some("content_filter")
+        || response
+            .pointer("/choices/0/message/refusal")
+            .is_some_and(|v| !v.is_null() && v.as_str().is_none_or(|text| !text.trim().is_empty()))
+    {
+        return Err(AiError::ContentFiltered);
+    }
     let content_value = response
         .pointer("/choices/0/message/content")
         .ok_or(AiError::Content)?;
@@ -458,11 +499,12 @@ pub fn run(
             }
             if matches!(response, Err(AiError::Configuration)) {
                 job.state = "paused".into();
-                job.error = Some("API 认证、权限、模型或服务地址无效；修正配置后继续。".into());
+                record_failure(job, &work, &AiError::Configuration.message());
                 break;
             }
             let mut accepted = BTreeSet::new();
-            let content_failure = matches!(response, Err(AiError::Content));
+            let content_failure =
+                matches!(response, Err(AiError::Content | AiError::ContentFiltered));
             if let Ok(ref value) = response {
                 for (&id, row) in &value.items {
                     let Some(media) = all.get(&id) else {
@@ -566,6 +608,7 @@ pub fn run(
                         },
                     )?;
                     job.accepted.insert(id);
+                    job.analysis_errors.remove(&id);
                     accepted.insert(id);
                 }
             }
@@ -574,6 +617,20 @@ pub fn run(
                 .copied()
                 .filter(|id| !job.accepted.contains(id))
                 .collect();
+            if !failed.is_empty() {
+                let message = match &response {
+                    Err(error) => error.message(),
+                    Ok(_) => "API 未返回对应图片的有效结果，或结果未通过本地校验。".into(),
+                };
+                record_failure(job, &failed, &message);
+                repo.audit(
+                    "api_batch_failure",
+                    &json!({"job_id":job.id,"mode":job.mode,"ids":failed,"reason":message})
+                        .to_string(),
+                )?;
+            } else {
+                job.error = None;
+            }
             if failed.is_empty() {
                 rate.successes += 1;
                 if rate.active == 1 && rate.successes >= 5 {
@@ -629,6 +686,14 @@ pub fn run(
         }
     }
     job.recovery = Vec::new();
+    if job.state == "completed" {
+        job.error = None;
+    } else if !job.deferred.is_empty() && job.error.is_none() {
+        job.error = Some(format!(
+            "{} 张图片尚未生成成功，可继续任务重试；请查看失败记录。",
+            job.deferred.len()
+        ));
+    }
     if let Err(error) = &result {
         job.state = "failed".into();
         job.error = Some(error.to_string());
