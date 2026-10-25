@@ -1813,6 +1813,70 @@ fn export_reconciles_hashes_and_preserves_selected_text_format() {
 }
 
 #[test]
+fn export_filters_redundant_character_bases_without_rewriting_reviewed_artifacts() {
+    let mut f = fixture();
+    let cancel = AtomicBool::new(false);
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let raw_path = media.path.with_extension("raw_tags.txt");
+    let original_raw = std::fs::read(&raw_path).unwrap();
+    let mut rules = f.repo.tag_rules().unwrap();
+    rules
+        .categories
+        .extend([("base".into(), 4), ("specific".into(), 4)]);
+    assert!(rules.accept_character_implication("base", "specific"));
+    f.repo.save_tag_rules(&rules).unwrap();
+    f.repo.set_media_keep(media.id, true).unwrap();
+    for (index, source, expected) in [
+        (0, "base, solo", "base, solo"),
+        (1, "base, specific, another", "specific, another"),
+    ] {
+        f.repo
+            .write_artifact(&media, "tags", source, "ai:test", "complete")
+            .unwrap();
+        if index == 1 {
+            f.repo.review_artifact(media.id, "tags").unwrap();
+        }
+        let mut job = f.repo.new_workflow("export", vec![media.id]).unwrap();
+        job.mode = "tags".into();
+        let destination = f.directory.path().join(format!("export-{index}"));
+        crate::export::run(&mut f.repo, &mut job, &destination, &cancel, |_| {}).unwrap();
+        let folder = destination.join(format!("media_{}", media.id));
+        let actual =
+            std::fs::read_to_string(folder.join(format!("media_{}.txt", media.id))).unwrap();
+        assert_eq!(actual, expected);
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(folder.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(
+            manifest["text_sha256"],
+            format!("{:x}", Sha256::digest(actual.as_bytes()))
+        );
+        assert_eq!(
+            f.repo
+                .list_artifacts()
+                .unwrap()
+                .into_iter()
+                .find(|a| a.kind == "tags")
+                .unwrap()
+                .content,
+            source
+        );
+        job.cursor = 0;
+        crate::export::run(&mut f.repo, &mut job, &destination, &cancel, |_| {}).unwrap();
+    }
+    assert_eq!(std::fs::read(raw_path).unwrap(), original_raw);
+}
+
+#[test]
 #[ignore = "Runs pinned local DINOv3 model and performs real two-signal duplicate analysis on temporary synthetic images"]
 fn local_dinov3_scan_preserves_single_signal_and_removes_dual_match() {
     let mut f = fixture();

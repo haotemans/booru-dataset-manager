@@ -1068,7 +1068,7 @@ impl BdmApp {
 
     pub(crate) fn review_text(&self, media: &Media, tab: usize) -> String {
         if tab == 0 {
-            return self
+            let source = self
                 .ingest
                 .stored
                 .get(&media.id)
@@ -1080,9 +1080,18 @@ impl BdmApp {
                         String::new()
                     }
                 });
+            return bdm_domain::tags::filter_character_tags(&source, false, &self.workflows.rules);
         }
         if let Some(artifact) = self.review_output(media.id, tab) {
-            return artifact.content;
+            return if tab == 1 {
+                bdm_domain::tags::filter_character_tags(
+                    &artifact.content,
+                    true,
+                    &self.workflows.rules,
+                )
+            } else {
+                artifact.content
+            };
         }
         if self.demo && !self.is_capture() {
             if tab == 1 && media.optimized {
@@ -1971,6 +1980,53 @@ mod tests {
             assert_eq!(groups[index].1, vec![tag]);
         }
         assert_eq!(groups.iter().map(|(_, v)| v.len()).sum::<usize>(), 7);
+
+        app.workflows
+            .rules
+            .characters
+            .push(bdm_domain::tags::CharacterRelation {
+                base: "character".into(),
+                variant: "character_specific".into(),
+                verified: true,
+                exclusive_group: String::new(),
+                evidence: "human-confirmed".into(),
+            });
+        let source = app.ingest.stored.get_mut(&3).unwrap();
+        source.post.tag_string.push_str(" character_specific");
+        source
+            .post
+            .tag_string_character
+            .push_str(" character_specific");
+        let original = source.post.tag_string.clone();
+        app.workflows.artifacts.insert(
+            (3, "tags".into()),
+            TextArtifact {
+                media_id: 3,
+                kind: "tags".into(),
+                content: "character, character_specific, solo".into(),
+                state: "complete".into(),
+                reviewed: true,
+                provenance: "ai:test".into(),
+            },
+        );
+        let media = app.library.media.iter().find(|m| m.id == 3).unwrap();
+        let displayed = app.review_text(media, 0);
+        assert!(!displayed.split_whitespace().any(|tag| tag == "character"));
+        assert_eq!(
+            raw_tag_groups(
+                &displayed,
+                Some(&app.ingest.stored[&3].post),
+                &app.workflows.rules
+            )[2]
+            .1,
+            vec!["character_specific"]
+        );
+        assert_eq!(app.review_text(media, 1), "character_specific, solo");
+        assert_eq!(app.ingest.stored[&3].post.tag_string, original);
+        assert_eq!(
+            app.workflows.artifacts[&(3, "tags".into())].content,
+            "character, character_specific, solo"
+        );
     }
     #[test]
     fn crop_drag_moves_and_resizes_selection_without_panning_review_canvas() {

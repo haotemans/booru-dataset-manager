@@ -127,6 +127,21 @@ impl TagRules {
         name
     }
 
+    fn redundant_character_bases<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> BTreeSet<String> {
+        if self.validate_characters().is_err() {
+            return BTreeSet::new();
+        }
+        let present: BTreeSet<_> = names.into_iter().map(|name| self.canonical(name)).collect();
+        self.characters
+            .iter()
+            .filter(|r| r.verified && present.contains(&self.canonical(&r.variant)))
+            .map(|r| self.canonical(&r.base))
+            .collect()
+    }
+
     pub fn validate_characters(&self) -> Result<(), &'static str> {
         let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for relation in self.characters.iter().filter(|r| r.verified) {
@@ -155,6 +170,36 @@ impl TagRules {
     }
 }
 
+/// Apply confirmed character hierarchy to a view or export without rewriting its
+/// source artifact. A base survives whenever its specific variant is absent.
+pub fn filter_character_tags(content: &str, comma_separated: bool, rules: &TagRules) -> String {
+    let tags: Vec<_> = if comma_separated {
+        content.split(',').map(str::trim).collect()
+    } else {
+        content.split_whitespace().collect()
+    };
+    let name = |tag: &str| {
+        if tag.starts_with("artist:") || tag.starts_with("@artist ") {
+            return String::new();
+        }
+        let tag = tag.strip_prefix("character:").unwrap_or(tag);
+        rules.canonical(&tag.trim_start_matches('@').replace(' ', "_"))
+    };
+    let names: Vec<_> = tags.iter().map(|tag| name(tag)).collect();
+    let redundant = rules.redundant_character_bases(names.iter().map(String::as_str));
+    let retained: Vec<_> = tags
+        .iter()
+        .zip(&names)
+        .filter(|(_, name)| !redundant.contains(*name))
+        .map(|(tag, _)| *tag)
+        .collect();
+    if retained.len() == tags.len() {
+        content.to_owned()
+    } else {
+        retained.join(if comma_separated { ", " } else { " " })
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NormalizedTags {
     pub tags: Vec<String>,
@@ -175,11 +220,8 @@ pub fn normalize(raw: &str, artists: &str, characters: &str, rules: &TagRules) -
     tags.retain(|tag| seen.insert(tag.clone()));
     let mut result = NormalizedTags::default();
     if rules.validate_characters().is_ok() {
-        for relation in &rules.characters {
-            if relation.verified && seen.contains(&canonical(&relation.variant)) {
-                tags.retain(|tag| tag != &canonical(&relation.base));
-            }
-        }
+        let redundant = rules.redundant_character_bases(tags.iter().map(String::as_str));
+        tags.retain(|tag| !redundant.contains(tag));
     } else {
         result
             .warnings
@@ -212,6 +254,46 @@ pub fn normalize(raw: &str, artists: &str, characters: &str, rules: &TagRules) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn character_filter_keeps_a_lone_base_and_only_removes_confirmed_redundancy() {
+        let mut rules = TagRules::default();
+        rules.characters.push(CharacterRelation {
+            base: "phoenix_reffaella".into(),
+            variant: "phoenix_reffaella_(the_illness_called_life)".into(),
+            verified: true,
+            exclusive_group: String::new(),
+            evidence: "human-confirmed".into(),
+        });
+        let base = "phoenix_reffaella";
+        let variant = "phoenix_reffaella_(the_illness_called_life)";
+        assert_eq!(filter_character_tags(base, false, &rules), base);
+        assert_eq!(filter_character_tags(variant, false, &rules), variant);
+        let raw = format!("solo {base} {variant} another_character");
+        assert_eq!(
+            filter_character_tags(&raw, false, &rules),
+            format!("solo {variant} another_character")
+        );
+        for prefix in ["", "character:", "@"] {
+            let text = format!("{prefix}{base}, {prefix}{variant}, other_variant");
+            assert_eq!(
+                filter_character_tags(&text, true, &rules),
+                format!("{prefix}{variant}, other_variant")
+            );
+        }
+        rules.aliases.insert("old_name".into(), base.into());
+        assert_eq!(
+            filter_character_tags(&format!("old_name {variant}"), false, &rules),
+            variant
+        );
+        rules.characters[0].verified = false;
+        assert_eq!(filter_character_tags(&raw, false, &rules), raw);
+        // A matching prefix alone must never be interpreted as a relationship.
+        assert_eq!(
+            filter_character_tags(&format!("{base} {base}_(unknown)"), false, &rules),
+            format!("{base} {base}_(unknown)")
+        );
+    }
 
     #[test]
     fn source_implications_auto_normalize_without_inventing_exclusivity() {

@@ -21,6 +21,7 @@ pub fn run(
     storage(fs::create_dir_all(destination))?;
     let all = repo.list_media()?;
     let artifacts = repo.list_artifacts()?;
+    let rules = repo.tag_rules()?;
     job.state = "running".into();
     repo.save_workflow(job)?;
     let result: Result<(), IngestError> = (|| {
@@ -47,6 +48,11 @@ pub fn run(
                 job.cursor += 1;
                 continue;
             }
+            let content = if job.mode == "tags" {
+                bdm_domain::tags::filter_character_tags(&text.content, true, &rules)
+            } else {
+                text.content.clone()
+            };
             let base = format!("media_{id}");
             let directory = destination.join(&base);
             let image_name = format!("{base}.{}", media.post.file_ext);
@@ -59,7 +65,7 @@ pub fn run(
                 let existing_text =
                     storage(fs::read_to_string(directory.join(format!("{base}.txt"))))?;
                 if format!("{:x}", Sha256::digest(existing)) != media.sha256
-                    || existing_text != text.content
+                    || existing_text != content
                 {
                     return Err(IngestError::Integrity);
                 }
@@ -71,14 +77,14 @@ pub fn run(
                 )?;
                 let files = [
                     (image_name.clone(), original),
-                    (format!("{base}.txt"), text.content.as_bytes().to_vec()),
+                    (format!("{base}.txt"), content.as_bytes().to_vec()),
                 ];
                 for (name, bytes) in files {
                     let mut file = storage(fs::File::create(temp.path().join(name)))?;
                     storage(file.write_all(&bytes))?;
                     storage(file.sync_all())?;
                 }
-                let manifest = serde_json::json!({"schema":"bdm-export-v1","media_id":id,"image":image_name,"sha256":media.sha256,"source":media.post,"current_dimensions":media.dimensions(),"edit":media.edit,"collections":media.collections,"review":"keep","text_kind":job.mode,"text_sha256":format!("{:x}",Sha256::digest(text.content.as_bytes()))});
+                let manifest = serde_json::json!({"schema":"bdm-export-v1","media_id":id,"image":image_name,"sha256":media.sha256,"source":media.post,"current_dimensions":media.dimensions(),"edit":media.edit,"collections":media.collections,"review":"keep","text_kind":job.mode,"text_sha256":format!("{:x}",Sha256::digest(content.as_bytes()))});
                 let mut file = storage(fs::File::create(temp.path().join("manifest.json")))?;
                 storage(file.write_all(storage(serde_json::to_string(&manifest))?.as_bytes()))?;
                 storage(file.sync_all())?;
