@@ -64,6 +64,16 @@ pub struct EditorState {
     pub editor_button: Option<Rect>,
     #[cfg(test)]
     pub redownload_button: Option<Rect>,
+    #[cfg(test)]
+    pub crop_ratio_button: Option<Rect>,
+    #[cfg(test)]
+    pub crop_ratio_choices: Vec<(usize, Rect)>,
+    #[cfg(test)]
+    pub crop_preview_button: Option<Rect>,
+    #[cfg(test)]
+    pub crop_save_button: Option<Rect>,
+    #[cfg(test)]
+    pub more_button: Option<Rect>,
 }
 impl Default for EditorState {
     fn default() -> Self {
@@ -91,6 +101,16 @@ impl Default for EditorState {
             editor_button: None,
             #[cfg(test)]
             redownload_button: None,
+            #[cfg(test)]
+            crop_ratio_button: None,
+            #[cfg(test)]
+            crop_ratio_choices: Vec::new(),
+            #[cfg(test)]
+            crop_preview_button: None,
+            #[cfg(test)]
+            crop_save_button: None,
+            #[cfg(test)]
+            more_button: None,
         }
     }
 }
@@ -208,6 +228,190 @@ impl BdmApp {
         Ok(())
     }
 
+    pub(crate) fn crop_ratio_picker(&mut self, ui: &mut egui::Ui, id: usize) {
+        let active = self.image_editor.visible && self.image_editor.cropping;
+        let busy = self.image_editor.active() || self.image_editor.preview.is_some();
+        let mut chosen = None;
+        let label = if active {
+            format!("裁剪 · {}", crop::RATIOS[self.image_editor.crop.ratio].0)
+        } else {
+            "裁剪比例".into()
+        };
+        #[cfg(test)]
+        self.image_editor.crop_ratio_choices.clear();
+        let picker = ui
+            .add_enabled_ui(!busy, |ui| {
+                egui::ComboBox::from_id_salt("review-crop-ratio")
+                    .width(132.0)
+                    .height(300.0)
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        for (index, (name, _)) in crop::RATIOS.iter().enumerate() {
+                            let option = ui.selectable_label(
+                                active && self.image_editor.crop.ratio == index,
+                                *name,
+                            );
+                            #[cfg(test)]
+                            self.image_editor
+                                .crop_ratio_choices
+                                .push((index, option.rect));
+                            if option.clicked() {
+                                chosen = Some(index);
+                            }
+                        }
+                    })
+            })
+            .inner;
+        #[cfg(test)]
+        {
+            self.image_editor.crop_ratio_button = Some(picker.response.rect);
+        }
+        if picker.response.clicked() {
+            crate::diagnostics::event(format!("crop_ratio_menu media={id}"));
+        }
+        if let Some(ratio) = chosen {
+            self.image_editor.reset(id);
+            self.image_editor.visible = true;
+            self.image_editor.cropping = true;
+            self.image_editor.crop.ratio = ratio;
+            self.media_review.sidebar = false;
+            let dimensions = self
+                .ingest
+                .stored
+                .get(&id)
+                .map(|m| m.dimensions())
+                .or_else(|| {
+                    self.library
+                        .media
+                        .iter()
+                        .find(|m| m.id == id)
+                        .map(|m| (m.width as u32, m.height as u32))
+                })
+                .unwrap_or((1, 1));
+            crate::diagnostics::event(format!(
+                "crop_ratio media={id} to={} dimensions={dimensions:?}",
+                crop::RATIOS[ratio].0
+            ));
+            self.image_editor
+                .crop
+                .center(vec2(dimensions.0 as f32, dimensions.1 as f32));
+        }
+    }
+
+    pub(crate) fn crop_toolbar(&mut self, ui: &mut egui::Ui, id: usize) {
+        #[cfg(test)]
+        {
+            self.image_editor.crop_preview_button = None;
+            self.image_editor.crop_save_button = None;
+        }
+        let busy = self.image_editor.active();
+        let real =
+            !self.demo && !self.is_capture() && !self.ingest_active() && !self.workflow_active();
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().interact_size.y = 28.0;
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if busy {
+                ui.spinner();
+                ui.label(if self.image_editor.saving {
+                    "正在保存裁剪…"
+                } else {
+                    "正在生成预览…"
+                });
+                if ui.button("取消任务").clicked() {
+                    if let Some(cancel) = &self.image_editor.cancel {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+                return;
+            }
+            if let Some(preview) = self.image_editor.preview.as_ref().and_then(|p| p.crop) {
+                ui.label(format!("{} × {} px", preview.width, preview.height));
+                ui.selectable_value(&mut self.image_editor.show_preview, false, "原图");
+                ui.selectable_value(&mut self.image_editor.show_preview, true, "裁剪预览");
+                let save = ui.add_enabled(
+                    real,
+                    egui::Button::new(RichText::new("保存裁剪").color(egui::Color32::WHITE))
+                        .fill(ACCENT),
+                );
+                #[cfg(test)]
+                {
+                    self.image_editor.crop_save_button = Some(save.rect);
+                }
+                if save.clicked() {
+                    if let Err(error) = self.editor_commit(ui.ctx(), id) {
+                        self.image_editor.error = error;
+                    }
+                }
+                if ui.button("返回调整").clicked() {
+                    self.image_editor.preview = None;
+                    self.image_editor.texture = None;
+                    self.image_editor.show_preview = false;
+                    self.media_review.view = crate::media_review::CanvasView::default();
+                }
+            } else {
+                let dimensions = self
+                    .ingest
+                    .stored
+                    .get(&id)
+                    .map(|m| m.dimensions())
+                    .or_else(|| {
+                        self.library
+                            .media
+                            .iter()
+                            .find(|m| m.id == id)
+                            .map(|m| (m.width as u32, m.height as u32))
+                    })
+                    .unwrap_or((1, 1));
+                let crop = self
+                    .image_editor
+                    .crop
+                    .pixels(vec2(dimensions.0 as f32, dimensions.1 as f32));
+                if let Some(crop) = crop {
+                    ui.label(format!("{} × {} px", crop.width, crop.height));
+                }
+                let preview = ui.add_enabled(real && crop.is_some(), egui::Button::new("预览裁剪"));
+                #[cfg(test)]
+                {
+                    self.image_editor.crop_preview_button = Some(preview.rect);
+                }
+                if preview.clicked() {
+                    self.editor_start_with_mode(ui.ctx(), id, false, false);
+                }
+                let save = ui.add_enabled(
+                    real && crop.is_some(),
+                    egui::Button::new(RichText::new("保存裁剪").color(egui::Color32::WHITE))
+                        .fill(ACCENT),
+                );
+                #[cfg(test)]
+                {
+                    self.image_editor.crop_save_button = Some(save.rect);
+                }
+                if save.clicked() {
+                    self.editor_start_with_mode(ui.ctx(), id, false, true);
+                }
+                if ui.button("重新框选").clicked() {
+                    self.image_editor.crop.selection = None;
+                }
+                ui.label(RichText::new("拖动移动 · 四角调整").size(11.0).color(MUTED));
+            }
+            if ui.button("退出裁剪").clicked() {
+                self.image_editor.preview = None;
+                self.image_editor.texture = None;
+                self.image_editor.crop.selection = None;
+                self.image_editor.visible = false;
+                self.image_editor.error.clear();
+                self.media_review.view = crate::media_review::CanvasView::default();
+            }
+            if !self.image_editor.error.is_empty() {
+                ui.add(
+                    egui::Label::new(RichText::new(&self.image_editor.error).color(DANGER))
+                        .truncate(),
+                )
+                .on_hover_text(&self.image_editor.error);
+            }
+        });
+    }
+
     pub fn editor_panel(&mut self, ui: &mut egui::Ui, id: usize, height: f32) {
         let model = self.image_editor.model_name();
         let root = crate::paths::project_root();
@@ -240,46 +444,9 @@ impl BdmApp {
                     })
                     .font(medium(16.0)),
                 );
-                let source_available = self
-                    .ingest
-                    .stored
-                    .get(&id)
-                    .is_some_and(|media| media.post.file_url.is_some());
-                let redownload_button = ui
-                    .add(egui::Button::new("重新下载原图"))
-                    .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。");
-                #[cfg(test)]
-                {
-                    self.image_editor.redownload_button = Some(redownload_button.rect);
-                }
-                if redownload_button.clicked() {
-                    self.request_redownload(ui.ctx(), id);
-                }
                 if !self.image_editor.error.is_empty() {
-                    ui.label(
-                        RichText::new(&self.image_editor.error)
-                            .size(12.0)
-                            .color(DANGER),
-                    );
+                    ui.label(RichText::new(&self.image_editor.error).size(12.0).color(DANGER));
                 }
-                if self.media_review.redownload.is_some() {
-                    ui.label(
-                        RichText::new("正在下载原图并校验，完成后会自动替换当前文件…")
-                            .size(11.0)
-                            .color(ACCENT),
-                    );
-                }
-                if !source_available {
-                    ui.label(
-                        RichText::new("当前记录没有来源原图地址，无法自动下载。")
-                            .size(11.0)
-                            .color(MUTED),
-                    );
-                }
-                ui.add_enabled_ui(!busy && self.image_editor.preview.is_none(), |ui| {
-                    ui.checkbox(&mut self.prefs.confirm_image_edits, "编辑后二次确认")
-                        .on_hover_text("裁剪和去水印共用；关闭后点击执行按钮即处理并替换当前图片。设置自动记住。删除确认不受影响。");
-                });
                 ui.label(
                     RichText::new(if !self.prefs.confirm_image_edits && self.image_editor.preview.is_none() {
                         "直接保存 · 处理成功后替换当前图片"
@@ -292,92 +459,7 @@ impl BdmApp {
                     .color(MUTED),
                 );
                 ui.add_space(8.0);
-                if cropping && self.image_editor.preview.is_none() {
-                    ui.add_enabled_ui(!busy, |ui| {
-                        crate::review_ui::section().show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(RichText::new("裁剪比例").size(12.0).color(MUTED));
-                            let old = self.image_editor.crop.ratio;
-                            let picker = egui::ComboBox::from_id_salt("crop-ratio")
-                                .width(ui.available_width() - 24.0)
-                                .selected_text(crop::RATIOS[old].0)
-                                .show_ui(ui, |ui| {
-                                    for (index, (name, _)) in crop::RATIOS.iter().enumerate() {
-                                        ui.selectable_value(
-                                            &mut self.image_editor.crop.ratio,
-                                            index,
-                                            *name,
-                                        );
-                                    }
-                                });
-                            if picker.response.clicked() {
-                                crate::diagnostics::event(format!("crop_ratio_menu media={id} dimensions={dimensions:?} selection={:?}", self.image_editor.crop.selection));
-                            }
-                            if old != self.image_editor.crop.ratio {
-                                crate::diagnostics::event(format!("crop_ratio media={id} from={} to={} dimensions={dimensions:?} selection={:?}", crop::RATIOS[old].0, crop::RATIOS[self.image_editor.crop.ratio].0, self.image_editor.crop.selection));
-                                if self.image_editor.crop.selection.is_some() {
-                                    self.image_editor.crop.center(dimensions);
-                                }
-                            }
-                            ui.add_space(6.0);
-                            ui.horizontal(|ui| {
-                                let width = (ui.available_width() - 8.0) / 2.0;
-                                ui.spacing_mut().item_spacing.x = 8.0;
-                                if ui
-                                    .add_sized(
-                                        [width, 30.0],
-                                        egui::Button::new(RichText::new("居中选区").size(12.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    crate::diagnostics::event(format!("crop_center media={id} dimensions={dimensions:?}"));
-                                    self.image_editor.crop.center(dimensions);
-                                }
-                                if ui
-                                    .add_sized(
-                                        [width, 30.0],
-                                        egui::Button::new(RichText::new("重新框选").size(12.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    crate::diagnostics::event(format!("crop_clear media={id}"));
-                                    self.image_editor.crop.selection = None;
-                                }
-                            });
-                        });
-                        ui.add_space(10.0);
-                        if let Some(c) = self.image_editor.crop.pixels(dimensions) {
-                            crate::review_ui::section().show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.label(RichText::new("输出尺寸").size(12.0).color(MUTED));
-                                ui.label(
-                                    RichText::new(format!("{} × {} px", c.width, c.height))
-                                        .font(medium(20.0)),
-                                );
-                                ui.label(
-                                    RichText::new(format!(
-                                        "起点 {}, {} · 原图 {} × {}",
-                                        c.x, c.y, dimensions.x as u32, dimensions.y as u32
-                                    ))
-                                    .size(12.0)
-                                    .color(MUTED),
-                                );
-                            });
-                        } else {
-                            ui.label(
-                                RichText::new("在左侧图片上拖动，创建裁剪框。")
-                                    .size(12.0)
-                                    .color(MUTED),
-                            );
-                        }
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new("框内移动 · 四角调整\n右键平移 · 滚轮缩放")
-                                .size(11.0)
-                                .color(MUTED),
-                        );
-                    });
-                } else if self.image_editor.preview.is_none() {
+                if self.image_editor.preview.is_none() {
                     ui.add_enabled_ui(!busy, |ui| {
                         crate::review_ui::section().show(ui, |ui| {
                             ui.set_width(ui.available_width());
@@ -588,6 +670,21 @@ impl BdmApp {
     }
 
     fn editor_start(&mut self, ctx: &egui::Context, id: usize, install: bool) {
+        self.editor_start_with_mode(
+            ctx,
+            id,
+            install,
+            !install && !self.prefs.confirm_image_edits,
+        );
+    }
+
+    fn editor_start_with_mode(
+        &mut self,
+        ctx: &egui::Context,
+        id: usize,
+        install: bool,
+        auto_commit: bool,
+    ) {
         if self.demo
             || self.is_capture()
             || self.image_editor.active()
@@ -616,8 +713,7 @@ impl BdmApp {
         let (sender, receiver) = mpsc::channel();
         self.image_editor.pending = Some(receiver);
         self.image_editor.cancel = Some(cancel);
-        self.image_editor.auto_commit = !install && !self.prefs.confirm_image_edits;
-        let auto_commit = self.image_editor.auto_commit;
+        self.image_editor.auto_commit = auto_commit;
         self.image_editor.error.clear();
         std::thread::spawn(move || {
             let result = if install {
@@ -835,6 +931,9 @@ impl BdmApp {
             self.image_editor.regions.clear();
             self.image_editor.draft.clear();
             self.image_editor.crop.selection = None;
+            if cropping {
+                self.image_editor.visible = false;
+            }
             self.media_review.view = crate::media_review::CanvasView::default();
         }
         self.image_editor.error.clear();
@@ -1116,6 +1215,75 @@ mod tests {
         }
         assert!(!app.image_editor.active());
     }
+    #[test]
+    fn inline_crop_preview_never_saves_and_explicit_save_works_in_both_confirmation_modes() {
+        fn render(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1050.0, 720.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.shell(ctx),
+            );
+        }
+        fn click(ctx: &egui::Context, app: &mut BdmApp, pos: egui::Pos2) {
+            render(ctx, app, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                render(
+                    ctx,
+                    app,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    }],
+                );
+            }
+        }
+        for confirm in [true, false] {
+            for preview_first in [true, false] {
+                let (_directory, mut app, media) = imported_app();
+                let original = std::fs::read(&media.path).unwrap();
+                let ctx = egui::Context::default();
+                crate::theme::setup(&ctx);
+                app.prefs.confirm_image_edits = confirm;
+                app.image_editor.cropping = true;
+                app.image_editor.crop.ratio = 2;
+                app.image_editor.crop.center(vec2(800.0, 800.0));
+                for _ in 0..3 {
+                    render(&ctx, &mut app, vec![]);
+                }
+                if preview_first {
+                    let pos = app.image_editor.crop_preview_button.unwrap().center();
+                    click(&ctx, &mut app, pos);
+                    finish(&mut app, &ctx);
+                    assert!(app.image_editor.preview.is_some());
+                    assert_eq!(std::fs::read(&media.path).unwrap(), original);
+                    for _ in 0..3 {
+                        render(&ctx, &mut app, vec![]);
+                    }
+                }
+                let pos = app.image_editor.crop_save_button.unwrap().center();
+                click(&ctx, &mut app, pos);
+                finish(&mut app, &ctx);
+                assert!(
+                    app.image_editor.error.is_empty(),
+                    "{}",
+                    app.image_editor.error
+                );
+                assert!(app.image_editor.preview.is_none());
+                assert_eq!(
+                    app.ingest.stored[&(media.id as usize)].dimensions(),
+                    (800, 600)
+                );
+                assert_ne!(std::fs::read(&media.path).unwrap(), original);
+                assert_eq!(app.prefs.confirm_image_edits, confirm);
+            }
+        }
+    }
+
     #[test]
     fn redownload_worker_reports_source_failure_and_success_refreshes_closed_review() {
         let (_directory, mut app, media) = imported_app();

@@ -11,6 +11,7 @@ use std::sync::mpsc::Receiver;
 pub struct ReviewState {
     pub tab: usize,
     pub auto_advance: bool,
+    pub(crate) sidebar: bool,
     canvas_id: Option<usize>,
     pub(crate) view: CanvasView,
     pub(crate) redownload: Option<(usize, Receiver<Result<StoredMedia, String>>)>,
@@ -32,6 +33,7 @@ impl Default for ReviewState {
         Self {
             tab: 0,
             auto_advance: true,
+            sidebar: false,
             canvas_id: None,
             view: CanvasView::default(),
             redownload: None,
@@ -100,30 +102,51 @@ impl CanvasView {
 struct ReviewLayout {
     header: Rect,
     image: Rect,
-    info: Rect,
+    info: Option<Rect>,
+    tools: Rect,
+    crop: Option<Rect>,
     footer: Rect,
 }
 
 impl ReviewLayout {
-    fn new(rect: Rect) -> Self {
-        let header = Rect::from_min_size(rect.min, vec2(rect.width(), 48.0));
+    fn new(rect: Rect, sidebar: bool, cropping: bool) -> Self {
+        let header = Rect::from_min_size(rect.min, vec2(rect.width(), 34.0));
         let footer = Rect::from_min_size(
-            egui::pos2(rect.left(), rect.bottom() - 80.0),
-            vec2(rect.width(), 80.0),
+            egui::pos2(rect.left(), rect.bottom() - 46.0),
+            vec2(rect.width(), 46.0),
+        );
+        let crop = cropping.then(|| {
+            Rect::from_min_size(
+                egui::pos2(rect.left(), footer.top() - 46.0),
+                vec2(rect.width(), 42.0),
+            )
+        });
+        let tools_bottom = crop.map_or(footer.top(), |r| r.top());
+        let tools = Rect::from_min_size(
+            egui::pos2(rect.left(), tools_bottom - 42.0),
+            vec2(rect.width(), 38.0),
         );
         let body = Rect::from_min_max(
-            egui::pos2(rect.left(), header.bottom() + 8.0),
-            egui::pos2(rect.right(), footer.top() - 8.0),
+            egui::pos2(rect.left(), header.bottom() + 6.0),
+            egui::pos2(rect.right(), tools.top() - 6.0),
         );
-        let info_width = (body.width() * 0.34).clamp(320.0, 400.0);
-        let image_width = body.width() - info_width - 12.0;
+        let info_width = (body.width() * 0.28).clamp(280.0, 360.0);
+        let info = sidebar.then(|| {
+            Rect::from_min_max(egui::pos2(body.right() - info_width, body.top()), body.max)
+        });
+        let image = Rect::from_min_max(
+            body.min,
+            egui::pos2(
+                info.map_or(body.right(), |r| r.left() - 10.0),
+                body.bottom(),
+            ),
+        );
         Self {
             header,
-            image: Rect::from_min_size(body.min, vec2(image_width, body.height())),
-            info: Rect::from_min_max(
-                egui::pos2(body.left() + image_width + 12.0, body.top()),
-                body.max,
-            ),
+            image,
+            info,
+            tools,
+            crop,
             footer,
         }
     }
@@ -187,7 +210,7 @@ impl BdmApp {
         let screen = ctx.screen_rect();
         self.image_editor.reset(id);
         self.editor_poll(ctx);
-        let size = screen.size() - vec2(24.0, 32.0);
+        let size = screen.size() - vec2(16.0, 16.0);
         let mut close = false;
         let response = egui::Window::new("图片审核")
             .id(egui::Id::new("media_review_dialog"))
@@ -199,11 +222,14 @@ impl BdmApp {
             .movable(false)
             .fixed_pos(screen.min)
             .fixed_size(size)
-            .frame(egui::Frame::none().fill(NAV).inner_margin(12.0))
+            .frame(egui::Frame::none().fill(NAV).inner_margin(8.0))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-                let layout = ReviewLayout::new(rect);
+                let crop_actions = self.image_editor.visible && self.image_editor.cropping;
+                let inpainting = self.image_editor.visible && !self.image_editor.cropping;
+                let layout =
+                    ReviewLayout::new(rect, self.media_review.sidebar || inpainting, crop_actions);
                 #[cfg(test)]
                 {
                     self.media_review.footer = Some(layout.footer);
@@ -229,9 +255,9 @@ impl BdmApp {
                                 AMBER
                             },
                         );
-                        let name_width = (ui.available_width() - 290.0).clamp(80.0, 340.0);
+                        let name_width = (ui.available_width() - 340.0).clamp(80.0, 340.0);
                         ui.add_sized(
-                            [name_width, 36.0],
+                            [name_width, 28.0],
                             egui::Label::new(RichText::new(self.media_name(id)).size(13.0))
                                 .truncate(),
                         )
@@ -271,79 +297,28 @@ impl BdmApp {
                     ui.set_clip_rect(layout.image);
                     self.review_canvas(ui, &media, layout.image);
                 });
-                ui.painter()
-                    .rect(layout.info, 10.0, PANEL, egui::Stroke::new(1.0_f32, LINE));
-                let info = layout.info.shrink(14.0);
-                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(info), |ui| {
-                    ui.spacing_mut().item_spacing.y = 8.0;
-                    ui.set_clip_rect(info);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let width = (ui.available_width() - 8.0) / 3.0;
-                        if crate::review_ui::choice(
-                            ui,
-                            "标签与描述",
-                            !self.image_editor.visible,
-                            width,
-                        )
-                        .clicked()
-                        {
-                            self.image_editor.visible = false;
-                        }
-                        let busy =
-                            self.image_editor.active() || self.image_editor.preview.is_some();
-                        let button = ui
-                            .add_enabled_ui(!busy || !self.image_editor.cropping, |ui| {
-                                crate::review_ui::choice(
-                                    ui,
-                                    "局部修复",
-                                    self.image_editor.visible && !self.image_editor.cropping,
-                                    width,
-                                )
-                            })
-                            .inner
-                            .on_hover_text("Inpainting · 局部修复");
-                        if button.clicked() {
-                            crate::diagnostics::event(format!(
-                                "editor_tab media={id} tab=inpainting"
-                            ));
-                            self.image_editor.visible = true;
-                            self.image_editor.cropping = false;
-                        }
-                        #[cfg(test)]
-                        {
-                            self.image_editor.editor_button = Some(button.rect);
-                        }
-                        #[cfg(not(test))]
-                        let _ = button;
-                        if ui
-                            .add_enabled_ui(!busy || self.image_editor.cropping, |ui| {
-                                crate::review_ui::choice(
-                                    ui,
-                                    "裁剪",
-                                    self.image_editor.visible && self.image_editor.cropping,
-                                    width,
-                                )
-                            })
-                            .inner
-                            .clicked()
-                        {
-                            crate::diagnostics::event(format!(
-                                "editor_tab media={id} tab=crop dimensions={}x{}",
-                                media.width, media.height
-                            ));
-                            self.image_editor.visible = true;
-                            self.image_editor.cropping = true;
+                if let Some(info_rect) = layout.info {
+                    ui.painter()
+                        .rect(info_rect, 8.0, PANEL, egui::Stroke::new(1.0_f32, LINE));
+                    let info = info_rect.shrink(12.0);
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(info), |ui| {
+                        ui.set_clip_rect(info);
+                        if inpainting {
+                            self.editor_panel(ui, id, info.height());
+                        } else {
+                            self.review_info(ui, &media, info.height());
                         }
                     });
-                    ui.add_space(12.0);
-                    let height = (info.bottom() - ui.cursor().top()).max(1.0);
-                    if self.image_editor.visible {
-                        self.editor_panel(ui, id, height);
-                    } else {
-                        self.review_info(ui, &media, height);
-                    }
+                }
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(layout.tools), |ui| {
+                    self.review_toolbar(ui, &media, layout.image);
                 });
+                if let Some(crop) = layout.crop {
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(crop), |ui| {
+                        ui.set_clip_rect(crop);
+                        self.crop_toolbar(ui, id);
+                    });
+                }
                 ui.painter().line_segment(
                     [layout.footer.left_top(), layout.footer.right_top()],
                     egui::Stroke::new(1.0_f32, LINE),
@@ -351,7 +326,7 @@ impl BdmApp {
                 let mut decision = None;
                 let mut navigation = None;
                 ui.allocate_new_ui(
-                    egui::UiBuilder::new().max_rect(layout.footer.shrink2(vec2(0.0, 8.0))),
+                    egui::UiBuilder::new().max_rect(layout.footer.shrink2(vec2(0.0, 4.0))),
                     |ui| {
                         ui.spacing_mut().item_spacing.y = 6.0;
                         ui.horizontal(|ui| {
@@ -378,6 +353,8 @@ impl BdmApp {
                                     decision = Some(value);
                                 }
                             }
+                            ui.add_space(10.0);
+                            ui.checkbox(&mut self.media_review.auto_advance, "自动下一张");
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -405,30 +382,6 @@ impl BdmApp {
                                         navigation = Some(false);
                                     }
                                 },
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            if self
-                                .ingest
-                                .stored
-                                .get(&id)
-                                .is_some_and(|stored| stored.edit.is_some())
-                                && ui
-                                    .button("恢复编辑前版本")
-                                    .on_hover_text(
-                                        "撤销最近一次裁剪或去水印，从编辑前文件重新开始。",
-                                    )
-                                    .clicked()
-                            {
-                                if let Err(error) = self.restore_last_edit(ui.ctx(), id) {
-                                    self.form_error = error;
-                                }
-                            }
-                            ui.checkbox(&mut self.media_review.auto_advance, "判断后自动下一张");
-                            ui.label(
-                                RichText::new("← → 切图    滚轮缩放    双击适应")
-                                    .size(11.0)
-                                    .color(MUTED),
                             );
                         });
                     },
@@ -500,23 +453,154 @@ impl BdmApp {
         close
     }
 
-    fn review_canvas(&mut self, ui: &mut egui::Ui, media: &Media, rect: Rect) {
-        let stage = Rect::from_min_max(rect.min + vec2(0.0, 72.0), rect.max);
-        let texture = self.review_texture(ui.ctx(), media.id);
-        let preview = if self.image_editor.visible && self.image_editor.show_preview {
-            self.image_editor.texture.clone()
-        } else {
-            None
-        };
-        let dimensions = preview.as_ref().or(texture.as_ref()).map_or(
-            vec2(media.width.max(1) as f32, media.height.max(1) as f32),
-            |t| t.size_vec2(),
-        );
-        ui.horizontal(|ui| {
+    fn review_toolbar(&mut self, ui: &mut egui::Ui, media: &Media, stage: Rect) {
+        let id = media.id;
+        let inpainting = self.image_editor.visible && !self.image_editor.cropping;
+        let busy = self.image_editor.active() || self.image_editor.preview.is_some();
+        ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            ui.spacing_mut().button_padding = vec2(10.0, 5.0);
             ui.spacing_mut().interact_size.y = 28.0;
-            let open = ui.add_enabled(
+            self.crop_ratio_picker(ui, id);
+            if ui
+                .add_enabled(
+                    !busy || !inpainting,
+                    egui::Button::new("标签与描述")
+                        .selected(self.media_review.sidebar && !inpainting),
+                )
+                .clicked()
+            {
+                self.media_review.sidebar = !(self.media_review.sidebar && !inpainting);
+                if inpainting {
+                    self.image_editor.visible = false;
+                }
+            }
+            let edit = ui.add_enabled(!busy, egui::Button::new("局部修复").selected(inpainting));
+            #[cfg(test)]
+            {
+                self.image_editor.editor_button = Some(edit.rect);
+            }
+            if edit.clicked() {
+                self.image_editor.visible = !inpainting;
+                self.image_editor.cropping = false;
+                self.image_editor.crop.selection = None;
+                self.media_review.sidebar = !inpainting;
+            }
+            ui.separator();
+            self.review_view_controls(ui, media, stage);
+            let _more = ui.menu_button("更多", |ui| {
+                let download = ui.button("重新下载原图");
+                #[cfg(test)]
+                {
+                    self.image_editor.redownload_button = Some(download.rect);
+                }
+                if download.clicked() {
+                    self.request_redownload(ui.ctx(), id);
+                    ui.close_menu();
+                }
+                if self
+                    .ingest
+                    .stored
+                    .get(&id)
+                    .is_some_and(|stored| stored.edit.is_some())
+                    && ui
+                        .add_enabled(!busy, egui::Button::new("恢复编辑前版本"))
+                        .clicked()
+                {
+                    if let Err(error) = self.restore_last_edit(ui.ctx(), id) {
+                        self.form_error = error;
+                    }
+                    ui.close_menu();
+                }
+                ui.add_enabled_ui(!busy, |ui| {
+                    ui.checkbox(&mut self.prefs.confirm_image_edits, "局部修复后二次确认");
+                });
+                ui.label(
+                    RichText::new("← → 切图 · 滚轮缩放 · 双击适应")
+                        .size(11.0)
+                        .color(MUTED),
+                );
+            });
+            #[cfg(test)]
+            {
+                self.image_editor.more_button = Some(_more.response.rect);
+            }
+            if !self.form_error.is_empty() {
+                ui.label(RichText::new("操作失败").size(12.0).color(DANGER))
+                    .on_hover_text(&self.form_error);
+            }
+        });
+    }
+
+    fn review_dimensions(&self, media: &Media) -> egui::Vec2 {
+        if self.image_editor.visible && self.image_editor.show_preview {
+            if let Some(crop) = self.image_editor.preview.as_ref().and_then(|p| p.crop) {
+                return vec2(crop.width as f32, crop.height as f32);
+            }
+        }
+        vec2(media.width.max(1) as f32, media.height.max(1) as f32)
+    }
+
+    fn review_view_controls(&mut self, ui: &mut egui::Ui, media: &Media, stage: Rect) {
+        let texture = self.review_texture(ui.ctx(), media.id);
+        let dimensions = self.review_dimensions(media);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.spacing_mut().button_padding = vec2(10.0, 5.0);
+        ui.spacing_mut().interact_size.y = 28.0;
+        let open = ui.add_enabled(
+            !self.demo
+                && !self.is_capture()
+                && self
+                    .ingest
+                    .stored
+                    .get(&media.id)
+                    .is_some_and(|m| m.path.is_file()),
+            egui::Button::new(RichText::new("打开原图").size(12.0)).fill(PANEL),
+        );
+        #[cfg(test)]
+        {
+            self.image_editor.open_button = Some(open.rect);
+        }
+        if open.clicked() {
+            if let Err(error) = self.open_original(media.id) {
+                if self.image_editor.visible {
+                    self.image_editor.error = error;
+                } else {
+                    self.form_error = error;
+                }
+            }
+        }
+        if ui.button("适应窗口").clicked() {
+            self.media_review.view = CanvasView::default();
+        }
+        if ui
+            .button("100%")
+            .on_hover_text("按屏幕物理像素查看原图")
+            .clicked()
+        {
+            self.media_review.view.zoom =
+                1.0 / (self.media_review.view.fit(stage, dimensions) * ui.ctx().pixels_per_point());
+            self.media_review.view.pan = egui::Vec2::ZERO;
+        }
+        for (label, factor) in [("−", 1.0 / 1.25), ("+", 1.25)] {
+            if ui.button(label).clicked() {
+                self.media_review
+                    .view
+                    .zoom_at(stage, stage.center(), factor);
+            }
+        }
+        let scale = self.media_review.view.fit(stage, dimensions)
+            * self.media_review.view.zoom
+            * ui.ctx().pixels_per_point();
+        ui.label(
+            RichText::new(format!("{:.0}%", scale * 100.0))
+                .size(12.0)
+                .color(MUTED),
+        );
+        ui.separator();
+        ui.spacing_mut().interact_size.y = 24.0;
+        let requested = self.ingest.detail_requested == Some(media.id);
+        let load = ui
+            .add_enabled(
                 !self.demo
                     && !self.is_capture()
                     && self
@@ -524,108 +608,57 @@ impl BdmApp {
                         .stored
                         .get(&media.id)
                         .is_some_and(|m| m.path.is_file()),
-                egui::Button::new(RichText::new("打开原图").size(12.0)).fill(PANEL),
-            );
-            #[cfg(test)]
-            {
-                self.image_editor.open_button = Some(open.rect);
-            }
-            if open.clicked() {
-                if let Err(error) = self.open_original(media.id) {
-                    if self.image_editor.visible {
-                        self.image_editor.error = error;
-                    } else {
-                        self.form_error = error;
-                    }
-                }
-            }
-            if ui.button("适应窗口").clicked() {
-                self.media_review.view = CanvasView::default();
-            }
-            if ui
-                .button("100%")
-                .on_hover_text("按屏幕物理像素查看原图")
-                .clicked()
-            {
-                self.media_review.view.zoom = 1.0
-                    / (self.media_review.view.fit(stage, dimensions) * ui.ctx().pixels_per_point());
-                self.media_review.view.pan = egui::Vec2::ZERO;
-            }
-            for (label, factor) in [("−", 1.0 / 1.25), ("+", 1.25)] {
-                if ui.button(label).clicked() {
-                    self.media_review
-                        .view
-                        .zoom_at(stage, stage.center(), factor);
-                }
-            }
-            let scale = self.media_review.view.fit(stage, dimensions)
-                * self.media_review.view.zoom
-                * ui.ctx().pixels_per_point();
-            ui.label(
-                RichText::new(format!("{:.0}%", scale * 100.0))
-                    .size(12.0)
-                    .color(MUTED),
-            );
-        });
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().interact_size.y = 24.0;
-            let requested = self.ingest.detail_requested == Some(media.id);
-            let load = ui
-                .add_enabled(
-                    !self.demo
-                        && !self.is_capture()
-                        && self
-                            .ingest
-                            .stored
-                            .get(&media.id)
-                            .is_some_and(|m| m.path.is_file()),
-                    egui::Button::new(if requested {
-                        "使用缩略图"
-                    } else {
-                        "加载原图"
-                    }),
-                )
-                .on_hover_text("默认显示缩略图；加载原图后可检查完整细节。");
-            #[cfg(test)]
-            {
-                self.media_review.load_original_button = Some(load.rect);
-            }
-            if load.clicked() {
-                if requested {
-                    self.clear_review_original();
+                egui::Button::new(if requested {
+                    "使用缩略图"
                 } else {
+                    "加载原图"
+                }),
+            )
+            .on_hover_text("默认显示缩略图；加载原图后可检查完整细节。");
+        #[cfg(test)]
+        {
+            self.media_review.load_original_button = Some(load.rect);
+        }
+        if load.clicked() {
+            if requested {
+                self.clear_review_original();
+            } else {
+                self.load_review_original(ui.ctx(), media.id);
+            }
+        }
+        if requested && texture.is_none() {
+            if let Some((_, error)) = self
+                .ingest
+                .detail_error
+                .as_ref()
+                .filter(|(failed, _)| *failed == media.id)
+            {
+                ui.label(RichText::new("加载失败").color(DANGER))
+                    .on_hover_text(error);
+                if ui.button("重试").clicked() {
                     self.load_review_original(ui.ctx(), media.id);
                 }
-            }
-            if requested && texture.is_none() {
-                if let Some((_, error)) = self
-                    .ingest
-                    .detail_error
-                    .as_ref()
-                    .filter(|(failed, _)| *failed == media.id)
-                {
-                    ui.label(RichText::new("原图加载失败").color(DANGER))
-                        .on_hover_text(error);
-                    if ui.button("重试").clicked() {
-                        self.load_review_original(ui.ctx(), media.id);
-                    }
-                } else {
-                    ui.spinner();
-                    ui.label(RichText::new("正在加载原图").size(12.0).color(MUTED));
-                }
             } else {
-                ui.label(
-                    RichText::new(if requested {
-                        "原图预览"
-                    } else {
-                        "缩略图预览"
-                    })
-                    .size(12.0)
-                    .color(MUTED),
-                );
+                ui.spinner().on_hover_text("正在加载原图");
+            }
+        }
+    }
+
+    fn review_canvas(&mut self, ui: &mut egui::Ui, media: &Media, stage: Rect) {
+        let texture = self.review_texture(ui.ctx(), media.id);
+        let texture = texture.or_else(|| {
+            if self.is_capture() {
+                self.ingest.textures.get(&media.id).cloned()
+            } else {
+                None
             }
         });
+        let preview = if self.image_editor.visible && self.image_editor.show_preview {
+            self.image_editor.texture.clone()
+        } else {
+            None
+        };
+        let dimensions = self.review_dimensions(media);
         ui.painter().rect(
             stage,
             8.0,
@@ -1501,12 +1534,98 @@ mod tests {
     }
 
     #[test]
+    fn inline_crop_keeps_the_image_wide_and_reveals_actions_after_ratio_selection() {
+        for size in [vec2(981.0, 613.0), vec2(1050.0, 720.0), vec2(1440.0, 960.0)] {
+            let ctx = egui::Context::default();
+            crate::theme::setup(&ctx);
+            let mut app = sample();
+            let media = app.library.media.iter_mut().find(|m| m.id == 3).unwrap();
+            media.width = 8507;
+            media.height = 3902;
+            let before = app.library.media.clone();
+            for _ in 0..3 {
+                frame(&ctx, &mut app, size, vec![]);
+            }
+            let canvas = app.media_review.canvas.unwrap();
+            assert!(canvas.width() > size.x * 0.95);
+            assert!(app.image_editor.crop_preview_button.is_none());
+            assert!(app.image_editor.crop_save_button.is_none());
+            let picker = app.image_editor.crop_ratio_button.unwrap().center();
+            for pressed in [true, false] {
+                frame(
+                    &ctx,
+                    &mut app,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(picker),
+                        egui::Event::PointerButton {
+                            pos: picker,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            frame(&ctx, &mut app, size, vec![]);
+            let option = app
+                .image_editor
+                .crop_ratio_choices
+                .iter()
+                .find(|(index, _)| *index == 6)
+                .unwrap()
+                .1
+                .center();
+            assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains(option));
+            for pressed in [true, false] {
+                frame(
+                    &ctx,
+                    &mut app,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(option),
+                        egui::Event::PointerButton {
+                            pos: option,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..3 {
+                frame(&ctx, &mut app, size, vec![]);
+            }
+            assert!(app.image_editor.cropping && app.image_editor.visible);
+            assert_eq!(app.image_editor.crop.ratio, 6);
+            assert!(app.image_editor.crop.selection.is_some());
+            let canvas = app.media_review.canvas.unwrap();
+            assert!(canvas.width() > size.x * 0.95);
+            for button in [
+                app.image_editor.crop_preview_button.unwrap(),
+                app.image_editor.crop_save_button.unwrap(),
+                app.media_review.keep_button.unwrap(),
+            ] {
+                assert!(app.media_review.window.unwrap().contains_rect(button));
+                assert!(!canvas.intersects(button));
+            }
+            let original = vec2(8507.0, 3902.0);
+            let displayed = app.media_review.view.image_rect(canvas, original);
+            let old_image_width =
+                size.x - 24.0 - ((size.x - 24.0) * 0.34).clamp(320.0, 400.0) - 12.0;
+            assert!(displayed.width() > old_image_width * 1.35);
+            assert_eq!(app.library.media, before);
+        }
+    }
+
+    #[test]
     fn long_text_tabs_keep_review_window_and_action_inside_small_and_large_viewports() {
         for size in [vec2(981.0, 613.0), vec2(1050.0, 720.0), vec2(1440.0, 960.0)] {
             let ctx = egui::Context::default();
             crate::theme::setup(&ctx);
             let mut app = sample();
             let source = app.library.media.clone();
+            app.media_review.sidebar = true;
             for tab in 0..3 {
                 assert!(!app
                     .review_text(

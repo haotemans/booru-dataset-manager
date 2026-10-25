@@ -423,8 +423,8 @@ impl BdmApp {
             ui.set_width(ui.available_width());
             setting_header(ui, "layers", "图片编辑");
             ui.add_space(8.0);
-            ui.checkbox(&mut self.prefs.confirm_image_edits,"编辑后二次确认")
-                .on_hover_text("裁剪和去水印共用：开启先预览再保存；关闭后点击执行即替换当前图片。设置自动保存。");
+            ui.checkbox(&mut self.prefs.confirm_image_edits,"局部修复后二次确认")
+                .on_hover_text("局部修复开启后先预览再保存；关闭后直接替换。裁剪由图片下方的“预览裁剪”和“保存裁剪”按钮分别控制。设置自动保存。");
         });
         ui.add_space(16.0);
         card().show(ui, |ui| {

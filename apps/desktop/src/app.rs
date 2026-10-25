@@ -385,7 +385,49 @@ impl BdmApp {
             self.capture_step = 54;
             self.capture_redownload_notice();
         }
-        if self.capture_step >= 57 {
+        let review_layout = std::env::args().any(|arg| arg == "--capture-review-layout");
+        if review_layout && self.capture_step == 0 && self.capture_frames == 0 {
+            self.capture_step = 37;
+            self.library = crate::model::Library::demo();
+            self.open_media(3);
+            self.capture_review_content();
+            self.image_editor.visible = false;
+            self.media_review.sidebar = false;
+            let args: Vec<_> = std::env::args().collect();
+            if let Some(path) = args
+                .iter()
+                .position(|arg| arg == "--capture-review-image")
+                .and_then(|i| args.get(i + 1))
+            {
+                if let Ok(image) = image::open(path) {
+                    if let Some(media) = self.library.media.iter_mut().find(|m| m.id == 3) {
+                        media.width = image.width() as usize;
+                        media.height = image.height() as usize;
+                    }
+                    let pixels = image.thumbnail(1800, 1800).to_rgba8();
+                    self.ingest.textures.insert(
+                        3,
+                        ctx.load_texture(
+                            "capture-review-reference",
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [pixels.width() as usize, pixels.height() as usize],
+                                pixels.as_raw(),
+                            ),
+                            egui::TextureOptions::LINEAR,
+                        ),
+                    );
+                }
+            }
+        }
+        if self.capture_step >= if review_layout { 44 } else { 57 } {
+            let _ = std::fs::write(
+                dir.join("capture.complete"),
+                format!(
+                    "Native capture completed at {} x {} logical pixels",
+                    ctx.screen_rect().width(),
+                    ctx.screen_rect().height()
+                ),
+            );
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
@@ -714,7 +756,7 @@ impl BdmApp {
                         ));
                     }
                     39 => {
-                        self.image_editor.crop.ratio = 7;
+                        self.image_editor.crop.ratio = if review_layout { 8 } else { 7 };
                         let media = self.library.media.iter().find(|m| m.id == 3).unwrap();
                         self.image_editor
                             .crop
@@ -750,6 +792,11 @@ impl BdmApp {
                         self.image_editor.show_preview = true;
                         self.media_review.view = crate::media_review::CanvasView::default();
                     }
+                    41 if review_layout => {
+                        self.image_editor.discard();
+                        self.image_editor.visible = false;
+                        self.media_review.sidebar = true;
+                    }
                     41 => {
                         self.image_editor.discard();
                         self.dialog = None;
@@ -766,6 +813,7 @@ impl BdmApp {
                             });
                     }
                     42 => {
+                        self.media_review.sidebar = false;
                         self.dialog = None;
                         self.open_media(3);
                         self.image_editor.reset(3);
@@ -773,7 +821,11 @@ impl BdmApp {
                         self.image_editor.cropping = true;
                         self.prefs.confirm_image_edits = false;
                         self.image_editor.crop.ratio = 1;
-                        self.image_editor.crop.center(egui::vec2(1930.0, 1849.0));
+                        if let Some(media) = self.library.media.iter().find(|m| m.id == 3) {
+                            self.image_editor
+                                .crop
+                                .center(egui::vec2(media.width as f32, media.height as f32));
+                        }
                     }
                     43 => {
                         self.image_editor.cropping = false;
