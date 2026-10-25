@@ -45,6 +45,16 @@ pub struct TextArtifact {
     pub provenance: String,
 }
 
+impl TextArtifact {
+    /// Human confirmation is independent of whether a usable output exists.
+    pub fn is_generated_output(&self) -> bool {
+        self.provenance != "local-normalization-v1"
+            && !self.provenance.is_empty()
+            && matches!(self.state.as_str(), "complete" | "needs_review")
+            && !self.content.trim().is_empty()
+    }
+}
+
 /// DCT-based 64-bit pHash; distance is a candidate signal, never byte identity.
 pub fn phash(path: &Path) -> Result<u64, IngestError> {
     let image = storage(image::open(path))?

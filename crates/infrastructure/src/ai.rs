@@ -53,7 +53,7 @@ impl AiError {
     fn message(&self) -> String {
         match self {
             Self::ContentFiltered => {
-                "API 服务端内容过滤拦截（content_filter / refusal），未返回描述；尚未生成成功。"
+                "API 服务端内容过滤拦截（content_filter / refusal），本批未返回有效结果；已成功的结果保留。"
                     .into()
             }
             Self::Content => "API 返回内容为空、格式无效或不符合任务要求，未生成有效结果。".into(),

@@ -1057,12 +1057,7 @@ impl BdmApp {
         self.workflows
             .artifacts
             .get(&(id, if tab == 2 { "caption" } else { "tags" }.into()))
-            .filter(|a| {
-                a.provenance != "local-normalization-v1"
-                    && !a.provenance.is_empty()
-                    && matches!(a.state.as_str(), "complete" | "needs_review")
-                    && !a.content.trim().is_empty()
-            })
+            .filter(|a| a.is_generated_output())
             .cloned()
     }
 

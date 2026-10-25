@@ -141,8 +141,12 @@ impl BdmApp {
                             ui.spacing_mut().item_spacing.x = 16.0;
                             for i in row {
                                 let label = ["原始标签", "优化标签", "自然语言", "齐全"][i];
-                                let hint =
-                                    ["原始标签", "优化标签", "自然语言描述", "三份文本齐全"][i];
+                                let hint = [
+                                    "原始标签",
+                                    "优化标签（含待确认结果）",
+                                    "自然语言描述（含待确认结果）",
+                                    "三份文本齐全（含待确认结果）",
+                                ][i];
                                 if coverage_ring(
                                     ui,
                                     counts[i],
@@ -641,7 +645,7 @@ mod tests {
                     "自然语言",
                     "成功 0 / 2",
                     "待重试 2",
-                    "API content_filter：未生成成功",
+                    "最近失败：API content_filter：未生成成功",
                 ] {
                     assert_eq!(
                         visible.iter().any(|text| text == label),

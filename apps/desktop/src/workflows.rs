@@ -208,6 +208,12 @@ mod tests {
             f.app.reload_workflow_data().unwrap();
             let media = f.app.library.media[0].clone();
             let tab = if kind == "tags" { 1 } else { 2 };
+            assert_eq!(media.optimized, kind == "tags");
+            assert_eq!(media.caption, kind == "caption");
+            let coverage = f.app.library.coverage();
+            assert_eq!(coverage[1], usize::from(kind == "tags"));
+            assert_eq!(coverage[2], usize::from(kind == "caption"));
+            assert_eq!(coverage[3], 0);
             assert_eq!(f.app.review_text(&media, 0), raw);
             assert_eq!(f.app.review_text(&media, tab), content);
             assert_eq!(f.app.review_text(&media, 3 - tab), "");
@@ -755,12 +761,12 @@ impl BdmApp {
                 .workflows
                 .artifacts
                 .get(&(media.id, "tags".into()))
-                .is_some_and(|a| a.state == "complete" && a.provenance != "local-normalization-v1");
+                .is_some_and(TextArtifact::is_generated_output);
             media.caption = self
                 .workflows
                 .artifacts
                 .get(&(media.id, "caption".into()))
-                .is_some_and(|a| a.state == "complete");
+                .is_some_and(TextArtifact::is_generated_output);
         }
         Ok(())
     }
@@ -1256,6 +1262,13 @@ impl BdmApp {
                     ""
                 };
                 let (state, color) = task_state(&job.state);
+                let error = job.error.as_ref().map(|error| {
+                    if job.kind == "optimize" {
+                        format!("最近失败：{error}")
+                    } else {
+                        error.clone()
+                    }
+                });
                 let active = self.workflow_active();
                 let action = if active
                     && job.state == "running"
@@ -1277,7 +1290,7 @@ impl BdmApp {
                         color,
                         action,
                         enabled: !self.demo && !self.is_capture(),
-                        error: job.error.as_deref(),
+                        error: error.as_deref(),
                     },
                     |ui| {
                         if job.kind == "optimize" {
