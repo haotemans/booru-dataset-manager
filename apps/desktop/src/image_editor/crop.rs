@@ -2,7 +2,7 @@ use super::{pixel, screen};
 use bdm_domain::editing::CropRect;
 use eframe::egui::{self, pos2, vec2, Rect, Vec2};
 
-pub const RATIOS: [(&str, Option<f32>); 9] = [
+pub const RATIOS: [(&str, Option<f32>); 17] = [
     ("自由裁剪", None),
     ("1:1", Some(1.0)),
     ("4:3", Some(4.0 / 3.0)),
@@ -11,6 +11,14 @@ pub const RATIOS: [(&str, Option<f32>); 9] = [
     ("2:3", Some(2.0 / 3.0)),
     ("16:9", Some(16.0 / 9.0)),
     ("9:16", Some(9.0 / 16.0)),
+    ("21:9", Some(21.0 / 9.0)),
+    ("9:21", Some(9.0 / 21.0)),
+    ("4:5", Some(4.0 / 5.0)),
+    ("5:4", Some(5.0 / 4.0)),
+    ("2:1", Some(2.0)),
+    ("1:2", Some(0.5)),
+    ("16:10", Some(16.0 / 10.0)),
+    ("10:16", Some(10.0 / 16.0)),
     ("原图比例", None),
 ];
 
@@ -22,7 +30,7 @@ pub struct CropState {
 }
 impl CropState {
     pub fn ratio_value(&self, size: Vec2) -> Option<f32> {
-        if self.ratio == 8 {
+        if self.ratio == RATIOS.len() - 1 {
             Some(size.x / size.y)
         } else {
             RATIOS[self.ratio].1
@@ -213,6 +221,12 @@ mod tests {
                     };
                     crop.center(size);
                     let rect = crop.selection.unwrap();
+                    if ratio == RATIOS.len() - 1 {
+                        assert!((rect.size() - size).length() < 0.002);
+                    }
+                    if let Some(expected) = crop.ratio_value(size) {
+                        assert!((rect.width() / rect.height() - expected).abs() < 0.002);
+                    }
                     assert!(
                         Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(rect),
                         "centered crop outside {width}x{height}, ratio {ratio}"
