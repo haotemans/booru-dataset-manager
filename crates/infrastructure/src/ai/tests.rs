@@ -354,6 +354,7 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
         )
         .unwrap();
     let media = f.repo.list_media().unwrap().remove(0);
+    let caption_before = std::fs::read(media.path.with_extension("txt")).ok();
     let blocked = json!({"choices":[{"finish_reason":"content_filter","message":{"content":""}}]});
     let (endpoint, worker) = server(vec![(200, blocked.clone()), (200, blocked)]);
     let mut profile = profile();
@@ -368,7 +369,16 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
     assert_eq!(job.deferred, vec![media.id]);
     assert!(job.error.as_ref().unwrap().contains("content_filter"));
     assert_eq!(job.analysis_errors[&media.id].len(), 2);
-    assert!(!media.path.with_extension("txt").exists());
+    assert_eq!(
+        std::fs::read(media.path.with_extension("txt")).ok(),
+        caption_before
+    );
+    assert!(!f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .iter()
+        .any(|a| a.kind == "caption"));
     let persisted = f
         .repo
         .list_workflows()
