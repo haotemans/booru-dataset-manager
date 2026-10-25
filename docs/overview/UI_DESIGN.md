@@ -184,3 +184,6 @@ cargo run -p bdm-desktop -- --compact --capture target/ui-captures-compact
 Tag 查询错误区固定在弹窗宽度内换行。Cloudflare 网站验证、401 认证失败、普通 403 访问拒绝分别提示；网站验证和访问拒绝提供“在浏览器中检查 Danbooru”链接，输入保留且不入库。浏览器验证由用户手动处理，不承诺验证后应用请求必然通过。
 
 2026-10-23: Settings cards use vector category icons and short labels, with detailed original/edit/download semantics in hover text. Image loading uses a thumbnail-to-original pictogram beside the persistent switch. Download and reset/save actions use accessible icon buttons; task counters use icons plus numeric values with hover names. Artist cards discovered from local provenance show their true local image count and “本地发现” until a remote total is known; artwork remains unobstructed by status text. References: `images/image-view-settings.png` and `images/discovered-artists.png`.
+
+
+图片下载、去重、API 优化和导出的进度／继续／暂停／结果卡片统一在总览仪表盘展示。画师、角色列表及各自图库不重复显示全局任务卡片；启动按钮保留，继续使用当前选中的收藏或图片作为处理范围。发起任务后提示在总览查看进度，历史任务仍在运行日志中。

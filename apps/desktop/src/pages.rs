@@ -545,6 +545,108 @@ impl BdmApp {
 mod tests {
     use super::*;
     #[test]
+    fn task_status_cards_are_global_on_dashboard_and_absent_from_collection_pages() {
+        fn texts(shape: &egui::Shape, result: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => result.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        texts(shape, result);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::theme::setup(&ctx);
+        let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
+        app.ingest.jobs = vec![bdm_domain::ingest::IngestJob {
+            id: 11,
+            collection_id: 1,
+            tag: "dashboard_download_fixture".into(),
+            root: Default::default(),
+            minimum_short_side: 800,
+            flatten_transparency: true,
+            before_id: None,
+            state: "interrupted".into(),
+            progress: Default::default(),
+            error: None,
+            failed_posts: vec![],
+        }];
+        app.workflows.jobs = ["dedup", "optimize", "export"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| bdm_infrastructure::workflows::WorkflowJob {
+                id: index as i64 + 1,
+                kind: kind.into(),
+                ids: vec![3, 8],
+                state: "paused".into(),
+                ..Default::default()
+            })
+            .collect();
+        let source = app.library.media.clone();
+        for page in [Page::Dashboard, Page::Artist, Page::Character] {
+            for gallery in [false, true] {
+                if page == Page::Dashboard && gallery {
+                    continue;
+                }
+                app.prefs.page = page;
+                app.gallery = gallery;
+                app.context = if gallery {
+                    app.library.collections(page).first().map(|c| c.id)
+                } else {
+                    None
+                };
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(1440.0, 960.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            if page == Page::Dashboard {
+                                app.dashboard(ui);
+                            } else if gallery {
+                                app.gallery_page(ui);
+                            } else {
+                                app.collections_page(ui);
+                            }
+                        });
+                    },
+                );
+                let mut visible = Vec::new();
+                for shape in output.shapes {
+                    texts(&shape.shape, &mut visible);
+                }
+                for label in [
+                    "图片下载",
+                    "dashboard_download_fixture",
+                    "去重",
+                    "文本优化",
+                    "导出",
+                ] {
+                    assert_eq!(
+                        visible.iter().any(|text| text == label),
+                        page == Page::Dashboard,
+                        "task label {label} on {page:?} gallery={gallery}"
+                    );
+                }
+                assert_eq!(app.ingest.jobs.len(), 1);
+                assert_eq!(app.workflows.jobs.len(), 3);
+                assert!(app
+                    .workflows
+                    .jobs
+                    .iter()
+                    .all(|job| job.state == "paused" && job.cursor == 0));
+                assert_eq!(app.library.media, source);
+            }
+        }
+    }
+
+    #[test]
     fn every_page_renders_at_supported_sizes() {
         for size in [[1050.0, 720.0], [1440.0, 960.0]] {
             for page in Page::ALL {

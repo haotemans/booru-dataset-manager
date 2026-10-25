@@ -589,8 +589,12 @@ impl BdmApp {
                 } else {
                     "optimize"
                 };
-                if let Err(e) = self.start_workflow(ui.ctx(), operation, ids, None) {
-                    self.workflows.error = Some(e);
+                match self.start_workflow(ui.ctx(), operation, ids, None) {
+                    Ok(()) if self.workflow_active() => {
+                        self.notify(ui.ctx(), "任务已启动，可在总览查看进度。")
+                    }
+                    Ok(()) => {}
+                    Err(error) => self.workflows.error = Some(error),
                 }
             }
             ui.button("返回").clicked()

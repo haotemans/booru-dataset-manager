@@ -775,8 +775,12 @@ impl BdmApp {
             .on_disabled_hover_text("选择画师／角色卡片，或进入单个收藏的图库。")
             .clicked()
         {
-            if let Err(error) = self.start_ingest(ui.ctx(), None) {
-                self.ingest.error = Some(error);
+            match self.start_ingest(ui.ctx(), None) {
+                Ok(()) => self.notify(ui.ctx(), "下载任务已启动，可在总览查看进度。"),
+                Err(error) => {
+                    self.notify(ui.ctx(), &error);
+                    self.ingest.error = Some(error);
+                }
             }
         }
     }

@@ -12,7 +12,6 @@ impl BdmApp {
     }
 
     pub fn collections_page(&mut self, ui: &mut egui::Ui) {
-        self.ingestion_status(ui);
         if self.prefs.page == Page::Character {
             self.character_relationships(ui);
         }
@@ -373,8 +372,6 @@ impl BdmApp {
     }
 
     pub fn gallery_page(&mut self, ui: &mut egui::Ui) {
-        self.ingestion_status(ui);
-        self.workflow_status(ui);
         ui.horizontal_wrapped(|ui| {
             if icon_button(ui, "back", "返回列表", false).clicked() {
                 self.gallery = false;
