@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const FEATHER: u8 = 16;
 const REFERENCE_BAND: u8 = 4;
 
-/// Estimate a smooth spatial color field from the clean selected border only.
-/// Never use the watermark-bearing interior as a color reference.
+/// Match the border, then correct low-frequency interior drift using robust
+/// background-majority tiles; reject pixels inconsistent with the border fit.
 pub(super) fn compose(
     original: &mut RgbaImage,
     repaired: &RgbaImage,
@@ -114,15 +114,25 @@ pub(super) fn compose(
         } else {
             None
         };
+        let interior = field
+            .as_ref()
+            .map(|field| field.interior(&component, width, &depth, source, repair, cancel))
+            .transpose()?;
         for (n, &i) in component.iter().enumerate() {
             if n % 4096 == 0 {
                 check_cancel(cancel)?;
             }
             let t = f32::from(depth[i]) / f32::from(max_depth);
             let weight = t * t * (3.0 - 2.0 * t);
-            let offset = field
+            let mut offset = field
                 .as_ref()
                 .map_or([0.0; 3], |field| field.at(i % width, i / width));
+            if let Some(interior) = &interior {
+                let correction = interior.at(i % width, i / width);
+                for c in 0..3 {
+                    offset[c] += correction[c];
+                }
+            }
             for channel in 0..3 {
                 let before = f32::from(source[i * 4 + channel]);
                 let after =
@@ -199,45 +209,87 @@ impl ColorField {
                     .clamp(-96.0, 96.0);
             }
         }
-        for _ in 0..2048 {
-            check_cancel(cancel)?;
-            let mut largest = 0.0f32;
-            for y in 0..height {
-                for x in 0..width {
-                    let i = y * width + x;
-                    if fixed[i] {
-                        continue;
-                    }
-                    let mut sum = [0.0; 3];
-                    let mut count = 0.0;
-                    for neighbor in [
-                        (x > 0).then(|| i - 1),
-                        (x + 1 < width).then_some(i + 1),
-                        (y > 0).then(|| i - width),
-                        (y + 1 < height).then_some(i + width),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        for c in 0..3 {
-                            sum[c] += values[neighbor][c];
-                        }
-                        count += 1.0;
-                    }
-                    for c in 0..3 {
-                        let next = sum[c] / count;
-                        largest = largest.max((next - values[i][c]).abs());
-                        values[i][c] = next;
-                    }
-                }
-            }
-            if largest < 0.002 {
-                break;
-            }
-        }
+        relax(width, height, &mut values, &fixed, cancel)?;
         Ok(Self {
             left,
             top,
+            step,
+            width,
+            height,
+            values,
+        })
+    }
+
+    fn interior(
+        &self,
+        component: &[usize],
+        image_width: usize,
+        depth: &[u8],
+        source: &[u8],
+        repair: &[u8],
+        cancel: &AtomicBool,
+    ) -> Result<Self, IngestError> {
+        // Coarse tiles carry only color, never original high-frequency detail.
+        let step = self.step.max(32);
+        let width = ((self.width - 1) * self.step).div_ceil(step) + 1;
+        let height = ((self.height - 1) * self.step).div_ceil(step) + 1;
+        let mut bins = vec![Vec::<[f32; 3]>::new(); width * height];
+        let mut totals = vec![0usize; bins.len()];
+        let mut fixed = vec![false; bins.len()];
+        for (n, &i) in component.iter().enumerate() {
+            if n % 4096 == 0 {
+                check_cancel(cancel)?;
+            }
+            let x = i % image_width;
+            let y = i / image_width;
+            let cell =
+                ((y - self.top + step / 2) / step) * width + (x - self.left + step / 2) / step;
+            if depth[i] <= REFERENCE_BAND {
+                fixed[cell] = true;
+            }
+            if source[i * 4 + 3] != 255 {
+                continue;
+            }
+            totals[cell] += 1;
+            let base = self.at(x, y);
+            // A saturated border correction is unreliable evidence for
+            // recognizing clean interior pixels; retain the border fallback.
+            if base.iter().any(|v| v.abs() >= 95.0) {
+                continue;
+            }
+            let residual: [f32; 3] = std::array::from_fn(|c| {
+                f32::from(source[i * 4 + c]) - f32::from(repair[i * 4 + c]) - base[c]
+            });
+            // Text/logo colors usually disagree strongly with the predicted
+            // background. Do not use their unaffected channels independently.
+            if residual.iter().all(|v| v.abs() <= 24.0) {
+                bins[cell].push(residual);
+            }
+        }
+        let mut values = vec![[0.0; 3]; bins.len()];
+        for (i, bin) in bins.iter().enumerate() {
+            if fixed[i] || bin.len() < 128 || bin.len() * 10 < totals[i] * 7 {
+                continue;
+            }
+            let mut estimate = [0.0; 3];
+            let mut coherent = true;
+            for c in 0..3 {
+                let mut channel: Vec<f32> = bin.iter().map(|v| v[c]).collect();
+                channel.sort_unstable_by(f32::total_cmp);
+                coherent &= channel[channel.len() * 9 / 10] - channel[channel.len() / 10] <= 16.0;
+                estimate[c] = ((channel[(channel.len() - 1) / 2] + channel[channel.len() / 2])
+                    * 0.5)
+                    .clamp(-16.0, 16.0);
+            }
+            if coherent {
+                values[i] = estimate;
+                fixed[i] = true;
+            }
+        }
+        relax(width, height, &mut values, &fixed, cancel)?;
+        Ok(Self {
+            left: self.left,
+            top: self.top,
             step,
             width,
             height,
@@ -260,6 +312,52 @@ impl ColorField {
             a * (1.0 - gy.fract()) + b * gy.fract()
         })
     }
+}
+
+fn relax(
+    width: usize,
+    height: usize,
+    values: &mut [[f32; 3]],
+    fixed: &[bool],
+    cancel: &AtomicBool,
+) -> Result<(), IngestError> {
+    for _ in 0..2048 {
+        check_cancel(cancel)?;
+        let mut largest = 0.0f32;
+        for y in 0..height {
+            for x in 0..width {
+                let i = y * width + x;
+                if fixed[i] {
+                    continue;
+                }
+                let mut sum = [0.0; 3];
+                let mut count = 0.0;
+                for neighbor in [
+                    (x > 0).then(|| i - 1),
+                    (x + 1 < width).then_some(i + 1),
+                    (y > 0).then(|| i - width),
+                    (y + 1 < height).then_some(i + width),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    for c in 0..3 {
+                        sum[c] += values[neighbor][c];
+                    }
+                    count += 1.0;
+                }
+                for c in 0..3 {
+                    let next = sum[c] / count;
+                    largest = largest.max((next - values[i][c]).abs());
+                    values[i][c] = next;
+                }
+            }
+        }
+        if largest < 0.002 {
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn median(histogram: &[u32; 511], count: u32) -> f32 {
@@ -325,6 +423,74 @@ mod tests {
         }
         for x in 20..100 {
             assert_eq!(original.get_pixel(x, 10), clean.get_pixel(x, 10));
+        }
+    }
+
+    #[test]
+    fn corrects_interior_only_color_cast_without_reintroducing_dark_or_colored_text() {
+        let clean = RgbaImage::from_fn(360, 280, |x, y| {
+            let texture = ((x * 7 + y * 3) % 5) as u8;
+            Rgba([230 + texture, 235 + texture, 240 + texture, 255])
+        });
+        let mask = GrayImage::from_fn(360, 280, |x, y| {
+            Luma([u8::from((8..352).contains(&x) && (8..272).contains(&y)) * 255])
+        });
+        let repaired = RgbaImage::from_fn(360, 280, |x, y| {
+            let p = clean.get_pixel(x, y);
+            let envelope = ((x as f32 - 8.0) / 344.0 * std::f32::consts::PI).sin()
+                * ((y as f32 - 8.0) / 264.0 * std::f32::consts::PI).sin();
+            let drift = (16.0 * envelope.max(0.0).powi(2)).round() as u8;
+            let detail = if x % 2 == 0 { p[0] + 2 } else { p[0] - 2 };
+            Rgba([detail, p[1] - drift / 2, p[2] - drift, 0])
+        });
+        let mut original = clean.clone();
+        for y in 100..180 {
+            for x in 130..230 {
+                // Thin dark and red lettering on otherwise intact background.
+                if x % 20 < 3 {
+                    original.put_pixel(x, y, Rgba([20, 20, 20, 255]));
+                } else if y % 20 < 3 {
+                    original.put_pixel(x, y, Rgba([240, 30, 30, 255]));
+                } else if x % 29 < 2 {
+                    let p = clean.get_pixel(x, y);
+                    original.put_pixel(x, y, Rgba([p[0] - 14, p[1] - 14, p[2] - 14, 255]));
+                }
+            }
+        }
+        let before = original.clone();
+        apply(&mut original, &repaired, &mask);
+        let mut error = 0u64;
+        let mut old_error = 0u64;
+        let mut count = 0u64;
+        for y in 80..200 {
+            for x in 100..260 {
+                let output_detail = i16::from(original.get_pixel(x + 1, y)[0])
+                    - i16::from(original.get_pixel(x, y)[0]);
+                let model_detail = i16::from(repaired.get_pixel(x + 1, y)[0])
+                    - i16::from(repaired.get_pixel(x, y)[0]);
+                assert!(
+                    (output_detail - model_detail).abs() <= 1,
+                    "generated detail changed at {x},{y}"
+                );
+                for c in 0..3 {
+                    error +=
+                        u64::from(original.get_pixel(x, y)[c].abs_diff(clean.get_pixel(x, y)[c]));
+                    old_error +=
+                        u64::from(repaired.get_pixel(x, y)[c].abs_diff(clean.get_pixel(x, y)[c]));
+                    count += 1;
+                }
+            }
+        }
+        assert!(
+            error * 3 < old_error,
+            "interior error {error} vs raw {old_error}"
+        );
+        assert!(error as f64 / (count as f64) < 2.0);
+        for (x, y, p) in original.enumerate_pixels() {
+            assert_eq!(p[3], before.get_pixel(x, y)[3]);
+            if mask.get_pixel(x, y)[0] == 0 {
+                assert_eq!(p, before.get_pixel(x, y));
+            }
         }
     }
 

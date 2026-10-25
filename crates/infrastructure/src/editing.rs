@@ -632,9 +632,9 @@ pub fn preview(
         mask,
         parent_sha256,
         model: if model == "anime-lama" {
-            "anime-lama@b592884b2b6589e57df6916db6bcac7a6307fc58:sha256-95d4bf7eb2f13729351ac0a0693c9b9b469b264fc1542ca3fa551b59b464a160:crop128-max1024-v1:spatial-tone-feather16-v3".into()
+            "anime-lama@b592884b2b6589e57df6916db6bcac7a6307fc58:sha256-95d4bf7eb2f13729351ac0a0693c9b9b469b264fc1542ca3fa551b59b464a160:crop128-max1024-v1:interior-tone-feather16-v4".into()
         } else {
-            "lama:md5-e3aa4aaa15225a33ec84f9f4bc47e500:crop128-max1024-v1:spatial-tone-feather16-v3"
+            "lama:md5-e3aa4aaa15225a33ec84f9f4bc47e500:crop128-max1024-v1:interior-tone-feather16-v4"
                 .into()
         },
         regions,
