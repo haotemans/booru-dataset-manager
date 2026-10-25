@@ -65,11 +65,7 @@ pub struct EditorState {
     #[cfg(test)]
     pub redownload_button: Option<Rect>,
     #[cfg(test)]
-    pub crop_ratio_button: Option<Rect>,
-    #[cfg(test)]
     pub crop_ratio_choices: Vec<(usize, Rect)>,
-    #[cfg(test)]
-    pub crop_preview_button: Option<Rect>,
     #[cfg(test)]
     pub crop_save_button: Option<Rect>,
     #[cfg(test)]
@@ -102,11 +98,7 @@ impl Default for EditorState {
             #[cfg(test)]
             redownload_button: None,
             #[cfg(test)]
-            crop_ratio_button: None,
-            #[cfg(test)]
             crop_ratio_choices: Vec::new(),
-            #[cfg(test)]
-            crop_preview_button: None,
             #[cfg(test)]
             crop_save_button: None,
             #[cfg(test)]
@@ -180,6 +172,11 @@ fn screen(point: [f32; 2], image: Rect, size: egui::Vec2) -> egui::Pos2 {
     image.min + vec2(point[0], point[1]) / size * image.size()
 }
 
+#[cfg(test)]
+pub(crate) fn ratio_name(index: usize) -> &'static str {
+    crop::RATIOS[index].0
+}
+
 impl BdmApp {
     pub fn open_original(&mut self, id: usize) -> Result<(), String> {
         if self.demo || self.is_capture() {
@@ -228,47 +225,38 @@ impl BdmApp {
         Ok(())
     }
 
-    pub(crate) fn crop_ratio_picker(&mut self, ui: &mut egui::Ui, id: usize) {
+    pub(crate) fn crop_ratio_buttons(&mut self, ui: &mut egui::Ui, id: usize) {
         let active = self.image_editor.visible && self.image_editor.cropping;
         let busy = self.image_editor.active() || self.image_editor.preview.is_some();
         let mut chosen = None;
-        let label = if active {
-            format!("裁剪 · {}", crop::RATIOS[self.image_editor.crop.ratio].0)
-        } else {
-            "裁剪比例".into()
-        };
         #[cfg(test)]
         self.image_editor.crop_ratio_choices.clear();
-        let picker = ui
-            .add_enabled_ui(!busy, |ui| {
-                egui::ComboBox::from_id_salt("review-crop-ratio")
-                    .width(132.0)
-                    .height(300.0)
-                    .selected_text(label)
-                    .show_ui(ui, |ui| {
-                        for (index, (name, _)) in crop::RATIOS.iter().enumerate() {
-                            let option = ui.selectable_label(
-                                active && self.image_editor.crop.ratio == index,
-                                *name,
-                            );
-                            #[cfg(test)]
-                            self.image_editor
-                                .crop_ratio_choices
-                                .push((index, option.rect));
-                            if option.clicked() {
-                                chosen = Some(index);
-                            }
-                        }
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.spacing_mut().button_padding = vec2(3.0, 4.0);
+            ui.spacing_mut().interact_size.y = 28.0;
+            let width = (ui.available_width() - 3.0 * (crop::RATIOS.len() - 1) as f32)
+                / (crop::RATIOS.len() as f32 + 0.9);
+            for index in crop::ordered_ratios() {
+                let (name, _) = crop::RATIOS[index];
+                let button = ui
+                    .add_enabled_ui(!busy, |ui| {
+                        ui.add_sized(
+                            [width * if !name.is_ascii() { 1.45 } else { 1.0 }, 28.0],
+                            egui::Button::new(RichText::new(name).size(12.0))
+                                .selected(active && self.image_editor.crop.ratio == index),
+                        )
                     })
-            })
-            .inner;
-        #[cfg(test)]
-        {
-            self.image_editor.crop_ratio_button = Some(picker.response.rect);
-        }
-        if picker.response.clicked() {
-            crate::diagnostics::event(format!("crop_ratio_menu media={id}"));
-        }
+                    .inner;
+                #[cfg(test)]
+                self.image_editor
+                    .crop_ratio_choices
+                    .push((index, button.rect));
+                if button.clicked() {
+                    chosen = Some(index);
+                }
+            }
+        });
         if let Some(ratio) = chosen {
             self.image_editor.reset(id);
             self.image_editor.visible = true;
@@ -298,118 +286,62 @@ impl BdmApp {
         }
     }
 
-    pub(crate) fn crop_toolbar(&mut self, ui: &mut egui::Ui, id: usize) {
-        #[cfg(test)]
-        {
-            self.image_editor.crop_preview_button = None;
-            self.image_editor.crop_save_button = None;
-        }
+    pub(crate) fn crop_confirm_button(&mut self, ui: &mut egui::Ui, id: usize) {
+        let active = self.image_editor.visible && self.image_editor.cropping;
         let busy = self.image_editor.active();
+        let dimensions = self
+            .ingest
+            .stored
+            .get(&id)
+            .map(|m| m.dimensions())
+            .or_else(|| {
+                self.library
+                    .media
+                    .iter()
+                    .find(|m| m.id == id)
+                    .map(|m| (m.width as u32, m.height as u32))
+            })
+            .unwrap_or((1, 1));
+        let crop = self
+            .image_editor
+            .crop
+            .pixels(vec2(dimensions.0 as f32, dimensions.1 as f32));
         let real =
             !self.demo && !self.is_capture() && !self.ingest_active() && !self.workflow_active();
-        ui.horizontal_centered(|ui| {
-            ui.spacing_mut().interact_size.y = 28.0;
-            ui.spacing_mut().item_spacing.x = 8.0;
-            if busy {
-                ui.spinner();
-                ui.label(if self.image_editor.saving {
-                    "正在保存裁剪…"
-                } else {
-                    "正在生成预览…"
-                });
-                if ui.button("取消任务").clicked() {
-                    if let Some(cancel) = &self.image_editor.cancel {
-                        cancel.store(true, Ordering::Relaxed);
-                    }
-                }
-                return;
-            }
-            if let Some(preview) = self.image_editor.preview.as_ref().and_then(|p| p.crop) {
-                ui.label(format!("{} × {} px", preview.width, preview.height));
-                ui.selectable_value(&mut self.image_editor.show_preview, false, "原图");
-                ui.selectable_value(&mut self.image_editor.show_preview, true, "裁剪预览");
-                let save = ui.add_enabled(
-                    real,
-                    egui::Button::new(RichText::new("保存裁剪").color(egui::Color32::WHITE))
-                        .fill(ACCENT),
-                );
-                #[cfg(test)]
-                {
-                    self.image_editor.crop_save_button = Some(save.rect);
-                }
-                if save.clicked() {
-                    if let Err(error) = self.editor_commit(ui.ctx(), id) {
-                        self.image_editor.error = error;
-                    }
-                }
-                if ui.button("返回调整").clicked() {
-                    self.image_editor.preview = None;
-                    self.image_editor.texture = None;
-                    self.image_editor.show_preview = false;
-                    self.media_review.view = crate::media_review::CanvasView::default();
+        let save = ui.add_enabled(
+            active && real && !busy && crop.is_some(),
+            egui::Button::new(RichText::new("裁剪确认")).selected(active),
+        );
+        #[cfg(test)]
+        {
+            self.image_editor.crop_save_button = Some(save.rect);
+        }
+        let clicked = save.clicked();
+        save.on_hover_text(crop.map_or_else(
+            || "先选择比例或绘制裁剪框".into(),
+            |c| format!("直接保存 {} × {} px，替换当前图片", c.width, c.height),
+        ));
+        if clicked {
+            if self.image_editor.preview.is_some() {
+                if let Err(error) = self.editor_commit(ui.ctx(), id) {
+                    self.image_editor.error = error;
                 }
             } else {
-                let dimensions = self
-                    .ingest
-                    .stored
-                    .get(&id)
-                    .map(|m| m.dimensions())
-                    .or_else(|| {
-                        self.library
-                            .media
-                            .iter()
-                            .find(|m| m.id == id)
-                            .map(|m| (m.width as u32, m.height as u32))
-                    })
-                    .unwrap_or((1, 1));
-                let crop = self
-                    .image_editor
-                    .crop
-                    .pixels(vec2(dimensions.0 as f32, dimensions.1 as f32));
-                if let Some(crop) = crop {
-                    ui.label(format!("{} × {} px", crop.width, crop.height));
-                }
-                let preview = ui.add_enabled(real && crop.is_some(), egui::Button::new("预览裁剪"));
-                #[cfg(test)]
-                {
-                    self.image_editor.crop_preview_button = Some(preview.rect);
-                }
-                if preview.clicked() {
-                    self.editor_start_with_mode(ui.ctx(), id, false, false);
-                }
-                let save = ui.add_enabled(
-                    real && crop.is_some(),
-                    egui::Button::new(RichText::new("保存裁剪").color(egui::Color32::WHITE))
-                        .fill(ACCENT),
-                );
-                #[cfg(test)]
-                {
-                    self.image_editor.crop_save_button = Some(save.rect);
-                }
-                if save.clicked() {
-                    self.editor_start_with_mode(ui.ctx(), id, false, true);
-                }
-                if ui.button("重新框选").clicked() {
-                    self.image_editor.crop.selection = None;
-                }
-                ui.label(RichText::new("拖动移动 · 四角调整").size(11.0).color(MUTED));
+                self.editor_start_with_mode(ui.ctx(), id, false, true);
             }
-            if ui.button("退出裁剪").clicked() {
-                self.image_editor.preview = None;
-                self.image_editor.texture = None;
-                self.image_editor.crop.selection = None;
-                self.image_editor.visible = false;
-                self.image_editor.error.clear();
-                self.media_review.view = crate::media_review::CanvasView::default();
+        }
+        if active && busy {
+            ui.spinner().on_hover_text("正在保存裁剪");
+            if ui.small_button("取消").clicked() {
+                if let Some(cancel) = &self.image_editor.cancel {
+                    cancel.store(true, Ordering::Relaxed);
+                }
             }
-            if !self.image_editor.error.is_empty() {
-                ui.add(
-                    egui::Label::new(RichText::new(&self.image_editor.error).color(DANGER))
-                        .truncate(),
-                )
+        }
+        if active && !self.image_editor.error.is_empty() {
+            ui.label(RichText::new("裁剪失败").color(DANGER))
                 .on_hover_text(&self.image_editor.error);
-            }
-        });
+        }
     }
 
     pub fn editor_panel(&mut self, ui: &mut egui::Ui, id: usize, height: f32) {
@@ -1216,7 +1148,7 @@ mod tests {
         assert!(!app.image_editor.active());
     }
     #[test]
-    fn inline_crop_preview_never_saves_and_explicit_save_works_in_both_confirmation_modes() {
+    fn crop_confirmation_saves_in_one_click_independently_of_inpainting_confirmation() {
         fn render(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) {
             let _ = ctx.run(
                 egui::RawInput {
@@ -1227,12 +1159,25 @@ mod tests {
                 |ctx| app.shell(ctx),
             );
         }
-        fn click(ctx: &egui::Context, app: &mut BdmApp, pos: egui::Pos2) {
-            render(ctx, app, vec![egui::Event::PointerMoved(pos)]);
+        for confirm in [true, false] {
+            let (_directory, mut app, media) = imported_app();
+            let original = std::fs::read(&media.path).unwrap();
+            let ctx = egui::Context::default();
+            crate::theme::setup(&ctx);
+            app.prefs.confirm_image_edits = confirm;
+            app.image_editor.cropping = true;
+            app.image_editor.crop.ratio = 2;
+            app.image_editor.crop.center(vec2(800.0, 800.0));
+            for _ in 0..3 {
+                render(&ctx, &mut app, vec![]);
+            }
+            assert_eq!(std::fs::read(&media.path).unwrap(), original);
+            let pos = app.image_editor.crop_save_button.unwrap().center();
+            render(&ctx, &mut app, vec![egui::Event::PointerMoved(pos)]);
             for pressed in [true, false] {
                 render(
-                    ctx,
-                    app,
+                    &ctx,
+                    &mut app,
                     vec![egui::Event::PointerButton {
                         pos,
                         button: egui::PointerButton::Primary,
@@ -1241,46 +1186,20 @@ mod tests {
                     }],
                 );
             }
-        }
-        for confirm in [true, false] {
-            for preview_first in [true, false] {
-                let (_directory, mut app, media) = imported_app();
-                let original = std::fs::read(&media.path).unwrap();
-                let ctx = egui::Context::default();
-                crate::theme::setup(&ctx);
-                app.prefs.confirm_image_edits = confirm;
-                app.image_editor.cropping = true;
-                app.image_editor.crop.ratio = 2;
-                app.image_editor.crop.center(vec2(800.0, 800.0));
-                for _ in 0..3 {
-                    render(&ctx, &mut app, vec![]);
-                }
-                if preview_first {
-                    let pos = app.image_editor.crop_preview_button.unwrap().center();
-                    click(&ctx, &mut app, pos);
-                    finish(&mut app, &ctx);
-                    assert!(app.image_editor.preview.is_some());
-                    assert_eq!(std::fs::read(&media.path).unwrap(), original);
-                    for _ in 0..3 {
-                        render(&ctx, &mut app, vec![]);
-                    }
-                }
-                let pos = app.image_editor.crop_save_button.unwrap().center();
-                click(&ctx, &mut app, pos);
-                finish(&mut app, &ctx);
-                assert!(
-                    app.image_editor.error.is_empty(),
-                    "{}",
-                    app.image_editor.error
-                );
-                assert!(app.image_editor.preview.is_none());
-                assert_eq!(
-                    app.ingest.stored[&(media.id as usize)].dimensions(),
-                    (800, 600)
-                );
-                assert_ne!(std::fs::read(&media.path).unwrap(), original);
-                assert_eq!(app.prefs.confirm_image_edits, confirm);
-            }
+            finish(&mut app, &ctx);
+            assert!(
+                app.image_editor.error.is_empty(),
+                "{}",
+                app.image_editor.error
+            );
+            assert!(app.image_editor.preview.is_none());
+            assert!(!app.image_editor.visible);
+            assert_eq!(
+                app.ingest.stored[&(media.id as usize)].dimensions(),
+                (800, 600)
+            );
+            assert_ne!(std::fs::read(&media.path).unwrap(), original);
+            assert_eq!(app.prefs.confirm_image_edits, confirm);
         }
     }
 

@@ -242,25 +242,6 @@ mod tests {
             for _ in 0..3 {
                 frame(&ctx, &mut app, vec![]);
             }
-            {
-                let menu = app.image_editor.more_button.unwrap().center();
-                for pressed in [true, false] {
-                    frame(
-                        &ctx,
-                        &mut app,
-                        vec![
-                            egui::Event::PointerMoved(menu),
-                            egui::Event::PointerButton {
-                                pos: menu,
-                                button: egui::PointerButton::Primary,
-                                pressed,
-                                modifiers: Default::default(),
-                            },
-                        ],
-                    );
-                }
-                frame(&ctx, &mut app, vec![]);
-            }
             let pos = app.image_editor.redownload_button.unwrap().center();
             frame(&ctx, &mut app, vec![egui::Event::PointerMoved(pos)]);
             for pressed in [true, false] {

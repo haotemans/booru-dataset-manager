@@ -23,6 +23,8 @@ pub struct ReviewState {
     #[cfg(test)]
     keep_button: Option<Rect>,
     #[cfg(test)]
+    reject_button: Option<Rect>,
+    #[cfg(test)]
     canvas: Option<Rect>,
     #[cfg(test)]
     pub(crate) load_original_button: Option<Rect>,
@@ -44,6 +46,8 @@ impl Default for ReviewState {
             footer: None,
             #[cfg(test)]
             keep_button: None,
+            #[cfg(test)]
+            reject_button: None,
             #[cfg(test)]
             canvas: None,
             #[cfg(test)]
@@ -103,32 +107,29 @@ struct ReviewLayout {
     header: Rect,
     image: Rect,
     info: Option<Rect>,
+    ratios: Rect,
     tools: Rect,
-    crop: Option<Rect>,
     footer: Rect,
 }
 
 impl ReviewLayout {
-    fn new(rect: Rect, sidebar: bool, cropping: bool) -> Self {
+    fn new(rect: Rect, sidebar: bool) -> Self {
         let header = Rect::from_min_size(rect.min, vec2(rect.width(), 34.0));
         let footer = Rect::from_min_size(
             egui::pos2(rect.left(), rect.bottom() - 46.0),
             vec2(rect.width(), 46.0),
         );
-        let crop = cropping.then(|| {
-            Rect::from_min_size(
-                egui::pos2(rect.left(), footer.top() - 46.0),
-                vec2(rect.width(), 42.0),
-            )
-        });
-        let tools_bottom = crop.map_or(footer.top(), |r| r.top());
         let tools = Rect::from_min_size(
-            egui::pos2(rect.left(), tools_bottom - 42.0),
-            vec2(rect.width(), 38.0),
+            egui::pos2(rect.left(), footer.top() - 38.0),
+            vec2(rect.width(), 34.0),
+        );
+        let ratios = Rect::from_min_size(
+            egui::pos2(rect.left(), tools.top() - 36.0),
+            vec2(rect.width(), 32.0),
         );
         let body = Rect::from_min_max(
             egui::pos2(rect.left(), header.bottom() + 6.0),
-            egui::pos2(rect.right(), tools.top() - 6.0),
+            egui::pos2(rect.right(), ratios.top() - 6.0),
         );
         let info_width = (body.width() * 0.28).clamp(280.0, 360.0);
         let info = sidebar.then(|| {
@@ -145,8 +146,8 @@ impl ReviewLayout {
             header,
             image,
             info,
+            ratios,
             tools,
-            crop,
             footer,
         }
     }
@@ -226,10 +227,8 @@ impl BdmApp {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-                let crop_actions = self.image_editor.visible && self.image_editor.cropping;
                 let inpainting = self.image_editor.visible && !self.image_editor.cropping;
-                let layout =
-                    ReviewLayout::new(rect, self.media_review.sidebar || inpainting, crop_actions);
+                let layout = ReviewLayout::new(rect, self.media_review.sidebar || inpainting);
                 #[cfg(test)]
                 {
                     self.media_review.footer = Some(layout.footer);
@@ -243,9 +242,9 @@ impl BdmApp {
                             if self.pending_deletion.contains(&id) {
                                 "待删除"
                             } else if media.keep {
-                                "已保留"
+                                "已通过"
                             } else {
-                                "待审核"
+                                "未判断"
                             },
                             if self.pending_deletion.contains(&id) {
                                 DANGER
@@ -310,15 +309,12 @@ impl BdmApp {
                         }
                     });
                 }
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(layout.ratios), |ui| {
+                    self.crop_ratio_buttons(ui, id);
+                });
                 ui.allocate_new_ui(egui::UiBuilder::new().max_rect(layout.tools), |ui| {
                     self.review_toolbar(ui, &media, layout.image);
                 });
-                if let Some(crop) = layout.crop {
-                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(crop), |ui| {
-                        ui.set_clip_rect(crop);
-                        self.crop_toolbar(ui, id);
-                    });
-                }
                 ui.painter().line_segment(
                     [layout.footer.left_top(), layout.footer.right_top()],
                     egui::Stroke::new(1.0_f32, LINE),
@@ -330,8 +326,7 @@ impl BdmApp {
                     |ui| {
                         ui.spacing_mut().item_spacing.y = 6.0;
                         ui.horizontal(|ui| {
-                            for (value, label) in [(1, "待删除"), (2, "待审核"), (3, "保留")]
-                            {
+                            for (value, label) in [(3, "通过"), (1, "拒绝")] {
                                 let selected = match value {
                                     1 => self.pending_deletion.contains(&id),
                                     3 => media.keep && !self.pending_deletion.contains(&id),
@@ -348,6 +343,10 @@ impl BdmApp {
                                 #[cfg(test)]
                                 if value == 3 {
                                     self.media_review.keep_button = Some(button.rect);
+                                }
+                                #[cfg(test)]
+                                if value == 1 {
+                                    self.media_review.reject_button = Some(button.rect);
                                 }
                                 if button.clicked() {
                                     decision = Some(value);
@@ -394,7 +393,6 @@ impl BdmApp {
                         for (key, value) in [
                             (egui::Key::Num1, 1),
                             (egui::Key::Delete, 1),
-                            (egui::Key::Num2, 2),
                             (egui::Key::Num3, 3),
                         ] {
                             if i.consume_key(egui::Modifiers::NONE, key) {
@@ -460,20 +458,8 @@ impl BdmApp {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.spacing_mut().interact_size.y = 28.0;
-            self.crop_ratio_picker(ui, id);
-            if ui
-                .add_enabled(
-                    !busy || !inpainting,
-                    egui::Button::new("标签与描述")
-                        .selected(self.media_review.sidebar && !inpainting),
-                )
-                .clicked()
-            {
-                self.media_review.sidebar = !(self.media_review.sidebar && !inpainting);
-                if inpainting {
-                    self.image_editor.visible = false;
-                }
-            }
+            ui.spacing_mut().button_padding = vec2(8.0, 4.0);
+            self.crop_confirm_button(ui, id);
             let edit = ui.add_enabled(!busy, egui::Button::new("局部修复").selected(inpainting));
             #[cfg(test)]
             {
@@ -485,17 +471,35 @@ impl BdmApp {
                 self.image_editor.crop.selection = None;
                 self.media_review.sidebar = !inpainting;
             }
+            if ui
+                .add_enabled(
+                    !busy || !inpainting,
+                    egui::Button::new("描述").selected(self.media_review.sidebar && !inpainting),
+                )
+                .clicked()
+            {
+                self.media_review.sidebar = !(self.media_review.sidebar && !inpainting);
+                if inpainting {
+                    self.image_editor.visible = false;
+                }
+            }
             ui.separator();
             self.review_view_controls(ui, media, stage);
             let _more = ui.menu_button("更多", |ui| {
-                let download = ui.button("重新下载原图");
-                #[cfg(test)]
-                {
-                    self.image_editor.redownload_button = Some(download.rect);
-                }
-                if download.clicked() {
-                    self.request_redownload(ui.ctx(), id);
-                    ui.close_menu();
+                if self.image_editor.visible && self.image_editor.cropping && !busy {
+                    if ui.button("重新框选").clicked() {
+                        self.image_editor.crop.selection = None;
+                        ui.close_menu();
+                    }
+                    if ui.button("退出裁剪").clicked() {
+                        self.image_editor.preview = None;
+                        self.image_editor.texture = None;
+                        self.image_editor.crop.selection = None;
+                        self.image_editor.visible = false;
+                        self.image_editor.error.clear();
+                        self.media_review.view = CanvasView::default();
+                        ui.close_menu();
+                    }
                 }
                 if self
                     .ingest
@@ -568,6 +572,16 @@ impl BdmApp {
                     self.form_error = error;
                 }
             }
+        }
+        let download = ui
+            .button("重新下载")
+            .on_hover_text("重新下载原图并保留当前文件备份");
+        #[cfg(test)]
+        {
+            self.image_editor.redownload_button = Some(download.rect);
+        }
+        if download.clicked() {
+            self.request_redownload(ui.ctx(), media.id);
         }
         if ui.button("适应窗口").clicked() {
             self.media_review.view = CanvasView::default();
@@ -1437,6 +1451,59 @@ mod tests {
     }
 
     #[test]
+    fn pass_and_reject_buttons_keep_rejections_in_the_confirmation_queue() {
+        let ctx = egui::Context::default();
+        crate::theme::setup(&ctx);
+        let mut app = sample();
+        app.media_review.auto_advance = false;
+        let before = app.library.media.clone();
+        let size = vec2(1050.0, 720.0);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, size, vec![]);
+        }
+        let rejected = app.media_review.reject_button.unwrap().center();
+        for pressed in [true, false] {
+            frame(
+                &ctx,
+                &mut app,
+                size,
+                vec![
+                    egui::Event::PointerMoved(rejected),
+                    egui::Event::PointerButton {
+                        pos: rejected,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        assert_eq!(app.library.media, before);
+        assert!(app.pending_deletion.contains(&3));
+        assert!(matches!(app.dialog, Some(Dialog::Media(3))));
+        let passed = app.media_review.keep_button.unwrap().center();
+        for pressed in [true, false] {
+            frame(
+                &ctx,
+                &mut app,
+                size,
+                vec![
+                    egui::Event::PointerMoved(passed),
+                    egui::Event::PointerButton {
+                        pos: passed,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        assert!(!app.pending_deletion.contains(&3));
+        assert!(app.library.media.iter().find(|m| m.id == 3).unwrap().keep);
+        assert!(matches!(app.dialog, Some(Dialog::Media(3))));
+    }
+
+    #[test]
     fn failed_review_save_does_not_advance_or_clear_deletion_mark() {
         let ctx = egui::Context::default();
         crate::theme::setup(&ctx);
@@ -1534,7 +1601,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_crop_keeps_the_image_wide_and_reveals_actions_after_ratio_selection() {
+    fn three_rows_keep_all_ratios_visible_and_crop_selection_does_not_move_the_canvas() {
         for size in [vec2(981.0, 613.0), vec2(1050.0, 720.0), vec2(1440.0, 960.0)] {
             let ctx = egui::Context::default();
             crate::theme::setup(&ctx);
@@ -1548,26 +1615,40 @@ mod tests {
             }
             let canvas = app.media_review.canvas.unwrap();
             assert!(canvas.width() > size.x * 0.95);
-            assert!(app.image_editor.crop_preview_button.is_none());
-            assert!(app.image_editor.crop_save_button.is_none());
-            let picker = app.image_editor.crop_ratio_button.unwrap().center();
-            for pressed in [true, false] {
-                frame(
-                    &ctx,
-                    &mut app,
-                    size,
-                    vec![
-                        egui::Event::PointerMoved(picker),
-                        egui::Event::PointerButton {
-                            pos: picker,
-                            button: egui::PointerButton::Primary,
-                            pressed,
-                            modifiers: Default::default(),
-                        },
-                    ],
+            assert!(app.image_editor.crop.selection.is_none());
+            let expected = [
+                "21:9",
+                "2:1",
+                "16:9",
+                "16:10",
+                "3:2",
+                "7:5",
+                "4:3",
+                "5:4",
+                "1:1",
+                "4:5",
+                "3:4",
+                "5:7",
+                "2:3",
+                "10:16",
+                "9:16",
+                "1:2",
+                "9:21",
+                "自由裁剪",
+                "原图比例",
+            ];
+            assert_eq!(app.image_editor.crop_ratio_choices.len(), expected.len());
+            let mut previous_right = 0.0;
+            for ((index, rect), label) in app.image_editor.crop_ratio_choices.iter().zip(expected) {
+                assert_eq!(crate::image_editor::ratio_name(*index), label);
+                assert!(
+                    app.media_review.window.unwrap().contains_rect(*rect),
+                    "ratio {label} outside {size:?}: {rect:?}"
                 );
+                assert!(rect.left() >= previous_right - 0.01);
+                assert!(rect.top() > canvas.bottom());
+                previous_right = rect.right();
             }
-            frame(&ctx, &mut app, size, vec![]);
             let option = app
                 .image_editor
                 .crop_ratio_choices
@@ -1576,7 +1657,6 @@ mod tests {
                 .unwrap()
                 .1
                 .center();
-            assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains(option));
             for pressed in [true, false] {
                 frame(
                     &ctx,
@@ -1599,12 +1679,20 @@ mod tests {
             assert!(app.image_editor.cropping && app.image_editor.visible);
             assert_eq!(app.image_editor.crop.ratio, 6);
             assert!(app.image_editor.crop.selection.is_some());
-            let canvas = app.media_review.canvas.unwrap();
-            assert!(canvas.width() > size.x * 0.95);
+            assert_eq!(app.media_review.canvas.unwrap(), canvas);
+            let save = app.image_editor.crop_save_button.unwrap();
+            assert!(
+                save.top() > app.image_editor.crop_ratio_choices[0].1.bottom(),
+                "row overlap at {size:?}: save={save:?}, ratio={:?}",
+                app.image_editor.crop_ratio_choices[0].1
+            );
+            assert!(app.media_review.keep_button.unwrap().top() > save.bottom());
             for button in [
-                app.image_editor.crop_preview_button.unwrap(),
-                app.image_editor.crop_save_button.unwrap(),
+                save,
+                app.image_editor.editor_button.unwrap(),
+                app.image_editor.redownload_button.unwrap(),
                 app.media_review.keep_button.unwrap(),
+                app.media_review.reject_button.unwrap(),
             ] {
                 assert!(app.media_review.window.unwrap().contains_rect(button));
                 assert!(!canvas.intersects(button));
@@ -1614,6 +1702,9 @@ mod tests {
             let old_image_width =
                 size.x - 24.0 - ((size.x - 24.0) * 0.34).clamp(320.0, 400.0) - 12.0;
             assert!(displayed.width() > old_image_width * 1.35);
+            assert_eq!(app.library.media, before);
+            key(&ctx, &mut app, egui::Key::Num2);
+            assert!(matches!(app.dialog, Some(Dialog::Media(3))));
             assert_eq!(app.library.media, before);
         }
     }

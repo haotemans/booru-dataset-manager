@@ -2,7 +2,7 @@ use super::{pixel, screen};
 use bdm_domain::editing::CropRect;
 use eframe::egui::{self, pos2, vec2, Rect, Vec2};
 
-pub const RATIOS: [(&str, Option<f32>); 17] = [
+pub const RATIOS: [(&str, Option<f32>); 19] = [
     ("自由裁剪", None),
     ("1:1", Some(1.0)),
     ("4:3", Some(4.0 / 3.0)),
@@ -19,8 +19,18 @@ pub const RATIOS: [(&str, Option<f32>); 17] = [
     ("1:2", Some(0.5)),
     ("16:10", Some(16.0 / 10.0)),
     ("10:16", Some(10.0 / 16.0)),
+    ("7:5", Some(7.0 / 5.0)),
+    ("5:7", Some(5.0 / 7.0)),
     ("原图比例", None),
 ];
+
+/// Wide-to-tall presets, followed by free and source aspect modes.
+pub fn ordered_ratios() -> Vec<usize> {
+    let mut indices: Vec<_> = (1..RATIOS.len() - 1).collect();
+    indices.sort_by(|&left, &right| RATIOS[right].1.unwrap().total_cmp(&RATIOS[left].1.unwrap()));
+    indices.extend([0, RATIOS.len() - 1]);
+    indices
+}
 
 #[derive(Default)]
 pub struct CropState {
