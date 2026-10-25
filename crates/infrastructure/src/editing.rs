@@ -8,7 +8,6 @@ use image::{GenericImageView, ImageFormat};
 use rusqlite::params;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::VecDeque,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -21,6 +20,7 @@ use std::{
 };
 
 const WORKER: &str = include_str!("../../../scripts/inpainting_worker.py");
+mod blend;
 mod mask;
 mod worker;
 
@@ -78,6 +78,80 @@ mod tests {
             }],
             crop: None,
         }
+    }
+    #[test]
+    fn redownload_restores_cropped_and_repaired_originals_with_backup_and_source_metadata() {
+        for crop in [false, true] {
+            let mut f = imported();
+            let media = f.repo.list_media().unwrap().remove(0);
+            let original = fs::read(&media.path).unwrap();
+            let raw_tags = fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
+            let preview = if crop {
+                crop_preview(
+                    &media,
+                    CropRect {
+                        x: 5,
+                        y: 6,
+                        width: 300,
+                        height: 200,
+                    },
+                    &AtomicBool::new(false),
+                )
+                .unwrap()
+            } else {
+                synthetic(&media)
+            };
+            let edited = f.repo.commit_repair(media.id, &preview).unwrap();
+            let edited_bytes = fs::read(&edited.path).unwrap();
+            assert_ne!(edited_bytes, original);
+            let restored = f
+                .repo
+                .redownload_original(media.id, &f.provider, &AtomicBool::new(false))
+                .unwrap();
+            assert_eq!(restored, media);
+            assert_eq!(f.repo.list_media().unwrap()[0], restored);
+            assert_eq!(fs::read(&restored.path).unwrap(), original);
+            assert_eq!(
+                image::open(&restored.path).unwrap().dimensions(),
+                restored.dimensions()
+            );
+            assert_eq!(
+                fs::read(restored.path.with_extension("raw_tags.txt")).unwrap(),
+                raw_tags
+            );
+            let backups: Vec<_> = fs::read_dir(restored.path.parent().unwrap())
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".redownload-backup-")
+                })
+                .collect();
+            assert_eq!(backups.len(), 1);
+            assert_eq!(fs::read(&backups[0]).unwrap(), edited_bytes);
+            f.repo.recover_repairs().unwrap();
+            assert_eq!(f.repo.list_media().unwrap()[0], restored);
+        }
+    }
+
+    #[test]
+    fn redownload_rejects_invalid_source_without_replacing_edited_file() {
+        let mut f = imported();
+        let media = f.repo.list_media().unwrap().remove(0);
+        let edited = f.repo.commit_repair(media.id, &synthetic(&media)).unwrap();
+        let bytes = fs::read(&edited.path).unwrap();
+        let thumbnail = fs::read(&edited.thumbnail).unwrap();
+        f.provider.bytes[0] ^= 1;
+        assert!(matches!(
+            f.repo
+                .redownload_original(media.id, &f.provider, &AtomicBool::new(false)),
+            Err(IngestError::Integrity)
+        ));
+        assert_eq!(f.repo.list_media().unwrap()[0], edited);
+        assert_eq!(fs::read(&edited.path).unwrap(), bytes);
+        assert_eq!(fs::read(&edited.thumbnail).unwrap(), thumbnail);
     }
     #[test]
     fn crop_is_local_exact_and_repeated_edits_export_current_dimensions() {
@@ -542,7 +616,7 @@ pub fn preview(
     if result.dimensions() != (width, height) {
         return Err(IngestError::Integrity);
     }
-    // Preserve unselected pixels exactly and feather the repair at the mask edge.
+    // Match each repair to its clean border and preserve unselected pixels/alpha.
     let mut composed = decoded.to_rgba8();
     let repair = result.to_rgba8();
     if !repair_quality_ok(&composed, &repair, &mask_image) {
@@ -550,21 +624,7 @@ pub fn preview(
             "模型预览出现异常噪声，已阻止替换原图；请缩小选区或切换修复模型后重试。".into(),
         ));
     }
-    let weights = mask_edge_weights(&mask_image);
-    for (x, y, pixel) in composed.enumerate_pixels_mut() {
-        if mask_image.get_pixel(x, y)[0] > 0 {
-            let alpha = pixel[3];
-            let feather = weights[(y * width + x) as usize];
-            let repaired = repair.get_pixel(x, y);
-            for channel in 0..3 {
-                pixel[channel] = ((f32::from(pixel[channel]) * (1.0 - feather)
-                    + f32::from(repaired[channel]) * feather)
-                    .round()
-                    .clamp(0.0, 255.0)) as u8;
-            }
-            pixel[3] = alpha;
-        }
-    }
+    blend::compose(&mut composed, &repair, &mask_image, cancel)?;
     storage(composed.save(&output))?;
     Ok(RepairPreview {
         directory,
@@ -572,9 +632,10 @@ pub fn preview(
         mask,
         parent_sha256,
         model: if model == "anime-lama" {
-            "anime-lama@b592884b2b6589e57df6916db6bcac7a6307fc58:sha256-95d4bf7eb2f13729351ac0a0693c9b9b469b264fc1542ca3fa551b59b464a160:crop128-max1024-v1".into()
+            "anime-lama@b592884b2b6589e57df6916db6bcac7a6307fc58:sha256-95d4bf7eb2f13729351ac0a0693c9b9b469b264fc1542ca3fa551b59b464a160:crop128-max1024-v1:spatial-tone-feather16-v3".into()
         } else {
-            "lama:md5-e3aa4aaa15225a33ec84f9f4bc47e500:crop128-max1024-v1".into()
+            "lama:md5-e3aa4aaa15225a33ec84f9f4bc47e500:crop128-max1024-v1:spatial-tone-feather16-v3"
+                .into()
         },
         regions,
         crop: None,
@@ -630,61 +691,6 @@ fn repair_quality_ok(
     repaired_average <= original_average * 3.5 + 35.0
 }
 
-fn mask_edge_weights(mask: &image::GrayImage) -> Vec<f32> {
-    const FEATHER: i32 = 8;
-    let width = mask.width() as i32;
-    let height = mask.height() as i32;
-    let mut distances = vec![FEATHER + 1; (width * height) as usize];
-    let mut queue = VecDeque::new();
-    for y in 0..height {
-        for x in 0..width {
-            if mask.get_pixel(x as u32, y as u32)[0] == 0 {
-                continue;
-            }
-            let edge = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                .iter()
-                .any(|&(nx, ny)| {
-                    nx < 0
-                        || ny < 0
-                        || nx >= width
-                        || ny >= height
-                        || mask.get_pixel(nx as u32, ny as u32)[0] == 0
-                });
-            if edge {
-                distances[(y * width + x) as usize] = 1;
-                queue.push_back((x, y));
-            }
-        }
-    }
-    while let Some((x, y)) = queue.pop_front() {
-        let distance = distances[(y * width + x) as usize];
-        if distance >= FEATHER {
-            continue;
-        }
-        for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-            if nx < 0 || ny < 0 || nx >= width || ny >= height {
-                continue;
-            }
-            let index = (ny * width + nx) as usize;
-            if mask.get_pixel(nx as u32, ny as u32)[0] > 0 && distances[index] > distance + 1 {
-                distances[index] = distance + 1;
-                queue.push_back((nx, ny));
-            }
-        }
-    }
-    distances
-        .into_iter()
-        .map(|distance| {
-            if distance > FEATHER {
-                1.0
-            } else {
-                // Keep most of the repair at the edge while removing a hard color seam.
-                (0.45 + 0.55 * distance as f32 / FEATHER as f32).clamp(0.0, 1.0)
-            }
-        })
-        .collect()
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Journal {
     media: StoredMedia,
@@ -708,12 +714,12 @@ impl SqliteCatalog {
         cancel: &AtomicBool,
     ) -> Result<StoredMedia, IngestError> {
         let media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
-        if media.edit.is_some() {
+        let directory = media.path.parent().ok_or(IngestError::Storage)?;
+        if directory.join(".repair-journal.json").exists() {
             return Err(IngestError::StorageDetails(
-                "当前图片有未完成编辑，请先恢复编辑前版本。".into(),
+                "当前图片有未完成的保存任务，请重启程序恢复后重试。".into(),
             ));
         }
-        let directory = media.path.parent().ok_or(IngestError::Storage)?;
         let staging = storage(
             tempfile::Builder::new()
                 .prefix(".redownload-")
@@ -769,7 +775,10 @@ impl SqliteCatalog {
         let lock = self.media_lock.clone();
         let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
         let current = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
-        if current.sha256 != media.sha256 || current.edit.is_some() {
+        if current.sha256 != media.sha256
+            || current.edit != media.edit
+            || directory.join(".repair-journal.json").exists()
+        {
             return Err(IngestError::StorageDetails(
                 "图片在下载期间发生变化，请重新执行下载。".into(),
             ));
@@ -788,7 +797,9 @@ impl SqliteCatalog {
                 .map_err(|e| e.error),
         )?;
 
-        let mut updated = media;
+        // Keep review/collection changes made during the transfer, while restoring source dimensions.
+        let mut updated = current;
+        updated.edit = None;
         updated.sha256 = format!("{:x}", Sha256::digest(&stored_bytes));
         updated.source_sha256 = source_sha256;
         let tx = storage(

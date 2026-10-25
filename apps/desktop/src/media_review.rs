@@ -6,7 +6,7 @@ use crate::{
 };
 use bdm_domain::ingest::StoredMedia;
 use eframe::egui::{self, vec2, Rect, RichText, Sense};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::Receiver;
 
 pub struct ReviewState {
     pub tab: usize,
@@ -14,6 +14,7 @@ pub struct ReviewState {
     canvas_id: Option<usize>,
     pub(crate) view: CanvasView,
     pub(crate) redownload: Option<(usize, Receiver<Result<StoredMedia, String>>)>,
+    pub(crate) redownload_notice: Option<crate::redownload::RedownloadNotice>,
     #[cfg(test)]
     window: Option<Rect>,
     #[cfg(test)]
@@ -34,6 +35,7 @@ impl Default for ReviewState {
             canvas_id: None,
             view: CanvasView::default(),
             redownload: None,
+            redownload_notice: None,
             #[cfg(test)]
             window: None,
             #[cfg(test)]
@@ -170,7 +172,6 @@ impl BdmApp {
     }
 
     pub(crate) fn show_media_review(&mut self, ctx: &egui::Context, id: usize) -> bool {
-        self.poll_redownload(ctx);
         let Some(media) = self.library.media.iter().find(|m| m.id == id).cloned() else {
             return true;
         };
@@ -191,6 +192,7 @@ impl BdmApp {
         let response = egui::Window::new("图片审核")
             .id(egui::Id::new("media_review_dialog"))
             .order(egui::Order::Foreground)
+            .enabled(self.media_review.redownload_notice.is_none())
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
@@ -424,7 +426,10 @@ impl BdmApp {
                         });
                     },
                 );
-                if !ctx.wants_keyboard_input() && !ctx.input(|i| i.modifiers.any()) {
+                if self.media_review.redownload_notice.is_none()
+                    && !ctx.wants_keyboard_input()
+                    && !ctx.input(|i| i.modifiers.any())
+                {
                     ctx.input_mut(|i| {
                         for (key, value) in [
                             (egui::Key::Num1, 1),
@@ -449,7 +454,8 @@ impl BdmApp {
                         }
                     });
                 }
-                if !ctx.wants_keyboard_input()
+                if self.media_review.redownload_notice.is_none()
+                    && !ctx.wants_keyboard_input()
                     && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
                 {
                     self.selected_media
@@ -485,76 +491,6 @@ impl BdmApp {
         #[cfg(not(test))]
         let _ = response;
         close
-    }
-
-    pub(crate) fn start_redownload(
-        &mut self,
-        ctx: &egui::Context,
-        id: usize,
-    ) -> Result<(), String> {
-        let path = self
-            .catalog
-            .path
-            .clone()
-            .ok_or("本地数据库未打开。".to_owned())?;
-        let credentials = self
-            .saved_danbooru_credentials()
-            .map_err(|error| error.to_string())?;
-        let (sender, receiver) = mpsc::channel();
-        let repaint = ctx.clone();
-        std::thread::Builder::new()
-            .name("redownload-original".into())
-            .spawn(move || {
-                let result = bdm_infrastructure::catalog::SqliteCatalog::open(&path)
-                    .map_err(|error| error.to_string())
-                    .and_then(|mut repo| {
-                        bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
-                            .map_err(|error| error.to_string())
-                            .and_then(|provider| {
-                                repo.redownload_original(
-                                    id as i64,
-                                    &provider,
-                                    &std::sync::atomic::AtomicBool::new(false),
-                                )
-                                .map_err(|error| error.to_string())
-                            })
-                    });
-                let _ = sender.send(result);
-                repaint.request_repaint();
-            })
-            .map_err(|_| "无法启动重新下载任务。".to_owned())?;
-        self.form_error.clear();
-        self.media_review.redownload = Some((id, receiver));
-        self.notify(ctx, "已开始下载原图，请稍候…");
-        Ok(())
-    }
-
-    fn poll_redownload(&mut self, ctx: &egui::Context) {
-        let Some((_id, receiver)) = &self.media_review.redownload else {
-            return;
-        };
-        let result = match receiver.try_recv() {
-            Ok(result) => result,
-            Err(TryRecvError::Empty) => {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-                return;
-            }
-            Err(TryRecvError::Disconnected) => Err("重新下载任务意外结束。".into()),
-        };
-        self.media_review
-            .redownload
-            .take()
-            .expect("redownload task");
-        match result {
-            Ok(media) => {
-                self.editor_apply_saved(ctx, media);
-                self.notify(ctx, "原图下载完成，已替换当前图片；旧文件已保留备份。");
-            }
-            Err(error) => {
-                self.form_error = error.clone();
-                self.notify(ctx, &format!("原图下载失败：{error}"));
-            }
-        }
     }
 
     fn review_canvas(&mut self, ui: &mut egui::Ui, media: &Media, rect: Rect) {

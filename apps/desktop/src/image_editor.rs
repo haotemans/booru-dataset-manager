@@ -62,6 +62,8 @@ pub struct EditorState {
     pub open_button: Option<Rect>,
     #[cfg(test)]
     pub editor_button: Option<Rect>,
+    #[cfg(test)]
+    pub redownload_button: Option<Rect>,
 }
 impl Default for EditorState {
     fn default() -> Self {
@@ -87,6 +89,8 @@ impl Default for EditorState {
             open_button: None,
             #[cfg(test)]
             editor_button: None,
+            #[cfg(test)]
+            redownload_button: None,
         }
     }
 }
@@ -243,34 +247,13 @@ impl BdmApp {
                     .is_some_and(|media| media.post.file_url.is_some());
                 let redownload_button = ui
                     .add(egui::Button::new("重新下载原图"))
-                    .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。")
-                    .clicked();
-                if redownload_button {
-                    let blocked = if !real {
-                        Some("当前处于示例预览模式，不能下载真实原图。")
-                    } else if busy {
-                        Some("当前有图片处理任务正在运行，请等待完成。")
-                    } else if self.ingest_active() {
-                        Some("当前正在导入图片，请等待导入完成。")
-                    } else if self.workflow_active() {
-                        Some("当前有工作流正在运行，请等待完成。")
-                    } else if self.image_editor.preview.is_some() {
-                        Some("当前存在未保存的编辑预览，请先确认或放弃预览。")
-                    } else if self.media_review.redownload.is_some() {
-                        Some("原图下载已经在进行中，请稍候。")
-                    } else if !source_available {
-                        Some("当前记录没有来源原图地址，无法自动下载。")
-                    } else {
-                        None
-                    };
-                    if let Some(error) = blocked {
-                        self.image_editor.error = error.to_owned();
-                        self.notify(ui.ctx(), error);
-                    } else if let Err(error) = self.start_redownload(ui.ctx(), id) {
-                        self.image_editor.error = error;
-                        let message = self.image_editor.error.clone();
-                        self.notify(ui.ctx(), &message);
-                    }
+                    .on_hover_text("校验来源文件后替换当前图片，并保留当前文件备份。");
+                #[cfg(test)]
+                {
+                    self.image_editor.redownload_button = Some(redownload_button.rect);
+                }
+                if redownload_button.clicked() {
+                    self.request_redownload(ui.ctx(), id);
                 }
                 if !self.image_editor.error.is_empty() {
                     ui.label(
@@ -415,7 +398,7 @@ impl BdmApp {
                             ui.add_space(8.0);
                             ui.label(RichText::new("选区工具").size(12.0).color(MUTED));
                             ui.label(
-                                RichText::new("去水印时请覆盖水印本体及四周约 8–16 px；先生成预览，确认没有新纹理后再替换。")
+                                RichText::new("请覆盖水印本体，四周再留约 16 px 的干净背景，用于匹配底色和平滑边缘；先预览再替换。")
                                     .size(12.0)
                                     .color(MUTED),
                             );
@@ -1123,6 +1106,65 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(!app.image_editor.active());
+    }
+    #[test]
+    fn redownload_worker_reports_source_failure_and_success_refreshes_closed_review() {
+        let (_directory, mut app, media) = imported_app();
+        let ctx = egui::Context::default();
+        let id = media.id as usize;
+        let original = std::fs::read(&media.path).unwrap();
+        // The fixture's synthetic host is rejected locally by the provider, without network IO.
+        app.request_redownload(&ctx, id);
+        assert!(app.media_review.redownload.is_some());
+        assert!(app
+            .media_review
+            .redownload_notice
+            .as_ref()
+            .unwrap()
+            .result
+            .is_none());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.media_review.redownload.is_some() && std::time::Instant::now() < deadline {
+            app.poll_redownload(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(app.media_review.redownload.is_none());
+        assert!(matches!(
+            app.media_review.redownload_notice.as_ref().unwrap().result,
+            Some(Err(_))
+        ));
+        assert!(!app.image_editor.error.is_empty());
+        assert_eq!(std::fs::read(&media.path).unwrap(), original);
+
+        // Deliver a committed result after review has closed: metadata still refreshes globally.
+        app.dialog = None;
+        app.image_editor.discard();
+        app.library
+            .media
+            .iter_mut()
+            .find(|item| item.id == id)
+            .unwrap()
+            .width = 1;
+        let (sender, receiver) = mpsc::channel();
+        app.media_review.redownload = Some((id, receiver));
+        sender.send(Ok(media.clone())).unwrap();
+        crate::theme::setup(&ctx);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| app.shell(ctx));
+        assert!(matches!(
+            app.media_review.redownload_notice.as_ref().unwrap().result,
+            Some(Ok(()))
+        ));
+        assert_eq!(
+            app.library
+                .media
+                .iter()
+                .find(|item| item.id == id)
+                .unwrap()
+                .width,
+            media.dimensions().0 as usize
+        );
+        assert_eq!(app.ingest.stored[&id], media);
+        assert!(app.image_editor.error.is_empty());
     }
     fn repair_result(media: &bdm_domain::ingest::StoredMedia) -> RepairPreview {
         let (width, height) = media.dimensions();

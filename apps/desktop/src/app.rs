@@ -246,6 +246,13 @@ impl BdmApp {
     }
 
     pub(crate) fn shell(&mut self, ctx: &egui::Context) {
+        self.poll_redownload(ctx);
+        self.shell_content(ctx);
+        self.show_notice(ctx);
+        self.show_redownload_notice(ctx);
+    }
+
+    fn shell_content(&mut self, ctx: &egui::Context) {
         if matches!(self.dialog, Some(Dialog::Media(_) | Dialog::Similarity)) {
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(PANEL))
@@ -345,6 +352,9 @@ impl BdmApp {
                     });
             });
         self.show_dialog(ctx);
+    }
+
+    fn show_notice(&self, ctx: &egui::Context) {
         if let Some((message, deadline)) = &self.notice {
             if ctx.input(|i| i.time) < *deadline {
                 egui::Area::new("toast".into())
@@ -368,7 +378,14 @@ impl BdmApp {
         let Some(dir) = self.capture_dir.clone() else {
             return;
         };
-        if self.capture_step >= 54 {
+        if self.capture_step == 0
+            && self.capture_frames == 0
+            && std::env::args().any(|arg| arg == "--capture-redownload")
+        {
+            self.capture_step = 54;
+            self.capture_redownload_notice();
+        }
+        if self.capture_step >= 57 {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
@@ -432,6 +449,9 @@ impl BdmApp {
                     "52-similarity-review-large",
                     "53-similarity-review-zoom",
                     "54-similarity-review-finished",
+                    "55-redownload-progress",
+                    "56-redownload-failed",
+                    "57-redownload-complete",
                 ];
                 if let Err(error) = std::fs::create_dir_all(&dir).and_then(|_| {
                     image::save_buffer(
@@ -847,11 +867,22 @@ impl BdmApp {
                     53 => {
                         self.workflows.candidates.clear();
                     }
+                    54 => self.capture_redownload_notice(),
+                    55 => {
+                        if let Some(notice) = &mut self.media_review.redownload_notice {
+                            notice.result = Some(Err("来源暂时不可用，请稍后重试。".into()));
+                        }
+                    }
+                    56 => {
+                        if let Some(notice) = &mut self.media_review.redownload_notice {
+                            notice.result = Some(Ok(()));
+                        }
+                    }
                     _ => {
                         let _ = std::fs::write(
                             dir.join("capture.complete"),
                             format!(
-                                "54 native frames captured at {} x {} logical pixels",
+                                "Native capture completed at {} x {} logical pixels",
                                 ctx.screen_rect().width(),
                                 ctx.screen_rect().height()
                             ),

@@ -10,6 +10,8 @@ The current built application is `target/debug/bdm-desktop.exe`; use this single
 
 Image review defaults to thumbnails. System Settings → **图片查看 → 审核时自动加载原图** lets you enable background original loading on opening review or switching images; the setting defaults off and persists across restarts. Click **加载原图** or **使用缩略图** to override the current image; switching images follows the saved default. Closing review releases the original. **打开原图** opens the managed file in the system viewer. Crop/inpainting selections on thumbnails use original dimensions and modify the original when saved; zoom/pan only affect the view. Local DINOv3 and inpainting inference use CPU even when CUDA is available.
 
+In the crop/inpainting panel, **重新下载原图** immediately opens a status popup. Downloading, validation failures and completion remain visible above review; close the result popup to continue. Saved crop/inpainting edits can be replaced with a validated source original, restoring its dimensions and retaining the previous file in a `.redownload-backup-*` file beside the image. Unsubmitted previews must be confirmed or discarded first. This action is independent of the image-edit second-confirmation preference.
+
 Use Rust 1.88 or newer and a native platform linker (MSVC Build Tools on Windows, or a configured MinGW toolchain).
 
 ```powershell

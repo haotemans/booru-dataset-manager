@@ -109,7 +109,9 @@ impl BdmApp {
                     ui.add_space(8.0);
                 });
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if self.media_review.redownload_notice.is_none()
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
             close = true;
         }
         if open && !close && self.dialog.is_none() {

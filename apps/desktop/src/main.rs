@@ -13,6 +13,7 @@ mod media_review;
 mod model;
 mod pages;
 mod paths;
+mod redownload;
 mod review;
 mod review_ui;
 mod similarity_review;
