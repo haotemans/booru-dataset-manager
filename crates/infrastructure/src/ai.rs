@@ -409,12 +409,11 @@ pub fn run(
     let artifacts = repo.list_artifacts()?;
     for artifact in artifacts.iter().filter(|a| {
         a.kind == job.mode
-            && (a.reviewed
-                || a.provenance
-                    == format!(
-                        "{}:{}:job-{}:bdm-text-v1",
-                        profile.id, profile.model, job.id
-                    ))
+            && a.provenance
+                == format!(
+                    "{}:{}:job-{}:bdm-text-v1",
+                    profile.id, profile.model, job.id
+                )
     }) {
         job.accepted.insert(artifact.media_id);
     }
@@ -487,24 +486,6 @@ pub fn run(
                         &media.post.tag_string_character,
                         &rules,
                     );
-                    if job.mode == "tags" && normalized.ordinary.is_empty() && !send_images {
-                        repo.write_artifact(
-                            media,
-                            "tags",
-                            &normalized.tags.join(", "),
-                            &format!(
-                                "{}:{}:job-{}:bdm-text-v1",
-                                profile.id, profile.model, job.id
-                            ),
-                            if normalized.warnings.is_empty() {
-                                "complete"
-                            } else {
-                                "needs_review"
-                            },
-                        )?;
-                        job.accepted.insert(*id);
-                        continue;
-                    }
                     // Artist and character names are excluded; unknown/special terms remain local.
                     let paired_txt = if send_images {
                         match std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) {
@@ -630,27 +611,16 @@ pub fn run(
                             || tags.iter().any(|t| {
                                 t.len() > 256
                                     || t.chars().any(char::is_control)
-                                    || (!send_images && !normalized
-                                        .ordinary
-                                        .iter()
-                                        .any(|raw| raw == t || raw.replace('_', " ") == *t))
+                                    || t.trim().is_empty()
                             })
                         {
                             continue;
                         }
-                        if !send_images && tags
-                            .iter()
-                            .map(|t| t.replace(' ', "_"))
-                            .collect::<BTreeSet<_>>()
-                            != normalized
-                                .ordinary
-                                .iter()
-                                .map(|t| t.replace(' ', "_"))
-                                .collect::<BTreeSet<_>>()
-                        {
+                        let tags = identity::verified_visual_tags(tags, &rules);
+                        if tags.is_empty() {
+                            // Do not replace the last usable artifact with only rejected identity tags.
                             continue;
                         }
-                        let tags = identity::verified_visual_tags(tags, &rules);
                         let mut merged = normalized
                             .tags
                             .iter()
@@ -701,7 +671,7 @@ pub fn run(
                             &profile.character_tag_format,
                         )
                     };
-                    repo.write_artifact(
+                    repo.write_ai_artifact(
                         media,
                         &job.mode,
                         &text,
@@ -709,11 +679,6 @@ pub fn run(
                             "{}:{}:job-{}:bdm-text-v1",
                             profile.id, profile.model, job.id
                         ),
-                        if job.mode == "tags" && !send_images && normalized.warnings.is_empty() {
-                            "complete"
-                        } else {
-                            "needs_review"
-                        },
                     )?;
                     job.accepted.insert(id);
                     job.analysis_errors.remove(&id);
