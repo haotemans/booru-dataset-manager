@@ -336,7 +336,7 @@ pub fn run(
         report(job);
         return Ok(());
     }
-    let send_images = profile.settings.send_images && job.mode == "caption";
+    let send_images = profile.settings.send_images && matches!(job.mode.as_str(), "caption" | "tags");
     if send_images
         && !profile.upload_approval.as_ref().is_some_and(|approval| {
             approval.profile_id == profile.id
@@ -422,7 +422,7 @@ pub fn run(
     } else {
         Vec::new()
     };
-    let maximum_batch = profile.settings.batch_size;
+    let maximum_batch = if send_images { 1 } else { profile.settings.batch_size };
     let mut batch_size = job.fallback.clamp(1, maximum_batch);
     let result: Result<(), IngestError> = (|| {
         loop {
@@ -478,7 +478,7 @@ pub fn run(
                         &media.post.tag_string_character,
                         &rules,
                     );
-                    if job.mode == "tags" && normalized.ordinary.is_empty() {
+                    if job.mode == "tags" && normalized.ordinary.is_empty() && !send_images {
                         repo.write_artifact(
                             media,
                             "tags",
@@ -497,6 +497,16 @@ pub fn run(
                         continue;
                     }
                     // Artist and character names are excluded; unknown/special terms remain local.
+                    let paired_txt = if send_images {
+                        match std::fs::read_to_string(media.path.with_extension("txt")) {
+                            Ok(txt) if txt.len() <= 64 * 1024 && !txt.contains('\0') => Some(txt),
+                            _ => {
+                                job.analysis_errors.entry(*id).or_default()
+                                    .push("配对 TXT 无法读取或内容无效；未发送该图片。".into());
+                                continue;
+                            }
+                        }
+                    } else { None };
                     if send_images {
                         match images::prepare(*id, &media.path, &profile.settings, cancel) {
                             Ok(image) => images.push(image),
@@ -512,7 +522,11 @@ pub fn run(
                             }
                         }
                     }
-                    input.push(json!({"id":id,"tags":normalized.ordinary}));
+                    input.push(if let Some(txt) = paired_txt {
+                        json!({"id":id,"tags":normalized.ordinary,"paired_txt":txt})
+                    } else {
+                        json!({"id":id,"tags":normalized.ordinary})
+                    });
                     constraints.insert(*id, normalized);
                 }
             }
@@ -605,15 +619,15 @@ pub fn run(
                             || tags.iter().any(|t| {
                                 t.len() > 256
                                     || t.chars().any(char::is_control)
-                                    || !normalized
+                                    || (!send_images && !normalized
                                         .ordinary
                                         .iter()
-                                        .any(|raw| raw == t || raw.replace('_', " ") == *t)
+                                        .any(|raw| raw == t || raw.replace('_', " ") == *t))
                             })
                         {
                             continue;
                         }
-                        if tags
+                        if !send_images && tags
                             .iter()
                             .map(|t| t.replace(' ', "_"))
                             .collect::<BTreeSet<_>>()
@@ -675,7 +689,7 @@ pub fn run(
                             "{}:{}:job-{}:bdm-text-v1",
                             profile.id, profile.model, job.id
                         ),
-                        if job.mode == "tags" && normalized.warnings.is_empty() {
+                        if job.mode == "tags" && !send_images && normalized.warnings.is_empty() {
                             "complete"
                         } else {
                             "needs_review"
