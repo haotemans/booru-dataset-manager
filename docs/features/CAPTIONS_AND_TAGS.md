@@ -41,3 +41,12 @@ Image upload must be explicitly approved per target scope; both modes show the p
 Both optimization targets require image upload approval. Text-only Tag optimization is retired. The paired metadata is sourced from `image.raw_tags.txt` (the preserved Danbooru source sidecar), **not** `image.txt` (which holds generated caption output). The source may include artist, character and copyright fields, so the API request uses only locally known, unprotected category-0 generic tags. All other categories remain local. The image is the primary evidence; metadata is a potentially inaccurate prior for refining pose, clothing, facial expression, composition, style and lighting. This applies to both Tag and natural-language prompts.
 
 The model may suggest generic details that were absent from the source. Current conservative acceptance only persists suggestions that already exist in the **local verified category-0 vocabulary**, and rejects unknown or protected suggestions. This prevents a hallucinated identity from bypassing local name ownership, but it also limits novel general tags until the local dictionary is populated. Output remains subject to review and no raw-source metadata is changed. Known identity mentions in captions are rejected rather than merged; the local formatter injects canonical names after acceptance. Unknown proper-name detection remains imperfect and requires further validation.
+
+
+## Automatic acceptance and repeat optimization
+
+New successful image-based Tag and Caption jobs do **not** require a human text-review step. The validated result becomes the current `complete` artifact and immediately materializes to its internal sidecar (`image.tags.txt` or `image.txt`). An explicit later optimization with a new job ID is allowed to replace the current value, including an older reviewed version. Previous rows remain in SQLite artifact history; the original `image.raw_tags.txt` is untouched. An API failure cannot erase the most recently successful result.
+
+This does not remove the **image upload authorization** step, which is a privacy/permission gate separate from text-result review.
+
+Training export already writes one image and same-basename `media_<id>.txt` in the export, choosing the current Tag or Caption artifact by the selected export mode. The internal `.tags.txt` filename is intentionally not used as the training sidecar.
