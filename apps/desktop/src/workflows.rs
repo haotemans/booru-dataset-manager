@@ -1024,7 +1024,7 @@ impl BdmApp {
                 .size(12.0)
                 .color(MUTED),
         );
-        ui.label(format!("用途：{}。图片及对应 TXT 内容将发送到上述服务。",
+        ui.label(format!("用途：{}。图片及筛选后的 Danbooru 通用标签先验将发送到上述服务。",
             if scope.mode == "tags" { "优化标签" } else { "优化自然语言" }));
         ui.label(format!(
             "共 {} 组图片/TXT，每次请求严格 1 组；最长边 {} px，JPEG 质量 {}。",
