@@ -428,7 +428,7 @@ impl BdmApp {
         ui.add_space(8.0);
         ui.checkbox(
             &mut self.profile_draft.request.send_images,
-            "生成自然语言描述时附带图片",
+            "打标时发送图片及同名 TXT（每次请求仅一组）",
         );
         ui.add_enabled_ui(self.profile_draft.request.send_images, |ui| {
             ui.horizontal(|ui| {
@@ -447,11 +447,30 @@ impl BdmApp {
         });
         ui.label(
             RichText::new(
-                "发送前在内存内等比例缩小，小图不放大；最长边不超过 1024 px，单图 JPEG 自动压到 1 MiB 内。每次发送前确认范围，标签优化只发送文本。",
+                "发送前在内存内等比例缩小，小图不放大；最长边不超过 1024 px，单图 JPEG 自动压到 1 MiB 内。每次发送前确认范围，图片模式支持标签和自然语言优化。",
             )
                 .size(12.0)
                 .color(MUTED),
         );
+        ui.add_space(10.0);
+        ui.collapsing("自然语言优化 · 系统提示词", |ui| {
+            ui.add(egui::TextEdit::multiline(
+                &mut self.profile_draft.request.caption_system_prompt
+            ).desired_rows(5).desired_width(f32::INFINITY));
+            if ui.button("恢复自然语言默认提示词").clicked() {
+                self.profile_draft.request.caption_system_prompt =
+                    bdm_config::DEFAULT_CAPTION_SYSTEM_PROMPT.into();
+            }
+        });
+        ui.collapsing("Tag 优化 · 系统提示词", |ui| {
+            ui.add(egui::TextEdit::multiline(
+                &mut self.profile_draft.request.tag_system_prompt
+            ).desired_rows(5).desired_width(f32::INFINITY));
+            if ui.button("恢复 Tag 默认提示词").clicked() {
+                self.profile_draft.request.tag_system_prompt =
+                    bdm_config::DEFAULT_TAG_SYSTEM_PROMPT.into();
+            }
+        });
         ui.add_space(12.0);
         if primary(ui, "保存配置").clicked() {
             match self.save_api_profile(index) {
@@ -547,7 +566,7 @@ impl BdmApp {
                     });
                 ui.label(
                     RichText::new(
-                        "文本请求仅使用普通标签；画师、角色和受保护词本地保留。原始标签不会改写。",
+                        "图片模式按一图一 TXT 请求，并使用所选模式的独立系统提示词；画师与角色名称本地保护，结果需审核。原始标签不会改写。",
                     )
                     .size(12.0)
                     .color(MUTED),
