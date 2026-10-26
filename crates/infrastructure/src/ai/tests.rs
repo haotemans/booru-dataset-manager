@@ -443,17 +443,17 @@ fn explicit_api_refusal_does_not_log_remote_text() {
 }
 
 #[test]
-fn vision_tagging_sends_one_image_and_its_txt_and_requires_review() {
+fn vision_tagging_uses_danbooru_prior_and_auto_saves_result() {
     let mut f = crate::workflow_tests::fixture();
     let cancel = AtomicBool::new(false);
     f.repo.import(
         &f.post, &f.directory.path().join("library"), f.collection, 800, &cancel, &f.provider
     ).unwrap();
     let media = f.repo.list_media().unwrap().remove(0);
-    let txt = media.path.with_extension("txt");
-    std::fs::write(&txt, "scenery, blue sky").unwrap();
+    let txt = media.path.with_extension("raw_tags.txt");
+    assert!(std::fs::read_to_string(&txt).unwrap().contains("scenery"));
     let (endpoint, worker) = server(vec![(
-        200, response(json!([{"id":media.id,"tags":["scenery","blue_sky"]}]))
+        200, response(json!([{"id":media.id,"tags":["scenery"]}]))
     )]);
     let mut profile = profile();
     profile.endpoint = endpoint;
@@ -475,10 +475,10 @@ fn vision_tagging_sends_one_image_and_its_txt_and_requires_review() {
     assert_eq!(content.len(), 3);
     let input: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(input["items"][0]["id"], media.id);
-    assert_eq!(input["items"][0]["paired_txt"], "scenery, blue sky");
+    assert_eq!(input["items"][0]["paired_txt"], "scenery");
     let artifact = f.repo.list_artifacts().unwrap().into_iter().find(|a| a.kind=="tags").unwrap();
-    assert_eq!(artifact.state, "needs_review");
-    assert!(artifact.content.contains("blue_sky"));
-    assert_eq!(std::fs::read_to_string(txt).unwrap(), "scenery, blue sky");
+    assert_eq!(artifact.state, "complete");
+    assert!(artifact.content.contains("scenery"));
+    assert!(std::fs::read_to_string(txt).unwrap().contains("special_term"));
     assert_eq!(job.state, "completed");
 }
