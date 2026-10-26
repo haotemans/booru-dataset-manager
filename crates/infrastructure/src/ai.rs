@@ -102,9 +102,96 @@ fn format_protected_tag(kind: &str, name: &str, format: &str) -> String {
     }
 }
 
+pub fn format_caption(
+    description: &str,
+    names: &bdm_domain::tags::NormalizedTags,
+    artist_format: &str,
+    character_format: &str,
+) -> String {
+    names
+        .artists
+        .iter()
+        .map(|name| format_protected_tag("artist", name, artist_format))
+        .chain(
+            names
+                .characters
+                .iter()
+                .map(|name| format_protected_tag("character", name, character_format)),
+        )
+        .chain(std::iter::once(description.trim().to_owned()))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Recognize only the exact metadata suffix emitted by the previous formatter;
+/// leave arbitrary human prose and already formatted captions untouched.
+pub fn reformat_legacy_caption(
+    content: &str,
+    names: &bdm_domain::tags::NormalizedTags,
+    artist_format: &str,
+    character_format: &str,
+) -> Option<String> {
+    let mut suffix = String::new();
+    if !names.characters.is_empty() {
+        suffix.push_str(&format!(" Characters: {}.", names.characters.join(", ")));
+    }
+    if !names.artists.is_empty() {
+        suffix.push_str(&format!(
+            " Artist: {}.",
+            names
+                .artists
+                .iter()
+                .map(|name| format!("@artist {name}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if suffix.is_empty() {
+        return None;
+    }
+    content
+        .trim_end()
+        .strip_suffix(&suffix)
+        .filter(|description| !description.trim().is_empty())
+        .map(|description| format_caption(description, names, artist_format, character_format))
+}
+
 #[cfg(test)]
 mod formatting_tests {
-    use super::format_protected_tag;
+    use super::{format_caption, format_protected_tag, reformat_legacy_caption};
+
+    #[test]
+    fn captions_prefix_artists_then_characters_and_only_migrate_exact_legacy_suffixes() {
+        let mut names = bdm_domain::tags::NormalizedTags {
+            artists: vec!["tupikeee".into()],
+            characters: vec!["phoenix_reffaella".into()],
+            ..Default::default()
+        };
+        let body = "A solo girl sits against a white background.";
+        let expected = format!("@tupikeee, phoenix_reffaella, {body}");
+        assert_eq!(format_caption(body, &names, "at", "plain"), expected);
+        let legacy = format!("{body} Characters: phoenix_reffaella. Artist: @artist tupikeee.");
+        assert_eq!(
+            reformat_legacy_caption(&legacy, &names, "at", "plain"),
+            Some(expected.clone())
+        );
+        assert!(reformat_legacy_caption(&expected, &names, "at", "plain").is_none());
+        assert!(reformat_legacy_caption(
+            "Artist: a sign in the background.",
+            &names,
+            "at",
+            "plain"
+        )
+        .is_none());
+        names.artists.push("another_artist".into());
+        names.characters.push("another_character".into());
+        assert_eq!(format_caption(body, &names, "plain", "typed"), format!("tupikeee, another_artist, character:phoenix_reffaella, character:another_character, {body}"));
+        assert_eq!(
+            format_caption(body, &Default::default(), "at", "plain"),
+            body
+        );
+    }
 
     #[test]
     fn protected_name_formats_are_local_and_explicit() {
@@ -573,25 +660,12 @@ pub fn run(
                         {
                             continue;
                         }
-                        let mut caption = caption.to_owned();
-                        if !normalized.characters.is_empty() {
-                            caption.push_str(&format!(
-                                " Characters: {}.",
-                                normalized.characters.join(", ")
-                            ));
-                        }
-                        if !normalized.artists.is_empty() {
-                            caption.push_str(&format!(
-                                " Artist: {}.",
-                                normalized
-                                    .artists
-                                    .iter()
-                                    .map(|name| format!("@artist {name}"))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ));
-                        }
-                        caption
+                        format_caption(
+                            caption,
+                            &normalized,
+                            &profile.artist_tag_format,
+                            &profile.character_tag_format,
+                        )
                     };
                     repo.write_artifact(
                         media,

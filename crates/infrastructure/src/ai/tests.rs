@@ -307,7 +307,7 @@ fn caption_upload_requires_scope_approval_and_sends_compressed_json_to_local_ser
         .find(|a| a.kind == "caption")
         .unwrap();
     assert_eq!(artifact.state, "needs_review");
-    assert!(artifact.content.contains("Characters: character"));
+    assert!(artifact.content.starts_with("@artist artist, character, "));
 }
 
 #[test]

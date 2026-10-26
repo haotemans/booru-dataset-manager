@@ -323,10 +323,10 @@ impl BdmApp {
         ui.add_space(16.0);
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            setting_header(ui, "tag", "优化标签格式");
+            setting_header(ui, "tag", "文本姓名格式");
             ui.add_space(8.0);
             ui.label(
-                RichText::new("画师名和角色名不会发送给 AI，只在本地合并到优化标签时使用以下格式。")
+                RichText::new("画师名和角色名不会发送给 AI；在本地合并到标签和自然语言时使用以下格式。自然语言按画师、角色、描述排列。")
                     .size(12.0)
                     .color(MUTED),
             );
