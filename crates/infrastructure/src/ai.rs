@@ -12,6 +12,7 @@ use std::{
 };
 
 mod images;
+mod identity;
 mod protocol;
 #[cfg(test)]
 mod tests;
@@ -336,7 +337,15 @@ pub fn run(
         report(job);
         return Ok(());
     }
-    let send_images = profile.settings.send_images && matches!(job.mode.as_str(), "caption" | "tags");
+    // Optimization always requires a vision-capable profile; text-only mode is retired.
+    if !profile.settings.send_images {
+        job.state = "paused".into();
+        job.error = Some("优化需要发送图片与 Danbooru 元数据，请在 API 配置中开启图片发送。".into());
+        repo.save_workflow(job)?;
+        report(job);
+        return Ok(());
+    }
+    let send_images = true;
     if send_images
         && !profile.upload_approval.as_ref().is_some_and(|approval| {
             approval.profile_id == profile.id
@@ -498,11 +507,13 @@ pub fn run(
                     }
                     // Artist and character names are excluded; unknown/special terms remain local.
                     let paired_txt = if send_images {
-                        match std::fs::read_to_string(media.path.with_extension("txt")) {
-                            Ok(txt) if txt.len() <= 64 * 1024 && !txt.contains('\0') => Some(txt),
+                        match std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) {
+                            Ok(raw) if raw.len() <= 64 * 1024 && !raw.contains('\0') => {
+                                Some(identity::generic_metadata_prior(&raw, &normalized, &rules))
+                            }
                             _ => {
                                 job.analysis_errors.entry(*id).or_default()
-                                    .push("配对 TXT 无法读取或内容无效；未发送该图片。".into());
+                                    .push("Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。".into());
                                 continue;
                             }
                         }
@@ -639,6 +650,7 @@ pub fn run(
                         {
                             continue;
                         }
+                        let tags = identity::verified_visual_tags(tags, &rules);
                         let mut merged = normalized
                             .tags
                             .iter()
@@ -672,6 +684,14 @@ pub fn run(
                                 .chars()
                                 .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
                         {
+                            continue;
+                        }
+                        if identity::caption_mentions_identity(
+                            caption,
+                            &normalized,
+                            &rules,
+                            &media.post.tag_string_copyright,
+                        ) {
                             continue;
                         }
                         format_caption(
