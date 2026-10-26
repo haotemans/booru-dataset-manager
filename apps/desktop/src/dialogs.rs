@@ -428,7 +428,7 @@ impl BdmApp {
         ui.add_space(8.0);
         ui.checkbox(
             &mut self.profile_draft.request.send_images,
-            "打标时发送图片及同名 TXT（每次请求仅一组）",
+            "优化时发送图片 + Danbooru 通用元数据先验（一次一图）",
         );
         ui.add_enabled_ui(self.profile_draft.request.send_images, |ui| {
             ui.horizontal(|ui| {
@@ -566,7 +566,7 @@ impl BdmApp {
                     });
                 ui.label(
                     RichText::new(
-                        "图片模式按一图一 TXT 请求，并使用所选模式的独立系统提示词；画师与角色名称本地保护，结果需审核。原始标签不会改写。",
+                        "两种模式均要求图片；Danbooru .raw_tags.txt 提供通用视觉先验。角色、画师及作品名由本地保护。",
                     )
                     .size(12.0)
                     .color(MUTED),
