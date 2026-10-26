@@ -207,7 +207,7 @@ impl BdmApp {
                         profile.request.timeout_seconds,
                         profile.request.json_output.description(),
                         if profile.request.send_images {
-                            "描述附带压缩图片"
+                            "图片 + 同名 TXT（单组请求）"
                         } else {
                             "仅文本"
                         }
