@@ -235,14 +235,21 @@ fn output_modes_are_explicit_and_multimodal_items_keep_ids() {
         height: 40,
         data_url: "data:image/jpeg;base64,c3ludGhldGlj".into(),
     }];
-    let body = protocol::body(&profile, &input, &images, "caption").unwrap();
+    let paired = vec![json!({"id":42,"tags":["scenery"],"paired_txt":"A scenic view."})];
+    let body = protocol::body(&profile, &paired, &images, "caption").unwrap();
     let content = body["messages"][1]["content"].as_array().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(content[1]["text"].as_str().unwrap()).unwrap()
             ["image_item_id"],
         42
     );
+    let tag_body = protocol::body(&profile, &paired, &images, "tags").unwrap();
+    assert!(tag_body["messages"][0]["content"]
+        .as_str().unwrap().contains(&profile.settings.tag_system_prompt));
+    assert!(body["messages"][0]["content"]
+        .as_str().unwrap().contains(&profile.settings.caption_system_prompt));
     assert!(protocol::body(&profile, &input, &images, "tags").is_err());
+    assert!(protocol::body(&profile, &[paired[0].clone(), paired[0].clone()], &images, "caption").is_err());
 }
 
 #[test]
@@ -433,4 +440,45 @@ fn explicit_api_refusal_does_not_log_remote_text() {
     assert!(matches!(error, AiError::ContentFiltered));
     assert!(!error.message().contains("remote-sensitive-detail"));
     assert_eq!(worker.join().unwrap().len(), 1);
+}
+
+#[test]
+fn vision_tagging_sends_one_image_and_its_txt_and_requires_review() {
+    let mut f = crate::workflow_tests::fixture();
+    let cancel = AtomicBool::new(false);
+    f.repo.import(
+        &f.post, &f.directory.path().join("library"), f.collection, 800, &cancel, &f.provider
+    ).unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let txt = media.path.with_extension("txt");
+    std::fs::write(&txt, "scenery, blue sky").unwrap();
+    let (endpoint, worker) = server(vec![(
+        200, response(json!([{"id":media.id,"tags":["scenery","blue_sky"]}]))
+    )]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    profile.settings.send_images = true;
+    profile.settings.batch_size = 8;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id])
+    });
+    let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
+    job.mode = "tags".into();
+    run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
+    let requests = worker.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    let content = requests[0]["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(content.len(), 3);
+    let input: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(input["items"][0]["id"], media.id);
+    assert_eq!(input["items"][0]["paired_txt"], "scenery, blue sky");
+    let artifact = f.repo.list_artifacts().unwrap().into_iter().find(|a| a.kind=="tags").unwrap();
+    assert_eq!(artifact.state, "needs_review");
+    assert!(artifact.content.contains("blue_sky"));
+    assert_eq!(std::fs::read_to_string(txt).unwrap(), "scenery, blue sky");
+    assert_eq!(job.state, "completed");
 }
