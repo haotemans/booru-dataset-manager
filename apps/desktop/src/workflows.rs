@@ -709,6 +709,8 @@ pub struct WorkflowSettings {
     pub base: String,
     pub variant: String,
     pub export_root: String,
+    /// Explicit opt-in to old per-image folder structure.
+    pub export_folders: bool,
     pub candidate_page: usize,
     auto_analysis_waiting: bool,
     pub(crate) auto_analysis_enabled: bool,
@@ -886,6 +888,12 @@ impl BdmApp {
                 return Err("请输入导出目录的绝对路径。".into());
             }
             job.destination = destination.display().to_string();
+            job.export_layout = if self.workflows.export_folders {
+                "folders"
+            } else {
+                "flat"
+            }
+            .into();
         }
         if job.kind.starts_with("dedup") && resume.is_none() && self.prefs.similar_image_review {
             job.review_similarity = Some(self.prefs.review_similarity);
