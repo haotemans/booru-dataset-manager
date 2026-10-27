@@ -948,6 +948,7 @@ impl BdmApp {
                 .map_err(|e| e.to_string())?;
             Some(bdm_infrastructure::ai::AiProfile {
                 id: profile.id.clone(),
+                concurrency: profile.concurrency,
                 endpoint: profile.endpoint.clone(),
                 model: profile.model.clone(),
                 group: profile.group.clone(),
@@ -1033,8 +1034,10 @@ impl BdmApp {
             }
         ));
         ui.label(format!(
-            "共 {} 组图片/TXT，每次请求严格 1 组；最长边 {} px，JPEG 质量 {}。",
+            "共 {} 组图片/元数据，每次请求最多 {} 组，最大并发 {}；最长边 {} px，JPEG 质量 {}。",
             scope.ids.len(),
+            scope.profile.request.batch_size,
+            scope.profile.concurrency,
             scope.profile.request.image_max_edge,
             scope.profile.request.jpeg_quality
         ));
