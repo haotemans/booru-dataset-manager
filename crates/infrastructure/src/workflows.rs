@@ -630,7 +630,8 @@ mod phash_performance_regression {
                 ])
             });
             image.save(&path).unwrap();
-            let resized = image::open(&path).unwrap()
+            let resized = image::open(&path)
+                .unwrap()
                 .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
                 .to_luma8();
             let mut values = Vec::with_capacity(64);
@@ -640,10 +641,10 @@ mod phash_performance_regression {
                     for y in 0..32 {
                         for x in 0..32 {
                             sum += f64::from(resized.get_pixel(x, y).0[0])
-                                * ((f64::from(2 * x + 1) * u as f64
-                                    * std::f64::consts::PI) / 64.0).cos()
-                                * ((f64::from(2 * y + 1) * v as f64
-                                    * std::f64::consts::PI) / 64.0).cos();
+                                * ((f64::from(2 * x + 1) * u as f64 * std::f64::consts::PI) / 64.0)
+                                    .cos()
+                                * ((f64::from(2 * y + 1) * v as f64 * std::f64::consts::PI) / 64.0)
+                                    .cos();
                         }
                     }
                     values.push(sum);
@@ -652,9 +653,11 @@ mod phash_performance_regression {
             let mut sorted = values[1..].to_vec();
             sorted.sort_by(f64::total_cmp);
             let median = sorted[sorted.len() / 2];
-            let expected = values.iter().enumerate().skip(1).fold(0u64, |h, (i, v)| {
-                h | u64::from(*v > median) << i
-            });
+            let expected = values
+                .iter()
+                .enumerate()
+                .skip(1)
+                .fold(0u64, |h, (i, v)| h | u64::from(*v > median) << i);
             assert_eq!(phash(&path).unwrap(), expected);
         }
     }

@@ -146,10 +146,11 @@ fn candidate_features(
     args.push(rusqlite::types::Value::Integer(id));
     args.push(rusqlite::types::Value::Text(VERSION.into()));
     let mut query = storage(repo.connection.prepare(&sql))?;
-    let rows = storage(query.query_map(
-        rusqlite::params_from_iter(args.iter()),
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ))?;
+    let rows = storage(
+        query.query_map(rusqlite::params_from_iter(args.iter()), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        }),
+    )?;
     storage(rows.collect())
 }
 
@@ -417,9 +418,10 @@ pub fn run(
             // separate durable transaction for every embedding/bucket insert.
             // Replacing stale bucket keys also fixes reruns after image edits.
             {
-                let tx = storage(repo.connection.transaction_with_behavior(
-                    rusqlite::TransactionBehavior::Immediate,
-                ))?;
+                let tx = storage(
+                    repo.connection
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
+                )?;
                 storage(tx.execute(
                     "INSERT OR REPLACE INTO visual_features VALUES(?1,?2,?3,?4)",
                     params![
@@ -435,9 +437,9 @@ pub fn run(
                     params![id, VERSION],
                 ))?;
                 {
-                    let mut insert = storage(tx.prepare_cached(
-                        "INSERT OR IGNORE INTO visual_buckets VALUES(?1,?2,?3)",
-                    ))?;
+                    let mut insert = storage(
+                        tx.prepare_cached("INSERT OR IGNORE INTO visual_buckets VALUES(?1,?2,?3)"),
+                    )?;
                     for key in &keys {
                         storage(insert.execute(params![id, VERSION, key]))?;
                     }
