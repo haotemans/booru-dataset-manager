@@ -89,7 +89,7 @@ impl DanbooruProvider {
         }
         let query = names.join(",");
         let bytes = Self::send(self.request("tags.json").query(&[
-            ("search[name]", query.as_str()),
+            ("search[name_normalize]", query.as_str()),
             ("limit", "64"),
             ("only", "id,name,category,post_count"),
         ]))?;
