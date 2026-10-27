@@ -61,13 +61,6 @@ pub enum ProtectedTagFormat {
     Typed,
 }
 impl ProtectedTagFormat {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Plain => "xxx",
-            Self::At => "@xxx",
-            Self::Typed => "类型:xxx",
-        }
-    }
     pub fn artist_label(self) -> &'static str {
         match self {
             Self::Plain => "xxx",

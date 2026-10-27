@@ -153,7 +153,21 @@ impl SqliteCatalog {
     ) -> Result<(), IngestError> {
         let lock = self.media_lock.clone();
         let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
-        self.write_artifact_locked(media, kind, content, provenance, state)
+        self.write_artifact_locked(media, kind, content, provenance, state, false)
+    }
+
+    /// An explicit new AI optimization may replace a previously reviewed version.
+    /// Source provenance is untouched; the old artifact remains in version history.
+    pub fn write_ai_artifact(
+        &mut self,
+        media: &StoredMedia,
+        kind: &str,
+        content: &str,
+        provenance: &str,
+    ) -> Result<(), IngestError> {
+        let lock = self.media_lock.clone();
+        let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
+        self.write_artifact_locked(media, kind, content, provenance, "complete", true)
     }
 
     fn write_artifact_locked(
@@ -163,6 +177,7 @@ impl SqliteCatalog {
         content: &str,
         provenance: &str,
         state: &str,
+        replace_reviewed: bool,
     ) -> Result<(), IngestError> {
         if !matches!(kind, "tags" | "caption") || content.len() > 64 * 1024 {
             return Err(IngestError::InvalidMedia);
@@ -172,7 +187,7 @@ impl SqliteCatalog {
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
         )?;
         let reviewed:Option<bool>=storage(tx.query_row("SELECT reviewed FROM text_artifacts WHERE media_id=?1 AND kind=?2 AND is_current=1",params![media.id,kind],|row|row.get(0)).optional())?;
-        if reviewed == Some(true) {
+        if reviewed == Some(true) && !replace_reviewed {
             return Ok(());
         }
         let target = media
@@ -254,6 +269,7 @@ impl SqliteCatalog {
             } else {
                 "needs_review"
             },
+            false,
         )?;
         Ok(result)
     }

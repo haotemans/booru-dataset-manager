@@ -237,14 +237,31 @@ fn output_modes_are_explicit_and_multimodal_items_keep_ids() {
         height: 40,
         data_url: "data:image/jpeg;base64,c3ludGhldGlj".into(),
     }];
-    let body = protocol::body(&profile, &input, &images, "caption").unwrap();
+    let paired = vec![json!({"id":42,"tags":["scenery"],"paired_txt":"A scenic view."})];
+    let body = protocol::body(&profile, &paired, &images, "caption").unwrap();
     let content = body["messages"][1]["content"].as_array().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(content[1]["text"].as_str().unwrap()).unwrap()
             ["image_item_id"],
         42
     );
+    let tag_body = protocol::body(&profile, &paired, &images, "tags").unwrap();
+    assert!(tag_body["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .contains(&profile.settings.tag_system_prompt));
+    assert!(body["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .contains(&profile.settings.caption_system_prompt));
     assert!(protocol::body(&profile, &input, &images, "tags").is_err());
+    assert!(protocol::body(
+        &profile,
+        &[paired[0].clone(), paired[0].clone()],
+        &images,
+        "caption"
+    )
+    .is_err());
 }
 
 #[test]
@@ -308,7 +325,7 @@ fn caption_upload_requires_scope_approval_and_sends_compressed_json_to_local_ser
         .into_iter()
         .find(|a| a.kind == "caption")
         .unwrap();
-    assert_eq!(artifact.state, "needs_review");
+    assert_eq!(artifact.state, "complete");
     assert!(artifact.content.starts_with("@artist artist, character, "));
 }
 
@@ -330,6 +347,14 @@ fn client_configuration_errors_pause_without_failing_items() {
     let (endpoint, server) = server(vec![(400, json!({"error":{"code":"model_not_found"}}))]);
     let mut profile = profile();
     profile.endpoint = endpoint;
+    profile.settings.send_images = true;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "tags".into();
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
@@ -362,6 +387,14 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
     let mut profile = profile();
     profile.endpoint = endpoint;
     profile.settings.batch_size = 1;
+    profile.settings.send_images = true;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "caption".into();
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
@@ -405,6 +438,13 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
         response(json!([{"id":media.id,"caption":"A landscape."}])),
     )]);
     profile.endpoint = endpoint;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
     assert_eq!(worker.join().unwrap().len(), 1);
     assert_eq!(job.state, "completed");
@@ -435,4 +475,61 @@ fn explicit_api_refusal_does_not_log_remote_text() {
     assert!(matches!(error, AiError::ContentFiltered));
     assert!(!error.message().contains("remote-sensitive-detail"));
     assert_eq!(worker.join().unwrap().len(), 1);
+}
+
+#[test]
+fn vision_tagging_uses_danbooru_prior_and_auto_saves_result() {
+    let mut f = crate::workflow_tests::fixture();
+    let cancel = AtomicBool::new(false);
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let txt = media.path.with_extension("raw_tags.txt");
+    assert!(std::fs::read_to_string(&txt).unwrap().contains("scenery"));
+    let (endpoint, worker) = server(vec![(
+        200,
+        response(json!([{"id":media.id,"tags":["scenery"]}])),
+    )]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    profile.settings.send_images = true;
+    profile.settings.batch_size = 8;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
+    let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
+    job.mode = "tags".into();
+    run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
+    let requests = worker.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    let content = requests[0]["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(content.len(), 3);
+    let input: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(input["items"][0]["id"], media.id);
+    assert_eq!(input["items"][0]["paired_txt"], "scenery");
+    let artifact = f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.kind == "tags")
+        .unwrap();
+    assert_eq!(artifact.state, "complete");
+    assert!(artifact.content.contains("scenery"));
+    assert!(std::fs::read_to_string(txt)
+        .unwrap()
+        .contains("special_term"));
+    assert_eq!(job.state, "completed");
 }

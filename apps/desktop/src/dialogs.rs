@@ -428,7 +428,7 @@ impl BdmApp {
         ui.add_space(8.0);
         ui.checkbox(
             &mut self.profile_draft.request.send_images,
-            "生成自然语言描述时附带图片",
+            "优化时发送图片 + Danbooru 通用元数据先验（一次一图）",
         );
         ui.add_enabled_ui(self.profile_draft.request.send_images, |ui| {
             ui.horizontal(|ui| {
@@ -447,11 +447,34 @@ impl BdmApp {
         });
         ui.label(
             RichText::new(
-                "发送前在内存内等比例缩小，小图不放大；最长边不超过 1024 px，单图 JPEG 自动压到 1 MiB 内。每次发送前确认范围，标签优化只发送文本。",
+                "发送前在内存内等比例缩小，小图不放大；最长边不超过 1024 px，单图 JPEG 自动压到 1 MiB 内。每次发送前确认范围，图片模式支持标签和自然语言优化。",
             )
                 .size(12.0)
                 .color(MUTED),
         );
+        ui.add_space(10.0);
+        ui.collapsing("自然语言优化 · 系统提示词", |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut self.profile_draft.request.caption_system_prompt)
+                    .desired_rows(5)
+                    .desired_width(f32::INFINITY),
+            );
+            if ui.button("恢复自然语言默认提示词").clicked() {
+                self.profile_draft.request.caption_system_prompt =
+                    bdm_config::DEFAULT_CAPTION_SYSTEM_PROMPT.into();
+            }
+        });
+        ui.collapsing("Tag 优化 · 系统提示词", |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut self.profile_draft.request.tag_system_prompt)
+                    .desired_rows(5)
+                    .desired_width(f32::INFINITY),
+            );
+            if ui.button("恢复 Tag 默认提示词").clicked() {
+                self.profile_draft.request.tag_system_prompt =
+                    bdm_config::DEFAULT_TAG_SYSTEM_PROMPT.into();
+            }
+        });
         ui.add_space(12.0);
         if primary(ui, "保存配置").clicked() {
             match self.save_api_profile(index) {
@@ -547,7 +570,7 @@ impl BdmApp {
                     });
                 ui.label(
                     RichText::new(
-                        "文本请求仅使用普通标签；画师、角色和受保护词本地保留。原始标签不会改写。",
+                        "两种模式均要求图片；Danbooru .raw_tags.txt 提供通用视觉先验。角色、画师及作品名由本地保护。",
                     )
                     .size(12.0)
                     .color(MUTED),
