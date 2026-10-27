@@ -953,6 +953,7 @@ impl BdmApp {
                 group: profile.group.clone(),
                 credentials,
                 settings: profile.request.clone(),
+                max_concurrency: profile.concurrency,
                 upload_approval: approval,
                 artist_tag_format: self.prefs.artist_tag_format.key().into(),
                 character_tag_format: self.prefs.character_tag_format.key().into(),
@@ -1033,8 +1034,10 @@ impl BdmApp {
             }
         ));
         ui.label(format!(
-            "共 {} 组图片/TXT，每次请求严格 1 组；最长边 {} px，JPEG 质量 {}。",
+            "共 {} 张图片；每次 JSON 请求最多 {} 组图文配对，最多 {} 个请求并发；最长边 {} px，JPEG 质量 {}。",
             scope.ids.len(),
+            scope.profile.request.batch_size,
+            scope.profile.concurrency,
             scope.profile.request.image_max_edge,
             scope.profile.request.jpeg_quality
         ));

@@ -15,6 +15,7 @@ fn profile() -> AiProfile {
         group: String::new(),
         credentials: None,
         settings: Default::default(),
+        max_concurrency: 1,
         upload_approval: None,
         artist_tag_format: "legacy".into(),
         character_tag_format: "plain".into(),
@@ -262,6 +263,47 @@ fn output_modes_are_explicit_and_multimodal_items_keep_ids() {
         "caption"
     )
     .is_err());
+}
+
+#[test]
+fn eight_images_are_correlated_with_eight_danbooru_metadata_items_in_one_json() {
+    let mut profile = profile();
+    profile.settings.batch_size = 8;
+    profile.settings.json_output = JsonOutputMode::JsonSchema;
+    let input = (1..=8i64)
+        .map(|id| json!({"id":id,"tags":["1girl"],"paired_txt":format!("1girl, pose_{id}")}))
+        .collect::<Vec<_>>();
+    let images = (1..=8i64)
+        .map(|id| images::PreparedImage {
+            id,
+            width: 128,
+            height: 256,
+            data_url: format!("data:image/jpeg;base64,{id}"),
+        })
+        .collect::<Vec<_>>();
+    let body = protocol::body(&profile, &input, &images, "tags").unwrap();
+    assert_eq!(
+        body["response_format"]["json_schema"]["schema"]["properties"]["items"]["minItems"],
+        8
+    );
+    let pieces = body["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(pieces.len(), 17);
+    let payload: Value = serde_json::from_str(pieces[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(payload["items"].as_array().unwrap().len(), 8);
+    for index in 0..8 {
+        let id = (index + 1) as i64;
+        let marker: Value =
+            serde_json::from_str(pieces[1 + index * 2]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(marker["image_item_id"], id);
+        assert_eq!(payload["items"][index]["id"], id);
+        assert!(pieces[2 + index * 2]["image_url"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/jpeg;base64,"));
+    }
+    let mut wrong_images = images;
+    wrong_images[7].id = 9;
+    assert!(protocol::body(&profile, &input, &wrong_images, "tags").is_err());
 }
 
 #[test]
