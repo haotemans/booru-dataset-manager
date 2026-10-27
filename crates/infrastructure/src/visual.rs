@@ -412,25 +412,37 @@ pub fn run(
                 job.deferred.push(id);
             }
             incomplete |= vector.is_none();
-            storage(repo.connection.execute(
-                "INSERT OR REPLACE INTO visual_features VALUES(?1,?2,?3,?4)",
-                params![
+            let keys = buckets(hash, vector.as_deref());
+            // One bounded SQLite write transaction per image instead of a
+            // separate durable transaction for every embedding/bucket insert.
+            // Replacing stale bucket keys also fixes reruns after image edits.
+            {
+                let tx = storage(repo.connection.transaction_with_behavior(
+                    rusqlite::TransactionBehavior::Immediate,
+                ))?;
+                storage(tx.execute(
+                    "INSERT OR REPLACE INTO visual_features VALUES(?1,?2,?3,?4)",
+                    params![
                         id,
                         VERSION,
                         format!("{hash:016x}"),
-                        vector
-                            .as_ref()
-                            .map(serde_json::to_string)
-                            .transpose()
-                            .map_err(|_| IngestError::Storage)?
+                        vector.as_ref().map(serde_json::to_string)
+                            .transpose().map_err(|_| IngestError::Storage)?
                     ],
-            ))?;
-            let keys = buckets(hash, vector.as_deref());
-            for key in &keys {
-                storage(repo.connection.execute(
-                    "INSERT OR IGNORE INTO visual_buckets VALUES(?1,?2,?3)",
-                    params![id, VERSION, key],
                 ))?;
+                storage(tx.execute(
+                    "DELETE FROM visual_buckets WHERE media_id=?1 AND version=?2",
+                    params![id, VERSION],
+                ))?;
+                {
+                    let mut insert = storage(tx.prepare_cached(
+                        "INSERT OR IGNORE INTO visual_buckets VALUES(?1,?2,?3)",
+                    ))?;
+                    for key in &keys {
+                        storage(insert.execute(params![id, VERSION, key]))?;
+                    }
+                }
+                storage(tx.commit())?;
             }
             let threshold = job
                 .review_similarity
