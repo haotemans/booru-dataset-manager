@@ -40,10 +40,10 @@ pub(super) fn body(
         .collect::<BTreeSet<_>>();
     if ids.len() != items.len()
         || (!images.is_empty()
-            && (items.len() != 1
-                || images.len() != 1
-                || images[0].id != items[0]["id"].as_i64().unwrap_or_default()
-                || !items[0]["paired_txt"].is_string()))
+            && (items.len() > profile.settings.batch_size
+                || images.len() != items.len()
+                || images.iter().map(|image| image.id).collect::<BTreeSet<_>>() != ids
+                || items.iter().any(|item| !item["paired_txt"].is_string())))
     {
         return Err(AiError::Configuration);
     }
