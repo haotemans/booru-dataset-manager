@@ -1,4 +1,4 @@
-use crate::{catalog::SqliteCatalog, ingest::storage, workflows::WorkflowJob};
+use crate::{catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob};
 use bdm_config::AiRequestSettings;
 use bdm_ports::{ApiCredentials, IngestError};
 use reqwest::blocking::Client;
@@ -405,7 +405,7 @@ pub fn run(
         .into_iter()
         .map(|m| (m.id, m))
         .collect::<BTreeMap<_, _>>();
-    let rules = repo.tag_rules()?;
+    let mut rules = repo.tag_rules()?;
     let artifacts = repo.list_artifacts()?;
     for artifact in artifacts.iter().filter(|a| {
         a.kind == job.mode
@@ -595,9 +595,68 @@ pub fn run(
                 record_failure(job, &work, &AiError::Configuration.message());
                 break;
             }
+            // Resolve proposed new generic tags against Danbooru before accepting
+            // them. A category lookup failure defers the item rather than silently
+            // dropping all novel details or trusting a model-invented identity.
+            let mut category_lookup_failed = false;
+            if job.mode == "tags" {
+                if let Ok(value) = &response {
+                    let mut unknown = BTreeSet::new();
+                    for row in value.items.values() {
+                        if let ItemResult::Tags(tags) = row {
+                            for tag in tags {
+                                let name = tag.trim().to_lowercase().replace(' ', "_");
+                                if name.is_empty()
+                                    || name.len() > 256
+                                    || name.contains('@')
+                                    || name.contains(':')
+                                    || name.contains(',')
+                                    || name.chars().any(char::is_control)
+                                    || rules.protected.contains(&name)
+                                {
+                                    continue;
+                                }
+                                let canonical = rules.canonical(&name);
+                                if !rules.categories.contains_key(&canonical) {
+                                    unknown.insert(canonical);
+                                }
+                            }
+                        }
+                    }
+                    if !unknown.is_empty() {
+                        let proposed = unknown.into_iter().collect::<Vec<_>>();
+                        if proposed.len() > 128 {
+                            category_lookup_failed = true;
+                        } else {
+                            match DanbooruProvider::new(None) {
+                                Ok(provider) => {
+                                    let mut updated = false;
+                                    for chunk in proposed.chunks(32) {
+                                        match provider.lookup_many(chunk) {
+                                            Ok(categories) => {
+                                                for (name, category) in categories {
+                                                    updated |= rules.categories.insert(name, category) != Some(category);
+                                                }
+                                            }
+                                            Err(_) => {
+                                                category_lookup_failed = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if updated {
+                                        repo.save_tag_rules(&rules)?;
+                                    }
+                                }
+                                Err(_) => category_lookup_failed = true,
+                            }
+                        }
+                    }
+                }
+            }
             let mut accepted = BTreeSet::new();
             let content_failure =
-                matches!(response, Err(AiError::Content | AiError::ContentFiltered));
+                category_lookup_failed || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
             if let Ok(ref value) = response {
                 for (&id, row) in &value.items {
                     let Some(media) = all.get(&id) else {
@@ -607,6 +666,9 @@ pub fn run(
                         continue;
                     };
                     let text = if let ItemResult::Tags(tags) = row {
+                        if category_lookup_failed {
+                            continue;
+                        }
                         if tags.len() > 512
                             || tags.iter().any(|t| {
                                 t.len() > 256
