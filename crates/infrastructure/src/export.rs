@@ -80,9 +80,7 @@ pub fn run(
                     &base,
                     &image_name,
                     &original,
-                    &media.sha256,
                     &content,
-                    &job.mode,
                     &manifest,
                 )?;
                 job.accepted.insert(id);
@@ -160,11 +158,13 @@ fn write_flat_pair(
     base: &str,
     image_name: &str,
     image_bytes: &[u8],
-    expected_image_sha: &str,
     content: &str,
-    mode: &str,
     manifest: &serde_json::Value,
 ) -> Result<(), IngestError> {
+    let expected_image_sha = manifest["sha256"].as_str().ok_or(IngestError::Integrity)?;
+    let mode = manifest["text_kind"]
+        .as_str()
+        .ok_or(IngestError::Integrity)?;
     let image_path = root.join(image_name);
     let text_path = root.join(format!("{base}.txt"));
     let manifest_dir = root.join(".bdm-manifests");
