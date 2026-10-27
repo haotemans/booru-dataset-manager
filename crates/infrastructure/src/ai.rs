@@ -161,7 +161,9 @@ pub fn reformat_legacy_caption(
         .map(|description| format_caption(description, names, artist_format, character_format))
 }
 
+// The focused formatter tests precede request implementations for discoverability.
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod formatting_tests {
     use super::{format_caption, format_protected_tag, reformat_legacy_caption};
 
