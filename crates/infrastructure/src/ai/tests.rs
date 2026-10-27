@@ -15,6 +15,7 @@ fn profile() -> AiProfile {
         group: String::new(),
         credentials: None,
         settings: Default::default(),
+        max_concurrency: 1,
         upload_approval: None,
         artist_tag_format: "legacy".into(),
         character_tag_format: "plain".into(),
