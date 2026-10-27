@@ -137,3 +137,5 @@ Vision optimization packs up to the profile's configured batch size (default 8) 
 The actual concurrent HTTP dispatch uses batches as units, rather than sending all eight images as separate HTTP requests. The profile's concurrency setting caps the number of simultaneous batches in a dispatch wave. HTTP calls run in scoped worker threads, never mutate SQLite, and results are correlated/persisted serially by image ID. Recovery requests remain serial and apply bounded content fallback. A concurrent 429 lowers subsequent waves to one active request, persists the cooldown, and keeps unsuccessful item IDs for recovery. Already-started requests are not cancelled merely because a peer was rate-limited.
 
 The desktop profile setting and upload confirmation display both values separately: `batch_size` (images per JSON) and `concurrency` (parallel JSON requests). Upload consent covers the exact selected image set and model/profile, not any later job.
+
+Implementation note: the integration fixtures also exercise upload authorization, JSON content blocks, and failed-ID recovery after successful image items are persisted.
