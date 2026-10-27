@@ -141,3 +141,5 @@ The desktop profile setting and upload confirmation display both values separate
 ## Content-addressed AI result reuse
 
 Each successfully accepted image result stores a stable SHA-256 cache fingerprint in the existing SQLite text-artifact provenance. The fingerprint covers the image SHA-256, sanitized Danbooru prior, provider URL/model, the selected system prompt, both local name formats, image upload settings and local tag-rule digest. A new explicit optimize job searches historical successful versions for that fingerprint. When `use_cache` is enabled (default), an exact hit is restored as the current `complete` sidecar without image recompression or an external request. Different prompts, images, provider models or local rules miss safely. The toggle in API profile settings can be disabled for a deliberate fresh experiment. No API credentials are included in fingerprints, and older artifacts lacking fingerprints are never silently assumed to match.
+
+Verification note: the cache's mock HTTP fixture requires the first network request to succeed and checks that an identical second job completes without a second network call.
