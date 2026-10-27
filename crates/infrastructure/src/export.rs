@@ -60,6 +60,31 @@ pub fn run(
             if format!("{:x}", Sha256::digest(&original)) != media.sha256 {
                 return Err(IngestError::Integrity);
             }
+            if job.export_layout == "flat" {
+                let manifest = serde_json::json!({
+                    "schema":"bdm-export-v1",
+                    "media_id":id,
+                    "image":image_name,
+                    "sha256":media.sha256,
+                    "source":media.post,
+                    "current_dimensions":media.dimensions(),
+                    "edit":media.edit,
+                    "collections":media.collections,
+                    "review":"keep",
+                    "text_kind":job.mode,
+                    "text_sha256":format!("{:x}",Sha256::digest(content.as_bytes())),
+                    "layout":"flat"
+                });
+                write_flat_pair(
+                    destination, &base, &image_name, &original,
+                    &media.sha256, &content, &job.mode, &manifest,
+                )?;
+                job.accepted.insert(id);
+                job.cursor += 1;
+                repo.save_workflow(job)?;
+                report(job);
+                continue;
+            }
             if directory.exists() {
                 let existing = storage(fs::read(directory.join(&image_name)))?;
                 let existing_text =
@@ -108,4 +133,79 @@ pub fn run(
     repo.save_workflow(job)?;
     report(job);
     result
+}
+
+fn atomic_write(path: &Path, data: &[u8]) -> Result<(), IngestError> {
+    let mut temp = storage(tempfile::NamedTempFile::new_in(
+        path.parent().ok_or(IngestError::Storage)?,
+    ))?;
+    storage(temp.write_all(data))?;
+    storage(temp.as_file().sync_all())?;
+    storage(temp.persist(path))?;
+    Ok(())
+}
+
+/// Writes training-friendly flat image/TXT pairs. Metadata lives under a hidden
+/// directory so trainers see one matching .txt per image in the export root.
+/// A changed TXT is replaced only when the last manifest proves the current
+/// text was produced by us, so manual edits don't get silently overwritten.
+fn write_flat_pair(
+    root: &Path,
+    base: &str,
+    image_name: &str,
+    image_bytes: &[u8],
+    expected_image_sha: &str,
+    content: &str,
+    mode: &str,
+    manifest: &serde_json::Value,
+) -> Result<(), IngestError> {
+    let image_path = root.join(image_name);
+    let text_path = root.join(format!("{base}.txt"));
+    let manifest_dir = root.join(".bdm-manifests");
+    storage(fs::create_dir_all(&manifest_dir))?;
+    let manifest_path = manifest_dir.join(format!("{base}.json"));
+
+    // Never overwrite an existing image with different bytes.
+    if image_path.exists() {
+        let old_image = storage(fs::read(&image_path))?;
+        if format!("{:x}", Sha256::digest(old_image)) != expected_image_sha {
+            return Err(IngestError::Integrity);
+        }
+    } else {
+        let mut temp = storage(tempfile::NamedTempFile::new_in(root))?;
+        storage(temp.write_all(image_bytes))?;
+        storage(temp.as_file().sync_all())?;
+        storage(temp.persist_noclobber(&image_path))?;
+    }
+
+    let prior_manifest = if manifest_path.is_file() {
+        Some(storage(serde_json::from_slice::<serde_json::Value>(
+            &storage(fs::read(&manifest_path))?,
+        ))?)
+    } else {
+        None
+    };
+    if text_path.exists() {
+        let old_text = storage(fs::read_to_string(&text_path))?;
+        if old_text != content {
+            let old_sha = format!("{:x}", Sha256::digest(old_text.as_bytes()));
+            let trusted = prior_manifest.as_ref().is_some_and(|previous| {
+                previous["text_sha256"].as_str() == Some(old_sha.as_str())
+                    && previous["text_kind"].as_str() == Some(mode)
+                    && previous["image"].as_str() == Some(image_name)
+                    && previous["sha256"].as_str() == Some(expected_image_sha)
+            });
+            if !trusted {
+                return Err(IngestError::Integrity);
+            }
+            atomic_write(&text_path, content.as_bytes())?;
+        }
+    } else {
+        atomic_write(&text_path, content.as_bytes())?;
+    }
+    let manifest_bytes = storage(serde_json::to_vec(manifest))?;
+    if prior_manifest.as_ref() != Some(manifest) {
+        atomic_write(&manifest_path, &manifest_bytes)?;
+    }
+    Ok(())
 }
