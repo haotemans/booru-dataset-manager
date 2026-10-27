@@ -1586,8 +1586,9 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
                             serde_json::from_slice(&bytes[offset + 4..offset + 4 + length])
                                 .unwrap();
                         let input: serde_json::Value = serde_json::from_str(
-                            body["messages"][1]["content"][0]["text"].as_str().unwrap()
-                        ).unwrap();
+                            body["messages"][1]["content"][0]["text"].as_str().unwrap(),
+                        )
+                        .unwrap();
                         let content = input.to_string();
                         assert!(
                             !content.contains("artist")
