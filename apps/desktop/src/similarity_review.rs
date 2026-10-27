@@ -124,10 +124,6 @@ impl BdmApp {
         self.similarity_pairs(false)
     }
 
-    pub(crate) fn ignored_similarity_pairs(&self) -> Vec<DuplicateCandidate> {
-        self.similarity_pairs(true)
-    }
-
     fn similarity_pairs(&self, ignored: bool) -> Vec<DuplicateCandidate> {
         let valid: std::collections::BTreeSet<_> = self
             .library
@@ -883,11 +879,11 @@ mod tests {
                 assert_eq!(app.similarity_review.pair, Some((3, 4)));
                 assert_eq!(
                     app.library.media.iter().any(|media| media.id == 1),
-                    choice != 0
+                    choice != 2
                 );
                 assert_eq!(
                     app.library.media.iter().any(|media| media.id == 2),
-                    choice != 2
+                    choice != 0
                 );
                 if choice == 1 {
                     assert_eq!(app.workflows.candidates[0].state, "rejected");

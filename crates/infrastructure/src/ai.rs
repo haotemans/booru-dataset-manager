@@ -1,4 +1,6 @@
-use crate::{catalog::SqliteCatalog, ingest::storage, workflows::WorkflowJob};
+use crate::{
+    catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob,
+};
 use bdm_config::AiRequestSettings;
 use bdm_ports::{ApiCredentials, IngestError};
 use reqwest::blocking::Client;
@@ -11,6 +13,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+mod identity;
 mod images;
 mod protocol;
 #[cfg(test)]
@@ -157,7 +160,9 @@ pub fn reformat_legacy_caption(
         .map(|description| format_caption(description, names, artist_format, character_format))
 }
 
+// The focused formatter tests precede request implementations for discoverability.
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod formatting_tests {
     use super::{format_caption, format_protected_tag, reformat_legacy_caption};
 
@@ -336,7 +341,16 @@ pub fn run(
         report(job);
         return Ok(());
     }
-    let send_images = profile.settings.send_images && job.mode == "caption";
+    // Optimization always requires a vision-capable profile; text-only mode is retired.
+    if !profile.settings.send_images {
+        job.state = "paused".into();
+        job.error =
+            Some("优化需要发送图片与 Danbooru 元数据，请在 API 配置中开启图片发送。".into());
+        repo.save_workflow(job)?;
+        report(job);
+        return Ok(());
+    }
+    let send_images = true;
     if send_images
         && !profile.upload_approval.as_ref().is_some_and(|approval| {
             approval.profile_id == profile.id
@@ -396,16 +410,15 @@ pub fn run(
         .into_iter()
         .map(|m| (m.id, m))
         .collect::<BTreeMap<_, _>>();
-    let rules = repo.tag_rules()?;
+    let mut rules = repo.tag_rules()?;
     let artifacts = repo.list_artifacts()?;
     for artifact in artifacts.iter().filter(|a| {
         a.kind == job.mode
-            && (a.reviewed
-                || a.provenance
-                    == format!(
-                        "{}:{}:job-{}:bdm-text-v1",
-                        profile.id, profile.model, job.id
-                    ))
+            && a.provenance
+                == format!(
+                    "{}:{}:job-{}:bdm-text-v1",
+                    profile.id, profile.model, job.id
+                )
     }) {
         job.accepted.insert(artifact.media_id);
     }
@@ -422,7 +435,11 @@ pub fn run(
     } else {
         Vec::new()
     };
-    let maximum_batch = profile.settings.batch_size;
+    let maximum_batch = if send_images {
+        1
+    } else {
+        profile.settings.batch_size
+    };
     let mut batch_size = job.fallback.clamp(1, maximum_batch);
     let result: Result<(), IngestError> = (|| {
         loop {
@@ -478,25 +495,23 @@ pub fn run(
                         &media.post.tag_string_character,
                         &rules,
                     );
-                    if job.mode == "tags" && normalized.ordinary.is_empty() {
-                        repo.write_artifact(
-                            media,
-                            "tags",
-                            &normalized.tags.join(", "),
-                            &format!(
-                                "{}:{}:job-{}:bdm-text-v1",
-                                profile.id, profile.model, job.id
-                            ),
-                            if normalized.warnings.is_empty() {
-                                "complete"
-                            } else {
-                                "needs_review"
-                            },
-                        )?;
-                        job.accepted.insert(*id);
-                        continue;
-                    }
                     // Artist and character names are excluded; unknown/special terms remain local.
+                    let paired_txt = if send_images {
+                        match std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) {
+                            Ok(raw) if raw.len() <= 64 * 1024 && !raw.contains('\0') => {
+                                Some(identity::generic_metadata_prior(&raw, &normalized, &rules))
+                            }
+                            _ => {
+                                job.analysis_errors.entry(*id).or_default().push(
+                                    "Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。"
+                                        .into(),
+                                );
+                                continue;
+                            }
+                        }
+                    } else {
+                        None
+                    };
                     if send_images {
                         match images::prepare(*id, &media.path, &profile.settings, cancel) {
                             Ok(image) => images.push(image),
@@ -512,7 +527,11 @@ pub fn run(
                             }
                         }
                     }
-                    input.push(json!({"id":id,"tags":normalized.ordinary}));
+                    input.push(if let Some(txt) = paired_txt {
+                        json!({"id":id,"tags":normalized.ordinary,"paired_txt":txt})
+                    } else {
+                        json!({"id":id,"tags":normalized.ordinary})
+                    });
                     constraints.insert(*id, normalized);
                 }
             }
@@ -589,9 +608,70 @@ pub fn run(
                 record_failure(job, &work, &AiError::Configuration.message());
                 break;
             }
+            // Resolve proposed new generic tags against Danbooru before accepting
+            // them. A category lookup failure defers the item rather than silently
+            // dropping all novel details or trusting a model-invented identity.
+            let mut category_lookup_failed = false;
+            if job.mode == "tags" {
+                if let Ok(value) = &response {
+                    let mut unknown = BTreeSet::new();
+                    for row in value.items.values() {
+                        if let ItemResult::Tags(tags) = row {
+                            for tag in tags {
+                                let name = tag.trim().to_lowercase().replace(' ', "_");
+                                if name.is_empty()
+                                    || name.len() > 256
+                                    || name.contains('@')
+                                    || name.contains(':')
+                                    || name.contains(',')
+                                    || name.chars().any(char::is_control)
+                                    || rules.protected.contains(&name)
+                                {
+                                    continue;
+                                }
+                                let canonical = rules.canonical(&name);
+                                if !rules.categories.contains_key(&canonical) {
+                                    unknown.insert(canonical);
+                                }
+                            }
+                        }
+                    }
+                    if !unknown.is_empty() {
+                        let proposed = unknown.into_iter().collect::<Vec<_>>();
+                        if proposed.len() > 128 {
+                            category_lookup_failed = true;
+                        } else {
+                            match DanbooruProvider::new(None) {
+                                Ok(provider) => {
+                                    let mut updated = false;
+                                    for chunk in proposed.chunks(32) {
+                                        match provider.lookup_many(chunk) {
+                                            Ok(categories) => {
+                                                for (name, category) in categories {
+                                                    updated |=
+                                                        rules.categories.insert(name, category)
+                                                            != Some(category);
+                                                }
+                                            }
+                                            Err(_) => {
+                                                category_lookup_failed = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if updated {
+                                        repo.save_tag_rules(&rules)?;
+                                    }
+                                }
+                                Err(_) => category_lookup_failed = true,
+                            }
+                        }
+                    }
+                }
+            }
             let mut accepted = BTreeSet::new();
-            let content_failure =
-                matches!(response, Err(AiError::Content | AiError::ContentFiltered));
+            let content_failure = category_lookup_failed
+                || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
             if let Ok(ref value) = response {
                 for (&id, row) in &value.items {
                     let Some(media) = all.get(&id) else {
@@ -601,28 +681,21 @@ pub fn run(
                         continue;
                     };
                     let text = if let ItemResult::Tags(tags) = row {
+                        if category_lookup_failed {
+                            continue;
+                        }
                         if tags.len() > 512
                             || tags.iter().any(|t| {
                                 t.len() > 256
                                     || t.chars().any(char::is_control)
-                                    || !normalized
-                                        .ordinary
-                                        .iter()
-                                        .any(|raw| raw == t || raw.replace('_', " ") == *t)
+                                    || t.trim().is_empty()
                             })
                         {
                             continue;
                         }
-                        if tags
-                            .iter()
-                            .map(|t| t.replace(' ', "_"))
-                            .collect::<BTreeSet<_>>()
-                            != normalized
-                                .ordinary
-                                .iter()
-                                .map(|t| t.replace(' ', "_"))
-                                .collect::<BTreeSet<_>>()
-                        {
+                        let tags = identity::verified_visual_tags(tags, &rules);
+                        if tags.is_empty() {
+                            // Do not replace the last usable artifact with only rejected identity tags.
                             continue;
                         }
                         let mut merged = normalized
@@ -660,14 +733,22 @@ pub fn run(
                         {
                             continue;
                         }
+                        if identity::caption_mentions_identity(
+                            caption,
+                            normalized,
+                            &rules,
+                            &media.post.tag_string_copyright,
+                        ) {
+                            continue;
+                        }
                         format_caption(
                             caption,
-                            &normalized,
+                            normalized,
                             &profile.artist_tag_format,
                             &profile.character_tag_format,
                         )
                     };
-                    repo.write_artifact(
+                    repo.write_ai_artifact(
                         media,
                         &job.mode,
                         &text,
@@ -675,11 +756,6 @@ pub fn run(
                             "{}:{}:job-{}:bdm-text-v1",
                             profile.id, profile.model, job.id
                         ),
-                        if job.mode == "tags" && normalized.warnings.is_empty() {
-                            "complete"
-                        } else {
-                            "needs_review"
-                        },
                     )?;
                     job.accepted.insert(id);
                     job.analysis_errors.remove(&id);

@@ -23,3 +23,30 @@ API failure diagnosis: a successful HTTP status is not an accepted optimization 
 Generated coverage (2026-10-26): review tabs, gallery presence filters and dashboard coverage share `TextArtifact::is_generated_output`. Nonempty provenance-bearing results in `complete` or `needs_review` count as generated; imported local normalization, missing provenance, empty output and unsuccessful states do not. Generated coverage does not confirm text or make pending captions eligible for export. Tags and natural language remain independent. Task failure messages describe the latest failed batch and preserve earlier successful results.
 
 Caption name layout (2026-10-26): locally merge artist names first, character names second, then the natural-language description, separated by comma-space. Both name categories follow the selected text-name format (default artist `@name`, character `name`). Remove hardcoded `Characters:` / `Artist: @artist` suffixes from new captions. Existing unreviewed captions may be locally versioned into this format only when the exact old suffix matches the normalized source names; preserve provenance, source text, review state and successful job IDs, without a new API call. Arbitrary prose and already formatted captions are unchanged.
+
+
+## Dual prompts and one-image/one-TXT AI labeling (feature branch)
+
+API profiles now store independent, editable natural-language and Tag optimization system prompts, with separate restore-default actions. Existing saved profiles use safe defaults for these new fields. The strict JSON envelope, IDs, protected-name handling and response parser remain mandatory regardless of user prompt customization.
+
+When **send images + paired TXT** is enabled, both optimization targets use vision. Each individual request carries exactly one managed image (in-memory JPEG preview) and the UTF-8 same-basename `.txt` content as `paired_txt`, alongside ordinary-source-tag reference data. Requests are still linked to stable media IDs. Missing, malformed or oversized paired TXT prevents that image from being uploaded and marks the ID for recovery. A blank TXT is permitted because newly imported media can have an empty caption sidecar. Files are read at dispatch, not copied into logs.
+
+Image-enabled Tag mode may introduce visible descriptive tags or fix ordinary-tag inaccuracies. Such output always requires human review. The text-only Tag mode retains the original strict meaning-preservation/set-equality protection. Artist and character identities stay protected and are merged locally. Original `.raw_tags.txt` is never AI-rewritten. The existing target artifact writes remain separate: `.tags.txt` for optimized tags and `.txt` for natural-language captions; a caption run may replace its own unreviewed `.txt` only after an accepted response.
+
+Image upload must be explicitly approved per target scope; both modes show the provider and selected image count. Single-item requests do not imply single-request concurrency. This branch has code-level tests for the request shape; real provider integration and native desktop checks require a Rust toolchain.
+
+
+## Raw Danbooru metadata is a prior, not a description
+
+Both optimization targets require image upload approval. Text-only Tag optimization is retired. The paired metadata is sourced from `image.raw_tags.txt` (the preserved Danbooru source sidecar), **not** `image.txt` (which holds generated caption output). The source may include artist, character and copyright fields, so the API request uses only locally known, unprotected category-0 generic tags. All other categories remain local. The image is the primary evidence; metadata is a potentially inaccurate prior for refining pose, clothing, facial expression, composition, style and lighting. This applies to both Tag and natural-language prompts.
+
+The model may suggest generic details that were absent from the source. Current conservative acceptance only persists suggestions that already exist in the **local verified category-0 vocabulary**, and rejects unknown or protected suggestions. This prevents a hallucinated identity from bypassing local name ownership, but it also limits novel general tags until the local dictionary is populated. Output remains subject to review and no raw-source metadata is changed. Known identity mentions in captions are rejected rather than merged; the local formatter injects canonical names after acceptance. Unknown proper-name detection remains imperfect and requires further validation.
+
+
+## Automatic acceptance and repeat optimization
+
+New successful image-based Tag and Caption jobs do **not** require a human text-review step. The validated result becomes the current `complete` artifact and immediately materializes to its internal sidecar (`image.tags.txt` or `image.txt`). An explicit later optimization with a new job ID is allowed to replace the current value, including an older reviewed version. Previous rows remain in SQLite artifact history; the original `image.raw_tags.txt` is untouched. An API failure cannot erase the most recently successful result.
+
+This does not remove the **image upload authorization** step, which is a privacy/permission gate separate from text-result review.
+
+Training export already writes one image and same-basename `media_<id>.txt` in the export, choosing the current Tag or Caption artifact by the selected export mode. The internal `.tags.txt` filename is intentionally not used as the training sidecar.

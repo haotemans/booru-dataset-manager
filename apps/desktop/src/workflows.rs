@@ -25,6 +25,7 @@ pub struct ImageUploadConfirmation {
     pub profile: crate::model::ApiProfile,
     pub ids: BTreeSet<i64>,
     pub resume: Option<i64>,
+    pub mode: String,
 }
 
 #[cfg(test)]
@@ -906,7 +907,7 @@ impl BdmApp {
                 }
                 .into();
             }
-            if profile.request.send_images && job.mode == "caption" && approval.is_none() {
+            if profile.request.send_images && approval.is_none() {
                 let ids = job
                     .ids
                     .iter()
@@ -918,6 +919,7 @@ impl BdmApp {
                         profile: profile.clone(),
                         ids,
                         resume,
+                        mode: job.mode.clone(),
                     },
                 )));
                 return Ok(());
@@ -1022,11 +1024,17 @@ impl BdmApp {
                 .size(12.0)
                 .color(MUTED),
         );
-        ui.label("用途：生成自然语言描述。图片内容将发送到上述服务。");
         ui.label(format!(
-            "共 {} 张，每批最多 {} 张；最长边 {} px，JPEG 质量 {}。",
+            "用途：{}。图片及筛选后的 Danbooru 通用标签先验将发送到上述服务。",
+            if scope.mode == "tags" {
+                "优化标签"
+            } else {
+                "优化自然语言"
+            }
+        ));
+        ui.label(format!(
+            "共 {} 组图片/TXT，每次请求严格 1 组；最长边 {} px，JPEG 质量 {}。",
             scope.ids.len(),
-            scope.profile.request.batch_size,
             scope.profile.request.image_max_edge,
             scope.profile.request.jpeg_quality
         ));
@@ -1058,6 +1066,7 @@ impl BdmApp {
                     profile: scope.profile.clone(),
                     ids: selected.clone(),
                     resume: scope.resume,
+                    mode: scope.mode.clone(),
                 },
             )));
         }
@@ -1086,7 +1095,7 @@ impl BdmApp {
                     .iter()
                     .position(|p| p.id == scope.profile.id)
                     .unwrap();
-                self.action_mode = 0;
+                self.action_mode = if scope.mode == "tags" { 1 } else { 0 };
                 match self.start_workflow_with_approval(
                     ui.ctx(),
                     "optimize",
