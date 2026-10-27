@@ -66,6 +66,8 @@ pub trait IngestRepository {
         cancel: &std::sync::atomic::AtomicBool,
         provider: &dyn MediaProvider,
     ) -> Result<bool, IngestError>;
+    // Stable port signature forwards the explicit import options to provider adapters.
+    #[allow(clippy::too_many_arguments)]
     fn import_with_options(
         &mut self,
         post: &bdm_domain::ingest::SourcePost,
