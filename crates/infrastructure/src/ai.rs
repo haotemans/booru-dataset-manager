@@ -685,7 +685,7 @@ pub fn run(
                 }
             }
             for (packet, response) in packets.into_iter().zip(responses) {
-                let AiBatch { ids, work, constraints, signatures, .. } = packet;
+                let AiBatch { ids, work, input, constraints, signatures, .. } = packet;
                 if work.is_empty() {
                     if recovery {
                         pending.drain(..ids.len());
@@ -875,7 +875,7 @@ pub fn run(
             } else {
                 job.error = None;
             }
-            if failed.is_empty() {
+            if failed.is_empty() && !input.is_empty() && response.is_ok() {
                 rate.successes += 1;
                 if rate.successes >= 5
                     && rate.active < profile.max_concurrency
