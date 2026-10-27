@@ -76,8 +76,14 @@ pub fn run(
                     "layout":"flat"
                 });
                 write_flat_pair(
-                    destination, &base, &image_name, &original,
-                    &media.sha256, &content, &job.mode, &manifest,
+                    destination,
+                    &base,
+                    &image_name,
+                    &original,
+                    &media.sha256,
+                    &content,
+                    &job.mode,
+                    &manifest,
                 )?;
                 job.accepted.insert(id);
                 job.cursor += 1;

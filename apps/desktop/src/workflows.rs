@@ -891,7 +891,8 @@ impl BdmApp {
                 "folders"
             } else {
                 "flat"
-            }.into();
+            }
+            .into();
         }
         if job.kind.starts_with("dedup") && resume.is_none() && self.prefs.similar_image_review {
             job.review_similarity = Some(self.prefs.review_similarity);

@@ -1816,28 +1816,50 @@ fn export_reconciles_hashes_and_preserves_selected_text_format() {
 fn flat_export_updates_only_owned_txt_and_rejects_modified_pairs() {
     let mut f = fixture();
     let cancel = AtomicBool::new(false);
-    f.repo.import(
-        &f.post, &f.directory.path().join("library"),
-        f.collection, 800, &cancel, &f.provider,
-    ).unwrap();
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
     let media = f.repo.list_media().unwrap().remove(0);
     f.repo.set_media_keep(media.id, true).unwrap();
     let root = f.directory.path().join("flat dataset");
     let base = format!("media_{}", media.id);
     let img_path = root.join(format!("{base}.png"));
     let txt_path = root.join(format!("{base}.txt"));
-    f.repo.write_artifact(&media, "caption", "First description.", "test", "complete").unwrap();
+    f.repo
+        .write_artifact(&media, "caption", "First description.", "test", "complete")
+        .unwrap();
     let mut job = f.repo.new_workflow("export", vec![media.id]).unwrap();
     job.mode = "caption".into();
     job.export_layout = "flat".into();
     crate::export::run(&mut f.repo, &mut job, &root, &cancel, |_| {}).unwrap();
     assert!(img_path.is_file());
-    assert_eq!(std::fs::read_to_string(&txt_path).unwrap(), "First description.");
+    assert_eq!(
+        std::fs::read_to_string(&txt_path).unwrap(),
+        "First description."
+    );
     let original = std::fs::read(&img_path).unwrap();
-    f.repo.write_artifact(&media, "caption", "Better description.", "test:2", "complete").unwrap();
+    f.repo
+        .write_artifact(
+            &media,
+            "caption",
+            "Better description.",
+            "test:2",
+            "complete",
+        )
+        .unwrap();
     job.cursor = 0;
     crate::export::run(&mut f.repo, &mut job, &root, &cancel, |_| {}).unwrap();
-    assert_eq!(std::fs::read_to_string(&txt_path).unwrap(), "Better description.");
+    assert_eq!(
+        std::fs::read_to_string(&txt_path).unwrap(),
+        "Better description."
+    );
     assert_eq!(std::fs::read(&img_path).unwrap(), original);
     std::fs::write(&txt_path, "Manual edit").unwrap();
     job.cursor = 0;
