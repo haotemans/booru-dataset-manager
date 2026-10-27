@@ -603,16 +603,18 @@ pub fn run(
                     params![scope, storage(serde_json::to_string(&rate))?],
                 ))?;
                 responses = std::thread::scope(|threads| {
+                    let mode = job.mode.as_str();
+                    let client = &client;
                     let handles = packets.iter().map(|packet| {
-                        threads.spawn(|| {
+                        threads.spawn(move || {
                             if packet.input.is_empty() || packet.work.is_empty() {
                                 return Err(AiError::Content);
                             }
                             let mut attempts = 0;
                             loop {
                                 let response = request(
-                                    &client, profile, &packet.input,
-                                    &packet.images, &job.mode, cancel
+                                    client, profile, &packet.input,
+                                    &packet.images, mode, cancel
                                 );
                                 if matches!(response, Err(AiError::Transport))
                                     && attempts < profile.settings.transport_retries
