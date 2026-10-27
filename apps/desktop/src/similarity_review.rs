@@ -124,10 +124,6 @@ impl BdmApp {
         self.similarity_pairs(false)
     }
 
-    pub(crate) fn ignored_similarity_pairs(&self) -> Vec<DuplicateCandidate> {
-        self.similarity_pairs(true)
-    }
-
     fn similarity_pairs(&self, ignored: bool) -> Vec<DuplicateCandidate> {
         let valid: std::collections::BTreeSet<_> = self
             .library
