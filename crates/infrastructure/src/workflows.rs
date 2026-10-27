@@ -60,6 +60,14 @@ pub fn phash(path: &Path) -> Result<u64, IngestError> {
     let image = storage(image::open(path))?
         .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
         .to_luma8();
+    // pHash evaluates 64 low-frequency DCT coefficients. Precompute the 256
+    // cosine terms once per image instead of computing ~131k transcendental
+    // functions in the innermost pixel loops. Accumulation order is unchanged.
+    let cosine: [[f64; 32]; 8] = std::array::from_fn(|frequency| {
+        std::array::from_fn(|position| {
+            ((2 * position + 1) as f64 * frequency as f64 * std::f64::consts::PI / 64.0).cos()
+        })
+    });
     let mut values = Vec::with_capacity(64);
     for v in 0..8 {
         for u in 0..8 {
@@ -67,8 +75,8 @@ pub fn phash(path: &Path) -> Result<u64, IngestError> {
             for y in 0..32 {
                 for x in 0..32 {
                     sum += f64::from(image.get_pixel(x, y).0[0])
-                        * ((f64::from(2 * x + 1) * u as f64 * std::f64::consts::PI) / 64.0).cos()
-                        * ((f64::from(2 * y + 1) * v as f64 * std::f64::consts::PI) / 64.0).cos();
+                        * cosine[u as usize][x as usize]
+                        * cosine[v as usize][y as usize];
                 }
             }
             values.push(sum);
