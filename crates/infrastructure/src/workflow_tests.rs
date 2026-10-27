@@ -372,13 +372,6 @@ fn legacy_artist_backfill_reads_every_source_and_preserves_edits_tags_and_deleti
         )
         .unwrap();
     let media = f.repo.list_media().unwrap().remove(0);
-    profile.upload_approval = Some(crate::ai::UploadApproval {
-        profile_id: profile.id.clone(),
-        endpoint: profile.endpoint.clone(),
-        model: profile.model.clone(),
-        settings: profile.settings.clone(),
-        ids: std::collections::BTreeSet::from([media.id]),
-    });
     let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
     let tags = std::fs::read(media.path.with_extension("tags.txt")).unwrap();
     let mut additional = f.post.clone();
