@@ -144,8 +144,10 @@ fn image_compression_adapts_quality_and_size_for_large_payloads() {
         ])
     });
     image.save(&path).unwrap();
-    let mut settings = AiRequestSettings::default();
-    settings.jpeg_quality = 95;
+    let settings = AiRequestSettings {
+        jpeg_quality: 95,
+        ..Default::default()
+    };
     let prepared = images::prepare(1, &path, &settings, &AtomicBool::new(false)).unwrap();
     let bytes = STANDARD
         .decode(
