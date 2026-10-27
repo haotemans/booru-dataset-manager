@@ -1618,6 +1618,13 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
         artist_tag_format: "legacy".into(),
         character_tag_format: "plain".into(),
     };
+    profile.upload_approval = Some(crate::ai::UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
     let mut tags = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     tags.mode = "tags".into();
@@ -1686,7 +1693,7 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
         let mut seen = Vec::new();
-        for attempt in 0..2 {
+        for attempt in 0..3 {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             let mut stream = loop {
                 match listener.accept() {
@@ -1740,7 +1747,12 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
                     .collect::<Vec<_>>(),
             );
             let id = if attempt == 0 { first_id } else { second_id };
-            let response=serde_json::json!({"choices":[{"message":{"content":serde_json::json!({"schema":"bdm-text-v1","items":[{"id":id,"tags":["scenery"]}]}).to_string()}}]}).to_string();
+            let items = if attempt == 1 {
+                serde_json::json!([])
+            } else {
+                serde_json::json!([{"id":id,"tags":["scenery"]}])
+            };
+            let response=serde_json::json!({"choices":[{"message":{"content":serde_json::json!({"schema":"bdm-text-v1","items":items}).to_string()}}]}).to_string();
             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",response.len(),response).unwrap();
         }
         seen
@@ -1771,7 +1783,7 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
     crate::ai::run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
     assert_eq!(
         server.join().unwrap(),
-        vec![vec![first.id, second.id], vec![second.id]]
+        vec![vec![first.id], vec![second.id], vec![second.id]]
     );
     assert_eq!(job.state, "completed");
     assert_eq!(job.accepted.len(), 2);
