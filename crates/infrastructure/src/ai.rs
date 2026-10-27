@@ -1,4 +1,6 @@
-use crate::{catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob};
+use crate::{
+    catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob,
+};
 use bdm_config::AiRequestSettings;
 use bdm_ports::{ApiCredentials, IngestError};
 use reqwest::blocking::Client;
@@ -11,8 +13,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-mod images;
 mod identity;
+mod images;
 mod protocol;
 #[cfg(test)]
 mod tests;
@@ -349,7 +351,8 @@ pub fn run(
     // Optimization always requires a vision-capable profile; text-only mode is retired.
     if !profile.settings.send_images {
         job.state = "paused".into();
-        job.error = Some("优化需要发送图片与 Danbooru 元数据，请在 API 配置中开启图片发送。".into());
+        job.error =
+            Some("优化需要发送图片与 Danbooru 元数据，请在 API 配置中开启图片发送。".into());
         repo.save_workflow(job)?;
         report(job);
         return Ok(());
@@ -470,8 +473,12 @@ pub fn run(
             let selected: Vec<i64> = if recovery {
                 pending.iter().take(batch_size).copied().collect()
             } else {
-                job.ids.iter().skip(job.cursor)
-                    .take(maximum_batch * parallel).copied().collect()
+                job.ids
+                    .iter()
+                    .skip(job.cursor)
+                    .take(maximum_batch * parallel)
+                    .copied()
+                    .collect()
             };
             let mut packets = Vec::new();
             for ids in selected.chunks(maximum_batch) {
@@ -494,17 +501,22 @@ pub fn run(
                         );
                         // Artist and character names are excluded; unknown/special terms remain local.
                         let paired_txt = if send_images {
-                            match std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) {
-                                Ok(raw) if raw.len() <= 64 * 1024 && !raw.contains('\0') => {
-                                    Some(identity::generic_metadata_prior(&raw, &normalized, &rules))
-                                }
+                            match std::fs::read_to_string(media.path.with_extension("raw_tags.txt"))
+                            {
+                                Ok(raw) if raw.len() <= 64 * 1024 && !raw.contains('\0') => Some(
+                                    identity::generic_metadata_prior(&raw, &normalized, &rules),
+                                ),
                                 _ => {
-                                    job.analysis_errors.entry(*id).or_default()
-                                        .push("Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。".into());
+                                    job.analysis_errors.entry(*id).or_default().push(
+                                        "Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。"
+                                            .into(),
+                                    );
                                     continue;
                                 }
                             }
-                        } else { None };
+                        } else {
+                            None
+                        };
                         if send_images {
                             match images::prepare(*id, &media.path, &profile.settings, cancel) {
                                 Ok(image) => images.push(image),
@@ -529,7 +541,13 @@ pub fn run(
                     }
                 }
 
-                packets.push(AiBatch { ids, work, input, images, constraints });
+                packets.push(AiBatch {
+                    ids,
+                    work,
+                    input,
+                    images,
+                    constraints,
+                });
             }
             if cancel.load(Ordering::Relaxed) {
                 job.state = "paused".into();
@@ -545,53 +563,61 @@ pub fn run(
                 let mut rate_retries = 0;
                 let response = if packet.input.is_empty() {
                     Err(AiError::Content)
-                } else { loop {
-                    if wait_until(
-                        rate.deadline.max(if rate.active == 1 {
-                            rate.last_start + 1
-                        } else {
-                            0
-                        }),
-                        cancel,
-                    )
-                    .is_err()
-                    {
-                        break Err(AiError::Cancelled);
-                    }
-                    rate.last_start = now();
-                    storage(repo.connection.execute(
-                        "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
-                        params![scope, storage(serde_json::to_string(&rate))?],
-                    ))?;
-                    let response = request(&client, profile, &packet.input, &packet.images, &job.mode, cancel);
-                    match &response {
-                        Err(AiError::RateLimited(seconds)) => {
-                            rate.deadline = now() + seconds;
-                            rate.active = 1;
-                            rate.successes = 0;
-                            storage(repo.connection.execute(
-                                "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
-                                params![scope, storage(serde_json::to_string(&rate))?],
-                            ))?;
-                            report(job);
-                            if rate_retries >= 1 {
-                                break response;
-                            }
-                            rate_retries += 1;
-                        }
-                        Err(AiError::Transport)
-                            if transport_retries < profile.settings.transport_retries =>
+                } else {
+                    loop {
+                        if wait_until(
+                            rate.deadline.max(if rate.active == 1 {
+                                rate.last_start + 1
+                            } else {
+                                0
+                            }),
+                            cancel,
+                        )
+                        .is_err()
                         {
-                            transport_retries += 1;
-                            if wait_until(now() + (1 << transport_retries), cancel).is_err() {
-                                break Err(AiError::Cancelled);
-                            }
+                            break Err(AiError::Cancelled);
                         }
-                        _ => break response,
+                        rate.last_start = now();
+                        storage(repo.connection.execute(
+                            "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
+                            params![scope, storage(serde_json::to_string(&rate))?],
+                        ))?;
+                        let response = request(
+                            &client,
+                            profile,
+                            &packet.input,
+                            &packet.images,
+                            &job.mode,
+                            cancel,
+                        );
+                        match &response {
+                            Err(AiError::RateLimited(seconds)) => {
+                                rate.deadline = now() + seconds;
+                                rate.active = 1;
+                                rate.successes = 0;
+                                storage(repo.connection.execute(
+                                    "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
+                                    params![scope, storage(serde_json::to_string(&rate))?],
+                                ))?;
+                                report(job);
+                                if rate_retries >= 1 {
+                                    break response;
+                                }
+                                rate_retries += 1;
+                            }
+                            Err(AiError::Transport)
+                                if transport_retries < profile.settings.transport_retries =>
+                            {
+                                transport_retries += 1;
+                                if wait_until(now() + (1 << transport_retries), cancel).is_err() {
+                                    break Err(AiError::Cancelled);
+                                }
+                            }
+                            _ => break response,
+                        }
                     }
-                }};
+                };
                 responses.push(response);
-
             } else {
                 if wait_until(rate.deadline, cancel).is_err() {
                     job.state = "paused".into();
@@ -605,33 +631,41 @@ pub fn run(
                 responses = std::thread::scope(|threads| {
                     let mode = job.mode.as_str();
                     let client = &client;
-                    let handles = packets.iter().map(|packet| {
-                        threads.spawn(move || {
-                            if packet.input.is_empty() || packet.work.is_empty() {
-                                return Err(AiError::Content);
-                            }
-                            let mut attempts = 0;
-                            loop {
-                                let response = request(
-                                    client, profile, &packet.input,
-                                    &packet.images, mode, cancel
-                                );
-                                if matches!(response, Err(AiError::Transport))
-                                    && attempts < profile.settings.transport_retries
-                                {
-                                    attempts += 1;
-                                    if wait_until(now() + (1 << attempts), cancel).is_err() {
-                                        return Err(AiError::Cancelled);
-                                    }
-                                    continue;
+                    let handles = packets
+                        .iter()
+                        .map(|packet| {
+                            threads.spawn(move || {
+                                if packet.input.is_empty() || packet.work.is_empty() {
+                                    return Err(AiError::Content);
                                 }
-                                return response;
-                            }
+                                let mut attempts = 0;
+                                loop {
+                                    let response = request(
+                                        client,
+                                        profile,
+                                        &packet.input,
+                                        &packet.images,
+                                        mode,
+                                        cancel,
+                                    );
+                                    if matches!(response, Err(AiError::Transport))
+                                        && attempts < profile.settings.transport_retries
+                                    {
+                                        attempts += 1;
+                                        if wait_until(now() + (1 << attempts), cancel).is_err() {
+                                            return Err(AiError::Cancelled);
+                                        }
+                                        continue;
+                                    }
+                                    return response;
+                                }
+                            })
                         })
-                    }).collect::<Vec<_>>();
-                    handles.into_iter().map(|handle| {
-                        handle.join().unwrap_or(Err(AiError::Transport))
-                    }).collect()
+                        .collect::<Vec<_>>();
+                    handles
+                        .into_iter()
+                        .map(|handle| handle.join().unwrap_or(Err(AiError::Transport)))
+                        .collect()
                 });
                 for outcome in &responses {
                     if let Err(AiError::RateLimited(seconds)) = outcome {
@@ -642,7 +676,12 @@ pub fn run(
                 }
             }
             for (packet, response) in packets.into_iter().zip(responses) {
-                let AiBatch { ids, work, constraints, .. } = packet;
+                let AiBatch {
+                    ids,
+                    work,
+                    constraints,
+                    ..
+                } = packet;
                 if work.is_empty() {
                     if recovery {
                         pending.drain(..ids.len());
@@ -651,233 +690,242 @@ pub fn run(
                     }
                     continue;
                 }
-            if matches!(response, Err(AiError::Cancelled)) {
-                job.state = "paused".into();
-                break 'dispatch;
-            }
-            if matches!(response, Err(AiError::Configuration)) {
-                job.state = "paused".into();
-                record_failure(job, &work, &AiError::Configuration.message());
-                break 'dispatch;
-            }
-            // Resolve proposed new generic tags against Danbooru before accepting
-            // them. A category lookup failure defers the item rather than silently
-            // dropping all novel details or trusting a model-invented identity.
-            let mut category_lookup_failed = false;
-            if job.mode == "tags" {
-                if let Ok(value) = &response {
-                    let mut unknown = BTreeSet::new();
-                    for row in value.items.values() {
-                        if let ItemResult::Tags(tags) = row {
-                            for tag in tags {
-                                let name = tag.trim().to_lowercase().replace(' ', "_");
-                                if name.is_empty()
-                                    || name.len() > 256
-                                    || name.contains('@')
-                                    || name.contains(':')
-                                    || name.contains(',')
-                                    || name.chars().any(char::is_control)
-                                    || rules.protected.contains(&name)
-                                {
-                                    continue;
-                                }
-                                let canonical = rules.canonical(&name);
-                                if !rules.categories.contains_key(&canonical) {
-                                    unknown.insert(canonical);
+                if matches!(response, Err(AiError::Cancelled)) {
+                    job.state = "paused".into();
+                    break 'dispatch;
+                }
+                if matches!(response, Err(AiError::Configuration)) {
+                    job.state = "paused".into();
+                    record_failure(job, &work, &AiError::Configuration.message());
+                    break 'dispatch;
+                }
+                // Resolve proposed new generic tags against Danbooru before accepting
+                // them. A category lookup failure defers the item rather than silently
+                // dropping all novel details or trusting a model-invented identity.
+                let mut category_lookup_failed = false;
+                if job.mode == "tags" {
+                    if let Ok(value) = &response {
+                        let mut unknown = BTreeSet::new();
+                        for row in value.items.values() {
+                            if let ItemResult::Tags(tags) = row {
+                                for tag in tags {
+                                    let name = tag.trim().to_lowercase().replace(' ', "_");
+                                    if name.is_empty()
+                                        || name.len() > 256
+                                        || name.contains('@')
+                                        || name.contains(':')
+                                        || name.contains(',')
+                                        || name.chars().any(char::is_control)
+                                        || rules.protected.contains(&name)
+                                    {
+                                        continue;
+                                    }
+                                    let canonical = rules.canonical(&name);
+                                    if !rules.categories.contains_key(&canonical) {
+                                        unknown.insert(canonical);
+                                    }
                                 }
                             }
                         }
-                    }
-                    if !unknown.is_empty() {
-                        let proposed = unknown.into_iter().collect::<Vec<_>>();
-                        if proposed.len() > 128 {
-                            category_lookup_failed = true;
-                        } else {
-                            match DanbooruProvider::new(None) {
-                                Ok(provider) => {
-                                    let mut updated = false;
-                                    for chunk in proposed.chunks(32) {
-                                        match provider.lookup_many(chunk) {
-                                            Ok(categories) => {
-                                                for (name, category) in categories {
-                                                    updated |= rules.categories.insert(name, category) != Some(category);
+                        if !unknown.is_empty() {
+                            let proposed = unknown.into_iter().collect::<Vec<_>>();
+                            if proposed.len() > 128 {
+                                category_lookup_failed = true;
+                            } else {
+                                match DanbooruProvider::new(None) {
+                                    Ok(provider) => {
+                                        let mut updated = false;
+                                        for chunk in proposed.chunks(32) {
+                                            match provider.lookup_many(chunk) {
+                                                Ok(categories) => {
+                                                    for (name, category) in categories {
+                                                        updated |=
+                                                            rules.categories.insert(name, category)
+                                                                != Some(category);
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    category_lookup_failed = true;
+                                                    break;
                                                 }
                                             }
-                                            Err(_) => {
-                                                category_lookup_failed = true;
-                                                break;
-                                            }
+                                        }
+                                        if updated {
+                                            repo.save_tag_rules(&rules)?;
                                         }
                                     }
-                                    if updated {
-                                        repo.save_tag_rules(&rules)?;
-                                    }
+                                    Err(_) => category_lookup_failed = true,
                                 }
-                                Err(_) => category_lookup_failed = true,
                             }
                         }
                     }
                 }
-            }
-            let mut accepted = BTreeSet::new();
-            let content_failure =
-                category_lookup_failed || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
-            if let Ok(ref value) = response {
-                for (&id, row) in &value.items {
-                    let Some(media) = all.get(&id) else {
-                        continue;
-                    };
-                    let Some(normalized) = constraints.get(&id) else {
-                        continue;
-                    };
-                    let text = if let ItemResult::Tags(tags) = row {
-                        if category_lookup_failed {
-                            continue;
-                        }
-                        if tags.len() > 512
-                            || tags.iter().any(|t| {
-                                t.len() > 256
-                                    || t.chars().any(char::is_control)
-                                    || t.trim().is_empty()
-                            })
-                        {
-                            continue;
-                        }
-                        let tags = identity::verified_visual_tags(tags, &rules);
-                        if tags.is_empty() {
-                            // Do not replace the last usable artifact with only rejected identity tags.
-                            continue;
-                        }
-                        let mut merged = normalized
-                            .tags
-                            .iter()
-                            .filter(|tag| !normalized.ordinary.contains(tag))
-                            .map(|tag| {
-                                if let Some(name) = normalized.artists.iter().find(|name| {
-                                    name.as_str() == tag.as_str()
-                                        || format!("@artist {name}").as_str() == tag.as_str()
-                                }) {
-                                    format_protected_tag("artist", name, &profile.artist_tag_format)
-                                } else if normalized.characters.iter().any(|name| name == tag) {
-                                    format_protected_tag(
-                                        "character",
-                                        tag,
-                                        &profile.character_tag_format,
-                                    )
-                                } else {
-                                    tag.clone()
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        merged.extend(tags.iter().cloned());
-                        merged.join(", ")
-                    } else {
-                        let ItemResult::Caption(caption) = row else {
+                let mut accepted = BTreeSet::new();
+                let content_failure = category_lookup_failed
+                    || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
+                if let Ok(ref value) = response {
+                    for (&id, row) in &value.items {
+                        let Some(media) = all.get(&id) else {
                             continue;
                         };
-                        if caption.is_empty()
-                            || caption.len() > 8192
-                            || caption
-                                .chars()
-                                .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
-                        {
+                        let Some(normalized) = constraints.get(&id) else {
                             continue;
-                        }
-                        if identity::caption_mentions_identity(
-                            caption,
-                            &normalized,
-                            &rules,
-                            &media.post.tag_string_copyright,
-                        ) {
-                            continue;
-                        }
-                        format_caption(
-                            caption,
-                            &normalized,
-                            &profile.artist_tag_format,
-                            &profile.character_tag_format,
-                        )
+                        };
+                        let text = if let ItemResult::Tags(tags) = row {
+                            if category_lookup_failed {
+                                continue;
+                            }
+                            if tags.len() > 512
+                                || tags.iter().any(|t| {
+                                    t.len() > 256
+                                        || t.chars().any(char::is_control)
+                                        || t.trim().is_empty()
+                                })
+                            {
+                                continue;
+                            }
+                            let tags = identity::verified_visual_tags(tags, &rules);
+                            if tags.is_empty() {
+                                // Do not replace the last usable artifact with only rejected identity tags.
+                                continue;
+                            }
+                            let mut merged = normalized
+                                .tags
+                                .iter()
+                                .filter(|tag| !normalized.ordinary.contains(tag))
+                                .map(|tag| {
+                                    if let Some(name) = normalized.artists.iter().find(|name| {
+                                        name.as_str() == tag.as_str()
+                                            || format!("@artist {name}").as_str() == tag.as_str()
+                                    }) {
+                                        format_protected_tag(
+                                            "artist",
+                                            name,
+                                            &profile.artist_tag_format,
+                                        )
+                                    } else if normalized.characters.iter().any(|name| name == tag) {
+                                        format_protected_tag(
+                                            "character",
+                                            tag,
+                                            &profile.character_tag_format,
+                                        )
+                                    } else {
+                                        tag.clone()
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            merged.extend(tags.iter().cloned());
+                            merged.join(", ")
+                        } else {
+                            let ItemResult::Caption(caption) = row else {
+                                continue;
+                            };
+                            if caption.is_empty()
+                                || caption.len() > 8192
+                                || caption
+                                    .chars()
+                                    .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+                            {
+                                continue;
+                            }
+                            if identity::caption_mentions_identity(
+                                caption,
+                                &normalized,
+                                &rules,
+                                &media.post.tag_string_copyright,
+                            ) {
+                                continue;
+                            }
+                            format_caption(
+                                caption,
+                                &normalized,
+                                &profile.artist_tag_format,
+                                &profile.character_tag_format,
+                            )
+                        };
+                        repo.write_ai_artifact(
+                            media,
+                            &job.mode,
+                            &text,
+                            &format!(
+                                "{}:{}:job-{}:bdm-text-v1",
+                                profile.id, profile.model, job.id
+                            ),
+                        )?;
+                        job.accepted.insert(id);
+                        job.analysis_errors.remove(&id);
+                        accepted.insert(id);
+                    }
+                }
+                let failed: Vec<_> = work
+                    .iter()
+                    .copied()
+                    .filter(|id| !job.accepted.contains(id))
+                    .collect();
+                if !failed.is_empty() {
+                    let message = match &response {
+                        Err(error) => error.message(),
+                        Ok(_) => "API 未返回对应图片的有效结果，或结果未通过本地校验。".into(),
                     };
-                    repo.write_ai_artifact(
-                        media,
-                        &job.mode,
-                        &text,
-                        &format!(
-                            "{}:{}:job-{}:bdm-text-v1",
-                            profile.id, profile.model, job.id
-                        ),
+                    record_failure(job, &failed, &message);
+                    repo.audit(
+                        "api_batch_failure",
+                        &json!({"job_id":job.id,"mode":job.mode,"ids":failed,"reason":message})
+                            .to_string(),
                     )?;
-                    job.accepted.insert(id);
-                    job.analysis_errors.remove(&id);
-                    accepted.insert(id);
-                }
-            }
-            let failed: Vec<_> = work
-                .iter()
-                .copied()
-                .filter(|id| !job.accepted.contains(id))
-                .collect();
-            if !failed.is_empty() {
-                let message = match &response {
-                    Err(error) => error.message(),
-                    Ok(_) => "API 未返回对应图片的有效结果，或结果未通过本地校验。".into(),
-                };
-                record_failure(job, &failed, &message);
-                repo.audit(
-                    "api_batch_failure",
-                    &json!({"job_id":job.id,"mode":job.mode,"ids":failed,"reason":message})
-                        .to_string(),
-                )?;
-            } else {
-                job.error = None;
-            }
-            if failed.is_empty() {
-                rate.successes += 1;
-                if rate.successes >= 5
-                    && rate.active < profile.max_concurrency
-                    && now() >= rate.deadline
-                {
-                    rate.active += 1;
-                    rate.successes = 0;
-                }
-            }
-            if recovery {
-                if !failed.is_empty()
-                    && batch_size > 1
-                    && !matches!(response, Err(AiError::Transport | AiError::RateLimited(_)))
-                {
-                    batch_size /= 2;
-                    job.fallback = batch_size;
                 } else {
-                    pending.drain(..ids.len());
+                    job.error = None;
+                }
+                if failed.is_empty() {
+                    rate.successes += 1;
+                    if rate.successes >= 5
+                        && rate.active < profile.max_concurrency
+                        && now() >= rate.deadline
+                    {
+                        rate.active += 1;
+                        rate.successes = 0;
+                    }
+                }
+                if recovery {
+                    if !failed.is_empty()
+                        && batch_size > 1
+                        && !matches!(response, Err(AiError::Transport | AiError::RateLimited(_)))
+                    {
+                        batch_size /= 2;
+                        job.fallback = batch_size;
+                    } else {
+                        pending.drain(..ids.len());
+                        for id in failed {
+                            if !job.deferred.contains(&id) {
+                                job.deferred.push(id);
+                            }
+                        }
+                        batch_size = maximum_batch;
+                    }
+                } else {
                     for id in failed {
                         if !job.deferred.contains(&id) {
                             job.deferred.push(id);
                         }
                     }
-                    batch_size = maximum_batch;
+                    job.cursor += if parallel == 1
+                        && content_failure
+                        && ids.len() == maximum_batch
+                        && maximum_batch > 1
+                    {
+                        maximum_batch / 2
+                    } else {
+                        ids.len()
+                    };
                 }
-            } else {
-                for id in failed {
-                    if !job.deferred.contains(&id) {
-                        job.deferred.push(id);
-                    }
-                }
-                job.cursor += if parallel == 1 && content_failure && ids.len() == maximum_batch && maximum_batch > 1
-                {
-                    maximum_batch / 2
-                } else {
-                    ids.len()
-                };
-            }
-            job.deferred.retain(|id| !job.accepted.contains(id));
-            job.recovery = pending.clone();
-            storage(repo.connection.execute(
-                "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
-                params![scope, storage(serde_json::to_string(&rate))?],
-            ))?;
-            repo.save_workflow(job)?;
-            report(job);
+                job.deferred.retain(|id| !job.accepted.contains(id));
+                job.recovery = pending.clone();
+                storage(repo.connection.execute(
+                    "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
+                    params![scope, storage(serde_json::to_string(&rate))?],
+                ))?;
+                repo.save_workflow(job)?;
+                report(job);
             }
         }
         Ok(())
