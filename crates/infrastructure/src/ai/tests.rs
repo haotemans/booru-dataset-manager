@@ -449,7 +449,14 @@ fn client_configuration_errors_pause_without_failing_items() {
     let (endpoint, server) = server(vec![(400, json!({"error":{"code":"model_not_found"}}))]);
     let mut profile = profile();
     profile.endpoint = endpoint;
-    approve(&mut profile, &[media.id]);
+    profile.settings.send_images = true;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "tags".into();
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
@@ -482,7 +489,14 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
     let mut profile = profile();
     profile.endpoint = endpoint;
     profile.settings.batch_size = 1;
-    approve(&mut profile, &[media.id]);
+    profile.settings.send_images = true;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "caption".into();
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
@@ -526,7 +540,13 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
         response(json!([{"id":media.id,"caption":"A landscape."}])),
     )]);
     profile.endpoint = endpoint;
-    approve(&mut profile, &[media.id]);
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
     assert_eq!(worker.join().unwrap().len(), 1);
     assert_eq!(job.state, "completed");
