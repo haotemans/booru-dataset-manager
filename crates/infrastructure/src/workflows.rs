@@ -26,6 +26,8 @@ pub struct WorkflowJob {
     pub fallback: usize,
     pub recovery: Vec<i64>,
     pub destination: String,
+    /// "flat" for training-ready image/TXT pairs; empty means legacy folder layout.
+    pub export_layout: String,
     pub analysis_attempts: std::collections::BTreeMap<i64, u32>,
     pub analysis_errors: std::collections::BTreeMap<i64, Vec<String>>,
     pub analysis_scope: BTreeSet<i64>,
