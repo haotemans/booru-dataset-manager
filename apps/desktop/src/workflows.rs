@@ -1028,8 +1028,10 @@ impl BdmApp {
         ui.label(format!("用途：{}。图片及筛选后的 Danbooru 通用标签先验将发送到上述服务。",
             if scope.mode == "tags" { "优化标签" } else { "优化自然语言" }));
         ui.label(format!(
-            "共 {} 组图片/TXT，每次请求严格 1 组；最长边 {} px，JPEG 质量 {}。",
+            "共 {} 张图片；每次 JSON 请求最多 {} 组图文配对，最多 {} 个请求并发；最长边 {} px，JPEG 质量 {}。",
             scope.ids.len(),
+            scope.profile.request.batch_size,
+            scope.profile.concurrency,
             scope.profile.request.image_max_edge,
             scope.profile.request.jpeg_quality
         ));
