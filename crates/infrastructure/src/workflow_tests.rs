@@ -372,6 +372,13 @@ fn legacy_artist_backfill_reads_every_source_and_preserves_edits_tags_and_deleti
         )
         .unwrap();
     let media = f.repo.list_media().unwrap().remove(0);
+    profile.upload_approval = Some(crate::ai::UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: std::collections::BTreeSet::from([media.id]),
+    });
     let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
     let tags = std::fs::read(media.path.with_extension("tags.txt")).unwrap();
     let mut additional = f.post.clone();
@@ -1578,7 +1585,10 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
                         let body: serde_json::Value =
                             serde_json::from_slice(&bytes[offset + 4..offset + 4 + length])
                                 .unwrap();
-                        let content = body["messages"][1]["content"].as_str().unwrap();
+                        let input: serde_json::Value = serde_json::from_str(
+                            body["messages"][1]["content"][0]["text"].as_str().unwrap()
+                        ).unwrap();
+                        let content = input.to_string();
                         assert!(
                             !content.contains("artist")
                                 && !content.contains("character")
@@ -1597,7 +1607,7 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
             }
         }
     });
-    let profile = crate::ai::AiProfile {
+    let mut profile = crate::ai::AiProfile {
         id: "local-test".into(),
         endpoint: format!("http://{address}/v1"),
         model: "test".into(),
@@ -1633,7 +1643,7 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
         .list_artifacts()
         .unwrap()
         .iter()
-        .any(|a| a.kind == "caption" && a.state == "needs_review"));
+        .any(|a| a.kind == "caption" && a.state == "complete"));
 }
 
 #[test]
@@ -1715,7 +1725,7 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
                             serde_json::from_slice(&bytes[offset + 4..offset + 4 + length])
                                 .unwrap();
                         break serde_json::from_str(
-                            body["messages"][1]["content"].as_str().unwrap(),
+                            body["messages"][1]["content"][0]["text"].as_str().unwrap(),
                         )
                         .unwrap();
                     }
@@ -1735,7 +1745,7 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
         }
         seen
     });
-    let profile = crate::ai::AiProfile {
+    let mut profile = crate::ai::AiProfile {
         id: "partial-test".into(),
         endpoint: format!("http://{address}/v1"),
         model: "test".into(),
@@ -1746,6 +1756,13 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
         artist_tag_format: "legacy".into(),
         character_tag_format: "plain".into(),
     };
+    profile.upload_approval = Some(crate::ai::UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: std::collections::BTreeSet::from([first.id, second.id]),
+    });
     let mut job = f
         .repo
         .new_workflow("optimize", vec![first.id, second.id])
