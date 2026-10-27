@@ -409,10 +409,14 @@ pub fn run(
         .transpose()
         .map_err(|_| IngestError::Storage)?
         .unwrap_or_else(|| RateState {
-            active: 2,
+            active: profile.max_concurrency.clamp(1, 16),
             ..Default::default()
         });
-    rate.active = rate.active.clamp(1, profile.max_concurrency.clamp(1, 16));
+    if rate.deadline == 0 {
+        rate.active = profile.max_concurrency.clamp(1, 16);
+    } else {
+        rate.active = rate.active.clamp(1, profile.max_concurrency.clamp(1, 16));
+    }
     let all = repo
         .list_media()?
         .into_iter()
