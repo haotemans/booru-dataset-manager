@@ -106,7 +106,6 @@ fn candidate_features(
             return Ok(matches);
         }
     }
-    let mut ids = BTreeSet::new();
     let mut search_keys = keys.to_vec();
     if review.is_some() {
         for key in &keys[3..] {
@@ -119,14 +118,40 @@ fn candidate_features(
             }
         }
     }
-    for key in &search_keys {
-        let mut query=storage(repo.connection.prepare("SELECT media_id FROM visual_buckets WHERE version=?1 AND bucket=?2 AND media_id<>?3 ORDER BY media_id DESC LIMIT 128"))?;
-        let rows = storage(query.query_map(params![VERSION, key, id], |r| r.get::<_, i64>(0)))?;
-        for other in rows {
-            ids.insert(storage(other)?);
-        }
-    }
-    ids.into_iter().take(512).map(|other|storage(repo.connection.query_row("SELECT media_id,phash,embedding FROM visual_features WHERE version=?1 AND media_id=?2",params![VERSION,other],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))))).collect()
+    search_keys.sort();
+    search_keys.dedup();
+    // Preserve the former per-bucket 128-candidate and global 512-candidate
+    // retrieval caps in a single SQL query. Previously each bucket issued
+    // its own SELECT and every candidate required another SELECT by media ID.
+    let placeholders = vec!["?"; search_keys.len()].join(",");
+    let sql = format!(
+        "WITH ranked AS (
+           SELECT media_id, bucket,
+                  ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY media_id DESC) AS pos
+           FROM visual_buckets
+           WHERE version=? AND bucket IN ({placeholders}) AND media_id<>?
+         ),
+         candidates AS (
+           SELECT DISTINCT media_id FROM ranked WHERE pos<=128
+           ORDER BY media_id ASC LIMIT 512
+         )
+         SELECT f.media_id, f.phash, f.embedding
+         FROM candidates AS c
+         JOIN visual_features AS f ON f.media_id=c.media_id AND f.version=?
+         ORDER BY f.media_id"
+    );
+    let mut args = Vec::<rusqlite::types::Value>::with_capacity(search_keys.len() + 3);
+    args.push(rusqlite::types::Value::Text(VERSION.into()));
+    args.extend(search_keys.into_iter().map(rusqlite::types::Value::Text));
+    args.push(rusqlite::types::Value::Integer(id));
+    args.push(rusqlite::types::Value::Text(VERSION.into()));
+    let mut query = storage(repo.connection.prepare(&sql))?;
+    let rows = storage(
+        query.query_map(rusqlite::params_from_iter(args.iter()), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        }),
+    )?;
+    storage(rows.collect())
 }
 
 fn analysis_python(executable: Option<&Path>, override_path: Option<PathBuf>) -> PathBuf {
@@ -388,25 +413,38 @@ pub fn run(
                 job.deferred.push(id);
             }
             incomplete |= vector.is_none();
-            storage(repo.connection.execute(
-                "INSERT OR REPLACE INTO visual_features VALUES(?1,?2,?3,?4)",
-                params![
+            let keys = buckets(hash, vector.as_deref());
+            // One bounded SQLite write transaction per image instead of a
+            // separate durable transaction for every embedding/bucket insert.
+            // Replacing stale bucket keys also fixes reruns after image edits.
+            {
+                let tx = storage(
+                    repo.connection
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
+                )?;
+                storage(tx.execute(
+                    "INSERT OR REPLACE INTO visual_features VALUES(?1,?2,?3,?4)",
+                    params![
                         id,
                         VERSION,
                         format!("{hash:016x}"),
-                        vector
-                            .as_ref()
-                            .map(serde_json::to_string)
-                            .transpose()
-                            .map_err(|_| IngestError::Storage)?
+                        vector.as_ref().map(serde_json::to_string)
+                            .transpose().map_err(|_| IngestError::Storage)?
                     ],
-            ))?;
-            let keys = buckets(hash, vector.as_deref());
-            for key in &keys {
-                storage(repo.connection.execute(
-                    "INSERT OR IGNORE INTO visual_buckets VALUES(?1,?2,?3)",
-                    params![id, VERSION, key],
                 ))?;
+                storage(tx.execute(
+                    "DELETE FROM visual_buckets WHERE media_id=?1 AND version=?2",
+                    params![id, VERSION],
+                ))?;
+                {
+                    let mut insert = storage(
+                        tx.prepare_cached("INSERT OR IGNORE INTO visual_buckets VALUES(?1,?2,?3)"),
+                    )?;
+                    for key in &keys {
+                        storage(insert.execute(params![id, VERSION, key]))?;
+                    }
+                }
+                storage(tx.commit())?;
             }
             let threshold = job
                 .review_similarity
