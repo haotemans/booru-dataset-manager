@@ -1703,6 +1703,7 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
                     Err(e) => panic!("{e}"),
                 }
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(10)))
                 .unwrap();
