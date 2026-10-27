@@ -559,7 +559,11 @@ impl BdmApp {
                         .hint_text("导出目录，例如 D:\\DatasetExport")
                         .desired_width(410.0),
                 );
-                ui.label(RichText::new("导出已保留且所选文本完整的图片。已存在文件须通过哈希和文本校验；不一致时停止并提示。").size(12.0).color(MUTED));
+                ui.checkbox(
+                    &mut self.workflows.export_folders,
+                    "旧版布局：每张图片独立文件夹（默认扁平训练集）",
+                );
+                ui.label(RichText::new("默认同名图片 + TXT；再次导出时只安全更新已有导出记录的 TXT。图片哈希异常立即停止。").size(12.0).color(MUTED));
             }
         }
         ui.add_space(14.0);
