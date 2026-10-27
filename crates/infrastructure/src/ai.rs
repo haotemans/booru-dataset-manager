@@ -30,6 +30,7 @@ pub struct UploadApproval {
 
 pub struct AiProfile {
     pub id: String,
+    pub concurrency: u32,
     pub endpoint: String,
     pub model: String,
     pub group: String,
@@ -482,7 +483,7 @@ pub fn run(
     } else {
         Vec::new()
     };
-    let maximum_batch = if send_images { 1 } else { profile.settings.batch_size };
+    let maximum_batch = profile.settings.batch_size;
     let mut batch_size = job.fallback.clamp(1, maximum_batch);
     let result: Result<(), IngestError> = (|| {
         loop {
