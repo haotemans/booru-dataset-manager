@@ -1025,8 +1025,14 @@ impl BdmApp {
                 .size(12.0)
                 .color(MUTED),
         );
-        ui.label(format!("用途：{}。图片及筛选后的 Danbooru 通用标签先验将发送到上述服务。",
-            if scope.mode == "tags" { "优化标签" } else { "优化自然语言" }));
+        ui.label(format!(
+            "用途：{}。图片及筛选后的 Danbooru 通用标签先验将发送到上述服务。",
+            if scope.mode == "tags" {
+                "优化标签"
+            } else {
+                "优化自然语言"
+            }
+        ));
         ui.label(format!(
             "共 {} 张图片；每次 JSON 请求最多 {} 组图文配对，最多 {} 个请求并发；最长边 {} px，JPEG 质量 {}。",
             scope.ids.len(),

@@ -246,11 +246,21 @@ fn output_modes_are_explicit_and_multimodal_items_keep_ids() {
     );
     let tag_body = protocol::body(&profile, &paired, &images, "tags").unwrap();
     assert!(tag_body["messages"][0]["content"]
-        .as_str().unwrap().contains(&profile.settings.tag_system_prompt));
+        .as_str()
+        .unwrap()
+        .contains(&profile.settings.tag_system_prompt));
     assert!(body["messages"][0]["content"]
-        .as_str().unwrap().contains(&profile.settings.caption_system_prompt));
+        .as_str()
+        .unwrap()
+        .contains(&profile.settings.caption_system_prompt));
     assert!(protocol::body(&profile, &input, &images, "tags").is_err());
-    assert!(protocol::body(&profile, &[paired[0].clone(), paired[0].clone()], &images, "caption").is_err());
+    assert!(protocol::body(
+        &profile,
+        &[paired[0].clone(), paired[0].clone()],
+        &images,
+        "caption"
+    )
+    .is_err());
 }
 
 #[test]
@@ -270,7 +280,10 @@ fn eight_images_are_correlated_with_eight_danbooru_metadata_items_in_one_json() 
         })
         .collect::<Vec<_>>();
     let body = protocol::body(&profile, &input, &images, "tags").unwrap();
-    assert_eq!(body["response_format"]["json_schema"]["schema"]["properties"]["items"]["minItems"], 8);
+    assert_eq!(
+        body["response_format"]["json_schema"]["schema"]["properties"]["items"]["minItems"],
+        8
+    );
     let pieces = body["messages"][1]["content"].as_array().unwrap();
     assert_eq!(pieces.len(), 17);
     let payload: Value = serde_json::from_str(pieces[0]["text"].as_str().unwrap()).unwrap();
@@ -360,13 +373,20 @@ fn caption_upload_requires_scope_approval_and_sends_compressed_json_to_local_ser
 fn identical_second_caption_job_reuses_sqlite_artifact_without_another_http_request() {
     let mut f = crate::workflow_tests::fixture();
     let cancel = AtomicBool::new(false);
-    f.repo.import(
-        &f.post, &f.directory.path().join("library"),
-        f.collection, 800, &cancel, &f.provider,
-    ).unwrap();
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
     let id = f.repo.list_media().unwrap().remove(0).id;
     let (endpoint, server) = server(vec![(
-        200, response(json!([{"id":id,"caption":"A landscape."}])),
+        200,
+        response(json!([{"id":id,"caption":"A landscape."}])),
     )]);
     let mut profile = profile();
     profile.endpoint = endpoint;
@@ -390,8 +410,13 @@ fn identical_second_caption_job_reuses_sqlite_artifact_without_another_http_requ
     run(&mut f.repo, &mut second, &profile, &cancel, |_| {}).unwrap();
     assert_eq!(second.state, "completed");
     assert!(second.accepted.contains(&id));
-    let artifact = f.repo.list_artifacts().unwrap().into_iter()
-        .find(|a| a.kind == "caption").unwrap();
+    let artifact = f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.kind == "caption")
+        .unwrap();
     assert_eq!(artifact.state, "complete");
     assert!(artifact.provenance.contains(":cache="));
 }
@@ -525,14 +550,22 @@ fn explicit_api_refusal_does_not_log_remote_text() {
 fn vision_tagging_uses_danbooru_prior_and_auto_saves_result() {
     let mut f = crate::workflow_tests::fixture();
     let cancel = AtomicBool::new(false);
-    f.repo.import(
-        &f.post, &f.directory.path().join("library"), f.collection, 800, &cancel, &f.provider
-    ).unwrap();
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
     let media = f.repo.list_media().unwrap().remove(0);
     let txt = media.path.with_extension("raw_tags.txt");
     assert!(std::fs::read_to_string(&txt).unwrap().contains("scenery"));
     let (endpoint, worker) = server(vec![(
-        200, response(json!([{"id":media.id,"tags":["scenery"]}]))
+        200,
+        response(json!([{"id":media.id,"tags":["scenery"]}])),
     )]);
     let mut profile = profile();
     profile.endpoint = endpoint;
@@ -543,7 +576,7 @@ fn vision_tagging_uses_danbooru_prior_and_auto_saves_result() {
         endpoint: profile.endpoint.clone(),
         model: profile.model.clone(),
         settings: profile.settings.clone(),
-        ids: BTreeSet::from([media.id])
+        ids: BTreeSet::from([media.id]),
     });
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "tags".into();
@@ -555,9 +588,17 @@ fn vision_tagging_uses_danbooru_prior_and_auto_saves_result() {
     let input: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(input["items"][0]["id"], media.id);
     assert_eq!(input["items"][0]["paired_txt"], "scenery");
-    let artifact = f.repo.list_artifacts().unwrap().into_iter().find(|a| a.kind=="tags").unwrap();
+    let artifact = f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.kind == "tags")
+        .unwrap();
     assert_eq!(artifact.state, "complete");
     assert!(artifact.content.contains("scenery"));
-    assert!(std::fs::read_to_string(txt).unwrap().contains("special_term"));
+    assert!(std::fs::read_to_string(txt)
+        .unwrap()
+        .contains("special_term"));
     assert_eq!(job.state, "completed");
 }

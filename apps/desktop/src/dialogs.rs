@@ -458,18 +458,22 @@ impl BdmApp {
         );
         ui.add_space(10.0);
         ui.collapsing("自然语言优化 · 系统提示词", |ui| {
-            ui.add(egui::TextEdit::multiline(
-                &mut self.profile_draft.request.caption_system_prompt
-            ).desired_rows(5).desired_width(f32::INFINITY));
+            ui.add(
+                egui::TextEdit::multiline(&mut self.profile_draft.request.caption_system_prompt)
+                    .desired_rows(5)
+                    .desired_width(f32::INFINITY),
+            );
             if ui.button("恢复自然语言默认提示词").clicked() {
                 self.profile_draft.request.caption_system_prompt =
                     bdm_config::DEFAULT_CAPTION_SYSTEM_PROMPT.into();
             }
         });
         ui.collapsing("Tag 优化 · 系统提示词", |ui| {
-            ui.add(egui::TextEdit::multiline(
-                &mut self.profile_draft.request.tag_system_prompt
-            ).desired_rows(5).desired_width(f32::INFINITY));
+            ui.add(
+                egui::TextEdit::multiline(&mut self.profile_draft.request.tag_system_prompt)
+                    .desired_rows(5)
+                    .desired_width(f32::INFINITY),
+            );
             if ui.button("恢复 Tag 默认提示词").clicked() {
                 self.profile_draft.request.tag_system_prompt =
                     bdm_config::DEFAULT_TAG_SYSTEM_PROMPT.into();

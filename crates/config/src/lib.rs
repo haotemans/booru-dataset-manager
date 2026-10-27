@@ -77,7 +77,8 @@ impl AiRequestSettings {
             return Err("JPEG 质量必须在 40–95 之间。");
         }
         for prompt in [&self.caption_system_prompt, &self.tag_system_prompt] {
-            if prompt.trim().is_empty() || prompt.len() > 8192 || prompt.chars().any(|c| c == '\0') {
+            if prompt.trim().is_empty() || prompt.len() > 8192 || prompt.chars().any(|c| c == '\0')
+            {
                 return Err("两种系统提示词都不能为空，且不得超过 8192 字节或包含 NUL 字符。");
             }
         }
