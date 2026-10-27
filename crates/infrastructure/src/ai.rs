@@ -34,6 +34,7 @@ pub struct AiProfile {
     pub group: String,
     pub credentials: Option<ApiCredentials>,
     pub settings: AiRequestSettings,
+    pub max_concurrency: u32,
     pub upload_approval: Option<UploadApproval>,
     /// Formatting is a local presentation choice; these values never affect AI input.
     pub artist_tag_format: String,
@@ -323,6 +324,14 @@ fn request(
     )
 }
 
+struct AiBatch {
+    ids: Vec<i64>,
+    work: Vec<i64>,
+    input: Vec<Value>,
+    images: Vec<images::PreparedImage>,
+    constraints: BTreeMap<i64, bdm_domain::tags::NormalizedTags>,
+}
+
 pub fn run(
     repo: &mut SqliteCatalog,
     job: &mut WorkflowJob,
@@ -400,6 +409,7 @@ pub fn run(
             active: 2,
             ..Default::default()
         });
+    rate.active = rate.active.clamp(1, profile.max_concurrency.clamp(1, 16));
     let all = repo
         .list_media()?
         .into_iter()
@@ -430,10 +440,10 @@ pub fn run(
     } else {
         Vec::new()
     };
-    let maximum_batch = if send_images { 1 } else { profile.settings.batch_size };
+    let maximum_batch = profile.settings.batch_size;
     let mut batch_size = job.fallback.clamp(1, maximum_batch);
     let result: Result<(), IngestError> = (|| {
-        loop {
+        'dispatch: loop {
             if cancel.load(Ordering::Relaxed) {
                 job.state = "paused".into();
                 break;
@@ -452,148 +462,201 @@ pub fn run(
                 .into();
                 break;
             }
-            let ids: Vec<i64> = if recovery {
+            let parallel = if recovery {
+                1
+            } else {
+                rate.active.max(1).min(profile.max_concurrency.clamp(1, 16)) as usize
+            };
+            let selected: Vec<i64> = if recovery {
                 pending.iter().take(batch_size).copied().collect()
             } else {
-                job.ids
-                    .iter()
-                    .skip(job.cursor)
-                    .take(maximum_batch)
-                    .copied()
-                    .collect()
+                job.ids.iter().skip(job.cursor)
+                    .take(maximum_batch * parallel).copied().collect()
             };
-            let work: Vec<i64> = ids
-                .iter()
-                .copied()
-                .filter(|id| !job.accepted.contains(id))
-                .collect();
-            if work.is_empty() {
-                if recovery {
-                    pending.drain(..ids.len());
-                } else {
-                    job.cursor += ids.len();
-                }
-                continue;
-            }
-            let mut constraints = BTreeMap::new();
-            let mut input = Vec::new();
-            let mut images = Vec::new();
-            for id in &work {
-                if let Some(media) = all.get(id) {
-                    let normalized = bdm_domain::tags::normalize(
-                        &media.post.tag_string,
-                        &media.post.tag_string_artist,
-                        &media.post.tag_string_character,
-                        &rules,
-                    );
-                    // Artist and character names are excluded; unknown/special terms remain local.
-                    let paired_txt = if send_images {
-                        match std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) {
-                            Ok(raw) if raw.len() <= 64 * 1024 && !raw.contains('\0') => {
-                                Some(identity::generic_metadata_prior(&raw, &normalized, &rules))
+            let mut packets = Vec::new();
+            for ids in selected.chunks(maximum_batch) {
+                let ids = ids.to_vec();
+                let work: Vec<i64> = ids
+                    .iter()
+                    .copied()
+                    .filter(|id| !job.accepted.contains(id))
+                    .collect();
+                let mut constraints = BTreeMap::new();
+                let mut input = Vec::new();
+                let mut images = Vec::new();
+                for id in &work {
+                    if let Some(media) = all.get(id) {
+                        let normalized = bdm_domain::tags::normalize(
+                            &media.post.tag_string,
+                            &media.post.tag_string_artist,
+                            &media.post.tag_string_character,
+                            &rules,
+                        );
+                        // Artist and character names are excluded; unknown/special terms remain local.
+                        let paired_txt = if send_images {
+                            match std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) {
+                                Ok(raw) if raw.len() <= 64 * 1024 && !raw.contains('\0') => {
+                                    Some(identity::generic_metadata_prior(&raw, &normalized, &rules))
+                                }
+                                _ => {
+                                    job.analysis_errors.entry(*id).or_default()
+                                        .push("Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。".into());
+                                    continue;
+                                }
                             }
-                            _ => {
-                                job.analysis_errors.entry(*id).or_default()
-                                    .push("Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。".into());
-                                continue;
-                            }
-                        }
-                    } else { None };
-                    if send_images {
-                        match images::prepare(*id, &media.path, &profile.settings, cancel) {
-                            Ok(image) => images.push(image),
-                            Err(AiError::Cancelled) => break,
-                            Err(_) => {
-                                job.analysis_errors
-                                    .entry(*id)
-                                    .or_default()
-                                    .push("图片读取或压缩失败；未发送该图片。".into());
-                                // Keep a failed image out of this multimodal batch. The
-                                // item is deferred below and can be retried independently.
-                                continue;
+                        } else { None };
+                        if send_images {
+                            match images::prepare(*id, &media.path, &profile.settings, cancel) {
+                                Ok(image) => images.push(image),
+                                Err(AiError::Cancelled) => break,
+                                Err(_) => {
+                                    job.analysis_errors
+                                        .entry(*id)
+                                        .or_default()
+                                        .push("图片读取或压缩失败；未发送该图片。".into());
+                                    // Keep a failed image out of this multimodal batch. The
+                                    // item is deferred below and can be retried independently.
+                                    continue;
+                                }
                             }
                         }
+                        input.push(if let Some(txt) = paired_txt {
+                            json!({"id":id,"tags":normalized.ordinary,"paired_txt":txt})
+                        } else {
+                            json!({"id":id,"tags":normalized.ordinary})
+                        });
+                        constraints.insert(*id, normalized);
                     }
-                    input.push(if let Some(txt) = paired_txt {
-                        json!({"id":id,"tags":normalized.ordinary,"paired_txt":txt})
-                    } else {
-                        json!({"id":id,"tags":normalized.ordinary})
-                    });
-                    constraints.insert(*id, normalized);
                 }
+
+                packets.push(AiBatch { ids, work, input, images, constraints });
             }
             if cancel.load(Ordering::Relaxed) {
                 job.state = "paused".into();
-                break;
+                break 'dispatch;
             }
-            if input.is_empty() {
-                for id in &work {
-                    if !job.accepted.contains(id) && !job.deferred.contains(id) {
-                        job.deferred.push(*id);
+            // Network requests never touch the database. A wave can contain up to
+            // configured concurrency independent JSON batches, each <= 8 images.
+            // Results are reconciled by media ID on the main workflow thread.
+            let mut responses: Vec<Result<BatchResponse, AiError>> = Vec::new();
+            if packets.len() == 1 {
+                let packet = &packets[0];
+                let mut transport_retries = 0;
+                let mut rate_retries = 0;
+                let response = if packet.input.is_empty() {
+                    Err(AiError::Content)
+                } else { loop {
+                    if wait_until(
+                        rate.deadline.max(if rate.active == 1 {
+                            rate.last_start + 1
+                        } else {
+                            0
+                        }),
+                        cancel,
+                    )
+                    .is_err()
+                    {
+                        break Err(AiError::Cancelled);
                     }
-                }
-                if recovery {
-                    pending.drain(..ids.len());
-                } else {
-                    job.cursor += ids.len();
-                }
-                continue;
-            }
-            let mut transport_retries = 0;
-            let mut rate_retries = 0;
-            let response = loop {
-                if wait_until(
-                    rate.deadline.max(if rate.active == 1 {
-                        rate.last_start + 1
-                    } else {
-                        0
-                    }),
-                    cancel,
-                )
-                .is_err()
-                {
-                    break Err(AiError::Cancelled);
+                    rate.last_start = now();
+                    storage(repo.connection.execute(
+                        "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
+                        params![scope, storage(serde_json::to_string(&rate))?],
+                    ))?;
+                    let response = request(&client, profile, &packet.input, &packet.images, &job.mode, cancel);
+                    match &response {
+                        Err(AiError::RateLimited(seconds)) => {
+                            rate.deadline = now() + seconds;
+                            rate.active = 1;
+                            rate.successes = 0;
+                            storage(repo.connection.execute(
+                                "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
+                                params![scope, storage(serde_json::to_string(&rate))?],
+                            ))?;
+                            report(job);
+                            if rate_retries >= 1 {
+                                break response;
+                            }
+                            rate_retries += 1;
+                        }
+                        Err(AiError::Transport)
+                            if transport_retries < profile.settings.transport_retries =>
+                        {
+                            transport_retries += 1;
+                            if wait_until(now() + (1 << transport_retries), cancel).is_err() {
+                                break Err(AiError::Cancelled);
+                            }
+                        }
+                        _ => break response,
+                    }
+                }};
+                responses.push(response);
+
+            } else {
+                if wait_until(rate.deadline, cancel).is_err() {
+                    job.state = "paused".into();
+                    break 'dispatch;
                 }
                 rate.last_start = now();
                 storage(repo.connection.execute(
                     "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
                     params![scope, storage(serde_json::to_string(&rate))?],
                 ))?;
-                let response = request(&client, profile, &input, &images, &job.mode, cancel);
-                match &response {
-                    Err(AiError::RateLimited(seconds)) => {
-                        rate.deadline = now() + seconds;
+                responses = std::thread::scope(|threads| {
+                    let handles = packets.iter().map(|packet| {
+                        threads.spawn(|| {
+                            if packet.input.is_empty() || packet.work.is_empty() {
+                                return Err(AiError::Content);
+                            }
+                            let mut attempts = 0;
+                            loop {
+                                let response = request(
+                                    &client, profile, &packet.input,
+                                    &packet.images, &job.mode, cancel
+                                );
+                                if matches!(response, Err(AiError::Transport))
+                                    && attempts < profile.settings.transport_retries
+                                {
+                                    attempts += 1;
+                                    if wait_until(now() + (1 << attempts), cancel).is_err() {
+                                        return Err(AiError::Cancelled);
+                                    }
+                                    continue;
+                                }
+                                return response;
+                            }
+                        })
+                    }).collect::<Vec<_>>();
+                    handles.into_iter().map(|handle| {
+                        handle.join().unwrap_or(Err(AiError::Transport))
+                    }).collect()
+                });
+                for outcome in &responses {
+                    if let Err(AiError::RateLimited(seconds)) = outcome {
+                        rate.deadline = rate.deadline.max(now() + seconds);
                         rate.active = 1;
                         rate.successes = 0;
-                        storage(repo.connection.execute(
-                            "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
-                            params![scope, storage(serde_json::to_string(&rate))?],
-                        ))?;
-                        report(job);
-                        if rate_retries >= 1 {
-                            break response;
-                        }
-                        rate_retries += 1;
                     }
-                    Err(AiError::Transport)
-                        if transport_retries < profile.settings.transport_retries =>
-                    {
-                        transport_retries += 1;
-                        if wait_until(now() + (1 << transport_retries), cancel).is_err() {
-                            break Err(AiError::Cancelled);
-                        }
-                    }
-                    _ => break response,
                 }
-            };
+            }
+            for (packet, response) in packets.into_iter().zip(responses) {
+                let AiBatch { ids, work, constraints, .. } = packet;
+                if work.is_empty() {
+                    if recovery {
+                        pending.drain(..ids.len());
+                    } else {
+                        job.cursor += ids.len();
+                    }
+                    continue;
+                }
             if matches!(response, Err(AiError::Cancelled)) {
                 job.state = "paused".into();
-                break;
+                break 'dispatch;
             }
             if matches!(response, Err(AiError::Configuration)) {
                 job.state = "paused".into();
                 record_failure(job, &work, &AiError::Configuration.message());
-                break;
+                break 'dispatch;
             }
             // Resolve proposed new generic tags against Danbooru before accepting
             // them. A category lookup failure defers the item rather than silently
@@ -768,8 +831,11 @@ pub fn run(
             }
             if failed.is_empty() {
                 rate.successes += 1;
-                if rate.active == 1 && rate.successes >= 5 {
-                    rate.active = 2;
+                if rate.successes >= 5
+                    && rate.active < profile.max_concurrency
+                    && now() >= rate.deadline
+                {
+                    rate.active += 1;
                     rate.successes = 0;
                 }
             }
@@ -795,7 +861,7 @@ pub fn run(
                         job.deferred.push(id);
                     }
                 }
-                job.cursor += if content_failure && ids.len() == maximum_batch && maximum_batch > 1
+                job.cursor += if parallel == 1 && content_failure && ids.len() == maximum_batch && maximum_batch > 1
                 {
                     maximum_batch / 2
                 } else {
@@ -810,6 +876,7 @@ pub fn run(
             ))?;
             repo.save_workflow(job)?;
             report(job);
+            }
         }
         Ok(())
     })();
