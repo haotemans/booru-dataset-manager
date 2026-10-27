@@ -664,7 +664,7 @@ pub fn run(
                         }
                         format_caption(
                             caption,
-                            &normalized,
+                            normalized,
                             &profile.artist_tag_format,
                             &profile.character_tag_format,
                         )
