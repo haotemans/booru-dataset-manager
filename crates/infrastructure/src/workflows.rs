@@ -612,3 +612,50 @@ impl SqliteCatalog {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod phash_performance_regression {
+    use super::*;
+
+    #[test]
+    fn cached_cosines_preserve_original_phash_bits() {
+        let dir = tempfile::tempdir().unwrap();
+        for seed in 0..3u32 {
+            let path = dir.path().join(format!("test-{seed}.png"));
+            let image = image::RgbImage::from_fn(96, 72, |x, y| {
+                image::Rgb([
+                    ((x * 7 + y * 3 + seed * 13) % 255) as u8,
+                    ((x * y + seed * 17) % 255) as u8,
+                    ((x * 9 + y + seed * 41) % 255) as u8,
+                ])
+            });
+            image.save(&path).unwrap();
+            let resized = image::open(&path).unwrap()
+                .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
+                .to_luma8();
+            let mut values = Vec::with_capacity(64);
+            for v in 0..8 {
+                for u in 0..8 {
+                    let mut sum = 0.0;
+                    for y in 0..32 {
+                        for x in 0..32 {
+                            sum += f64::from(resized.get_pixel(x, y).0[0])
+                                * ((f64::from(2 * x + 1) * u as f64
+                                    * std::f64::consts::PI) / 64.0).cos()
+                                * ((f64::from(2 * y + 1) * v as f64
+                                    * std::f64::consts::PI) / 64.0).cos();
+                        }
+                    }
+                    values.push(sum);
+                }
+            }
+            let mut sorted = values[1..].to_vec();
+            sorted.sort_by(f64::total_cmp);
+            let median = sorted[sorted.len() / 2];
+            let expected = values.iter().enumerate().skip(1).fold(0u64, |h, (i, v)| {
+                h | u64::from(*v > median) << i
+            });
+            assert_eq!(phash(&path).unwrap(), expected);
+        }
+    }
+}
