@@ -65,9 +65,16 @@ pub(super) fn caption_mentions_identity(
     copyright_tags: &str,
 ) -> bool {
     let lowercase = caption.to_lowercase();
-    if ["artist:", "character:", "copyright:", "franchise:", "series:", "@"]
-        .iter()
-        .any(|prefix| lowercase.contains(prefix))
+    if [
+        "artist:",
+        "character:",
+        "copyright:",
+        "franchise:",
+        "series:",
+        "@",
+    ]
+    .iter()
+    .any(|prefix| lowercase.contains(prefix))
     {
         return true;
     }
@@ -129,12 +136,7 @@ mod tests {
         }
         rules.protected.insert("protected_x".into());
         let raw = "artist_x character_x franchise_x 1girl blue_hair smile protected_x";
-        let normalized = bdm_domain::tags::normalize(
-            raw,
-            "artist_x",
-            "character_x",
-            &rules,
-        );
+        let normalized = bdm_domain::tags::normalize(raw, "artist_x", "character_x", &rules);
         assert_eq!(
             generic_metadata_prior(raw, &normalized, &rules),
             "1girl, blue_hair, smile"
