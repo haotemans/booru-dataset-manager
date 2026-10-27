@@ -602,6 +602,8 @@ impl SqliteCatalog {
         Ok(true)
     }
 
+    // Explicit source and transfer options are part of the established ingest adapter contract.
+    #[allow(clippy::too_many_arguments)]
     fn import_post(
         &mut self,
         post: &SourcePost,
