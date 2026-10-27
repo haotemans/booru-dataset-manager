@@ -1,4 +1,6 @@
-use crate::{catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob};
+use crate::{
+    catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob,
+};
 use bdm_config::AiRequestSettings;
 use bdm_domain::tags::TagRules;
 use bdm_ports::{ApiCredentials, IngestError};
@@ -12,8 +14,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-mod images;
 mod identity;
+mod images;
 mod protocol;
 #[cfg(test)]
 mod tests;
@@ -336,8 +338,9 @@ fn update_candidate_categories(
         let normalized = candidate.trim().to_lowercase().replace(' ', "_");
         if normalized.is_empty()
             || normalized.len() > 256
-            || !normalized.bytes().all(|byte| byte.is_ascii_alphanumeric()
-                || matches!(byte, b'_' | b'(' | b')' | b'-'))
+            || !normalized.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'(' | b')' | b'-')
+            })
         {
             continue;
         }
@@ -391,7 +394,8 @@ pub fn run(
     // Optimization always requires a vision-capable profile; text-only mode is retired.
     if !profile.settings.send_images {
         job.state = "paused".into();
-        job.error = Some("优化需要发送图片与 Danbooru 元数据，请在 API 配置中开启图片发送。".into());
+        job.error =
+            Some("优化需要发送图片与 Danbooru 元数据，请在 API 配置中开启图片发送。".into());
         repo.save_workflow(job)?;
         report(job);
         return Ok(());
@@ -482,7 +486,11 @@ pub fn run(
     } else {
         Vec::new()
     };
-    let maximum_batch = if send_images { 1 } else { profile.settings.batch_size };
+    let maximum_batch = if send_images {
+        1
+    } else {
+        profile.settings.batch_size
+    };
     let mut batch_size = job.fallback.clamp(1, maximum_batch);
     let result: Result<(), IngestError> = (|| {
         loop {
@@ -545,12 +553,16 @@ pub fn run(
                                 Some(identity::generic_metadata_prior(&raw, &normalized, &rules))
                             }
                             _ => {
-                                job.analysis_errors.entry(*id).or_default()
-                                    .push("Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。".into());
+                                job.analysis_errors.entry(*id).or_default().push(
+                                    "Danbooru 原始元数据 TXT 无法读取或内容无效；未发送图片。"
+                                        .into(),
+                                );
                                 continue;
                             }
                         }
-                    } else { None };
+                    } else {
+                        None
+                    };
                     if send_images {
                         match images::prepare(*id, &media.path, &profile.settings, cancel) {
                             Ok(image) => images.push(image),
@@ -687,7 +699,9 @@ pub fn run(
                                         match provider.lookup_many(chunk) {
                                             Ok(categories) => {
                                                 for (name, category) in categories {
-                                                    updated |= rules.categories.insert(name, category) != Some(category);
+                                                    updated |=
+                                                        rules.categories.insert(name, category)
+                                                            != Some(category);
                                                 }
                                             }
                                             Err(_) => {
@@ -707,8 +721,8 @@ pub fn run(
                 }
             }
             let mut accepted = BTreeSet::new();
-            let content_failure =
-                category_lookup_failed || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
+            let content_failure = category_lookup_failed
+                || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
             if let Ok(ref value) = response {
                 for (&id, row) in &value.items {
                     let Some(media) = all.get(&id) else {
@@ -730,12 +744,7 @@ pub fn run(
                         {
                             continue;
                         }
-                        update_candidate_categories(
-                            repo,
-                            &mut rules,
-                            &mut already_checked,
-                            tags,
-                        )?;
+                        update_candidate_categories(repo, &mut rules, &mut already_checked, tags)?;
                         let tags = identity::verified_visual_tags(tags, &rules);
                         if tags.is_empty() {
                             // Do not replace the last usable artifact with only rejected identity tags.
