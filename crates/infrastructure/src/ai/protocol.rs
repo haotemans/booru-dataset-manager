@@ -91,6 +91,8 @@ pub(super) fn body(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
+    #[serde(default)]
+    operation: Option<String>,
     schema: String,
     items: Vec<Value>,
 }
@@ -128,7 +130,13 @@ pub(super) fn parse(
         return Err(AiError::Content);
     }
     let envelope: Envelope = serde_json::from_str(content).map_err(|_| AiError::Content)?;
-    if envelope.schema != SCHEMA || envelope.items.len() > 512 {
+    if envelope.schema != SCHEMA
+        || envelope
+            .operation
+            .as_deref()
+            .is_some_and(|operation| operation != mode)
+        || envelope.items.len() > 512
+    {
         return Err(AiError::Content);
     }
     let mut counts = BTreeMap::<i64, usize>::new();

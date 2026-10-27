@@ -86,6 +86,34 @@ fn response(rows: Value) -> Value {
 }
 
 #[test]
+fn response_accepts_matching_operation_echo_without_relaxing_schema() {
+    let expected = [1025, 1027].into_iter().collect();
+    let mut envelope = json!({"operation":"caption","schema":"bdm-text-v1","items":[
+        {"id":1025,"caption":"A red square on white."},
+        {"id":1027,"caption":"A blue circle on white."}
+    ]});
+    let parsed = protocol::parse(&envelope.to_string(), &expected, "caption").unwrap();
+    assert_eq!(parsed.items.len(), 2);
+    envelope["operation"] = json!("tags");
+    assert!(matches!(
+        protocol::parse(&envelope.to_string(), &expected, "caption"),
+        Err(AiError::Content)
+    ));
+    envelope["operation"] = json!("caption");
+    envelope["unexpected"] = json!(true);
+    assert!(matches!(
+        protocol::parse(&envelope.to_string(), &expected, "caption"),
+        Err(AiError::Content)
+    ));
+    envelope.as_object_mut().unwrap().remove("unexpected");
+    envelope["schema"] = json!("wrong");
+    assert!(matches!(
+        protocol::parse(&envelope.to_string(), &expected, "caption"),
+        Err(AiError::Content)
+    ));
+}
+
+#[test]
 fn image_compression_preserves_ratio_small_images_alpha_and_original_bytes() {
     let directory = tempfile::tempdir().unwrap();
     let cancel = AtomicBool::new(false);
