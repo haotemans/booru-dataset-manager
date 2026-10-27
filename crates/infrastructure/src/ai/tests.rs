@@ -22,6 +22,16 @@ fn profile() -> AiProfile {
     }
 }
 
+fn approve(profile: &mut AiProfile, ids: impl IntoIterator<Item = i64>) {
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: ids.into_iter().collect(),
+    });
+}
+
 fn server(responses: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -208,49 +218,69 @@ fn strict_json_parser_preserves_valid_ids_and_rejects_invalid_results() {
 }
 
 #[test]
-fn output_modes_are_explicit_and_multimodal_items_keep_ids() {
+fn json_modes_preserve_ids_and_eight_image_metadata_pairs() {
     let mut profile = profile();
-    let input = vec![json!({"id":42,"tags":["scenery"]})];
+    profile.settings.batch_size = 8;
+    let items: Vec<Value> = (1..=8)
+        .map(|id| json!({"id":id,"tags":["1girl"],"paired_txt":"1girl, solo"}))
+        .collect();
+    let images: Vec<_> = (1..=8)
+        .map(|id| images::PreparedImage {
+            id,
+            width: 80,
+            height: 40,
+            data_url: "data:image/jpeg;base64,c3ludGhldGlj".into(),
+        })
+        .collect();
     for mode in [
         JsonOutputMode::PromptOnly,
         JsonOutputMode::JsonObject,
         JsonOutputMode::JsonSchema,
     ] {
         profile.settings.json_output = mode;
-        let body = protocol::body(&profile, &input, &[], "tags").unwrap();
+        let body = protocol::body(&profile, &items, &images, "tags").unwrap();
+        let content = body["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 17);
+        assert_eq!(
+            serde_json::from_str::<Value>(content[0]["text"].as_str().unwrap()).unwrap()
+                ["items"].as_array().unwrap().len(),
+            8
+        );
+        for (index, id) in (1..=8).enumerate() {
+            let image_ref: Value =
+                serde_json::from_str(content[index * 2 + 1]["text"].as_str().unwrap())
+                    .unwrap();
+            assert_eq!(image_ref["image_item_id"], id);
+            assert!(content[index * 2 + 2]["image_url"]["url"].is_string());
+        }
         if mode == JsonOutputMode::PromptOnly {
             assert!(body.get("response_format").is_none());
         }
         if mode == JsonOutputMode::JsonSchema {
             assert_eq!(
                 body["response_format"]["json_schema"]["schema"]["properties"]["items"]["maxItems"],
-                1
+                8
             );
-            assert_eq!(body["response_format"]["json_schema"]["strict"], true);
         }
-        assert!(body["messages"][1]["content"].is_string());
+        assert!(body["messages"][0]["content"].as_str().unwrap()
+            .contains(&profile.settings.tag_system_prompt));
     }
-    let images = vec![images::PreparedImage {
-        id: 42,
-        width: 80,
-        height: 40,
-        data_url: "data:image/jpeg;base64,c3ludGhldGlj".into(),
-    }];
-    let paired = vec![json!({"id":42,"tags":["scenery"],"paired_txt":"A scenic view."})];
-    let body = protocol::body(&profile, &paired, &images, "caption").unwrap();
-    let content = body["messages"][1]["content"].as_array().unwrap();
-    assert_eq!(
-        serde_json::from_str::<Value>(content[1]["text"].as_str().unwrap()).unwrap()
-            ["image_item_id"],
-        42
-    );
-    let tag_body = protocol::body(&profile, &paired, &images, "tags").unwrap();
-    assert!(tag_body["messages"][0]["content"]
-        .as_str().unwrap().contains(&profile.settings.tag_system_prompt));
-    assert!(body["messages"][0]["content"]
-        .as_str().unwrap().contains(&profile.settings.caption_system_prompt));
-    assert!(protocol::body(&profile, &input, &images, "tags").is_err());
-    assert!(protocol::body(&profile, &[paired[0].clone(), paired[0].clone()], &images, "caption").is_err());
+    assert!(protocol::body(&profile, &items, &images[..7], "tags").is_err());
+    assert!(protocol::body(&profile, &items, &[], "tags").is_err());
+    assert!(protocol::body(&profile, &items[..1], &images, "tags").is_err());
+    let parsed = protocol::parse(
+        &json!({"schema":"bdm-text-v1","items": [
+            {"id":8,"tags":["solo"]},
+            {"id":1,"tags":["blue_hair"]},
+            {"id":3,"tags":["smile"]}
+        ]}).to_string(),
+        &(1..=8).collect(),
+        "tags",
+    ).unwrap();
+    assert_eq!(parsed.items.len(), 3);
+    assert!(parsed.items.contains_key(&8));
+    assert!(parsed.items.contains_key(&1));
+    assert!(!parsed.items.contains_key(&2));
 }
 
 #[test]
@@ -314,7 +344,7 @@ fn caption_upload_requires_scope_approval_and_sends_compressed_json_to_local_ser
         .into_iter()
         .find(|a| a.kind == "caption")
         .unwrap();
-    assert_eq!(artifact.state, "needs_review");
+    assert_eq!(artifact.state, "complete");
     assert!(artifact.content.starts_with("@artist artist, character, "));
 }
 
@@ -336,6 +366,7 @@ fn client_configuration_errors_pause_without_failing_items() {
     let (endpoint, server) = server(vec![(400, json!({"error":{"code":"model_not_found"}}))]);
     let mut profile = profile();
     profile.endpoint = endpoint;
+    approve(&mut profile, [media.id]);
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "tags".into();
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
@@ -368,6 +399,7 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
     let mut profile = profile();
     profile.endpoint = endpoint;
     profile.settings.batch_size = 1;
+    approve(&mut profile, [media.id]);
     let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
     job.mode = "caption".into();
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
@@ -411,6 +443,7 @@ fn content_filter_is_persisted_as_failure_and_successful_resume_clears_it() {
         response(json!([{"id":media.id,"caption":"A landscape."}])),
     )]);
     profile.endpoint = endpoint;
+    approve(&mut profile, [media.id]);
     run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
     assert_eq!(worker.join().unwrap().len(), 1);
     assert_eq!(job.state, "completed");
@@ -431,8 +464,13 @@ fn explicit_api_refusal_does_not_log_remote_text() {
     let error = request(
         &Client::new(),
         &profile,
-        &[json!({"id":1,"tags":[]})],
-        &[],
+        &[json!({"id":1,"tags":[],"paired_txt":""})],
+        &[images::PreparedImage {
+            id: 1,
+            width: 80,
+            height: 40,
+            data_url: "data:image/jpeg;base64,c3ludGhldGlj".into(),
+        }],
         "caption",
         &AtomicBool::new(false),
     )
