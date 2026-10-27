@@ -128,3 +128,12 @@ An API configuration can be saved without a successful connection test. Connecti
 ## Pause on configuration-wide API errors
 
 Pause the affected job immediately when a response clearly indicates a configuration-wide problem, including HTTP 401 authentication failure, HTTP 403 authorization failure, or an explicit unsupported/nonexistent model error. Persist resumable progress, cursor, queued IDs and completed outcomes; present an actionable message and require explicit user action to resume after correction. Do not keep retrying requests under the same invalid configuration or mark affected content as failed merely because of a configuration-wide error. Ordinary item-level processing errors continue under existing bounded fallback/recovery rules. Jobs on unrelated profiles may continue; configuration edits alone must not automatically resume a paused job or dispatch requests.
+
+
+## Eight-pair multimodal JSON batch and bounded parallel waves
+
+Vision optimization packs up to the profile's configured batch size (default 8) of images **and matching sanitized Danbooru raw-tag priors** in a single JSON `/chat/completions` request. It sends an `items` JSON array containing stable numeric media IDs; each image is introduced by an `image_item_id` metadata marker. JSON Schema mode binds the response item count and output type; accepted responses are still locally parsed, ID-deduplicated, and validated. The request has a hard 16 MiB body bound. A last partial batch is not padded.
+
+The actual concurrent HTTP dispatch uses batches as units, rather than sending all eight images as separate HTTP requests. The profile's concurrency setting caps the number of simultaneous batches in a dispatch wave. HTTP calls run in scoped worker threads, never mutate SQLite, and results are correlated/persisted serially by image ID. Recovery requests remain serial and apply bounded content fallback. A concurrent 429 lowers subsequent waves to one active request, persists the cooldown, and keeps unsuccessful item IDs for recovery. Already-started requests are not cancelled merely because a peer was rate-limited.
+
+The desktop profile setting and upload confirmation display both values separately: `batch_size` (images per JSON) and `concurrency` (parallel JSON requests). Upload consent covers the exact selected image set and model/profile, not any later job.
