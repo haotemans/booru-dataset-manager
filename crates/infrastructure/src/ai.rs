@@ -1,5 +1,6 @@
 use crate::{catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob};
 use bdm_config::AiRequestSettings;
+use bdm_domain::ingest::StoredMedia;
 use bdm_domain::tags::TagRules;
 use bdm_ports::{ApiCredentials, IngestError};
 use reqwest::blocking::Client;
@@ -375,6 +376,82 @@ fn update_candidate_categories(
     Ok(())
 }
 
+/// Prepare additional independent image/metadata requests while the current request is in flight.
+fn prepare_prefetch(
+    ids: &[i64],
+    all: &BTreeMap<i64, StoredMedia>,
+    rules: &bdm_domain::tags::TagRules,
+    profile: &AiProfile,
+    cancel: &AtomicBool,
+) -> (Vec<Value>, Vec<images::PreparedImage>) {
+    let mut items = Vec::new();
+    let mut prepared = Vec::new();
+    for id in ids {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let Some(media) = all.get(id) else {
+            continue;
+        };
+        let normalized = bdm_domain::tags::normalize(
+            &media.post.tag_string,
+            &media.post.tag_string_artist,
+            &media.post.tag_string_character,
+            rules,
+        );
+        let Ok(raw) = std::fs::read_to_string(media.path.with_extension("raw_tags.txt")) else {
+            continue;
+        };
+        if raw.len() > 64 * 1024 || raw.contains('\0') {
+            continue;
+        }
+        let Ok(image) = images::prepare(*id, &media.path, &profile.settings, cancel) else {
+            continue;
+        };
+        items.push(json!({
+            "id":id,
+            "tags":normalized.ordinary,
+            "paired_txt":identity::generic_metadata_prior(&raw, &normalized, rules)
+        }));
+        prepared.push(image);
+    }
+    (items, prepared)
+}
+
+/// Issue multiple separate JSON batch requests in parallel. Each response is
+/// correlated to the original item IDs; only the caller mutates SQLite or sidecars.
+fn concurrent_requests(
+    client: &Client,
+    profile: &AiProfile,
+    current: &[Value],
+    current_images: &[images::PreparedImage],
+    others: Vec<(usize, Vec<Value>, Vec<images::PreparedImage>)>,
+    mode: &str,
+    cancel: &AtomicBool,
+) -> (
+    Result<BatchResponse, AiError>,
+    Vec<(usize, Result<BatchResponse, AiError>)>,
+) {
+    let mut completed = Vec::new();
+    let first = std::thread::scope(|scope| {
+        let handles = others
+            .into_iter()
+            .map(|(cursor, items, images)| {
+                scope.spawn(move || (cursor, request(client, profile, &items, &images, mode, cancel)))
+            })
+            .collect::<Vec<_>>();
+        let first = request(client, profile, current, current_images, mode, cancel);
+        for handle in handles {
+            match handle.join() {
+                Ok(result) => completed.push(result),
+                Err(_) => return Err(AiError::Transport),
+            }
+        }
+        first
+    });
+    (first, completed)
+}
+
 pub fn run(
     repo: &mut SqliteCatalog,
     job: &mut WorkflowJob,
@@ -449,9 +526,12 @@ pub fn run(
         .transpose()
         .map_err(|_| IngestError::Storage)?
         .unwrap_or_else(|| RateState {
-            active: 2,
+            active: profile.concurrency.clamp(1, 16),
             ..Default::default()
         });
+    if rate.deadline == 0 {
+        rate.active = profile.concurrency.clamp(1, 16);
+    }
     let all = repo
         .list_media()?
         .into_iter()
@@ -485,6 +565,7 @@ pub fn run(
     };
     let maximum_batch = profile.settings.batch_size;
     let mut batch_size = job.fallback.clamp(1, maximum_batch);
+    let mut prefetched = BTreeMap::<usize, Result<BatchResponse, AiError>>::new();
     let result: Result<(), IngestError> = (|| {
         loop {
             if cancel.load(Ordering::Relaxed) {
@@ -594,6 +675,7 @@ pub fn run(
             }
             let mut transport_retries = 0;
             let mut rate_retries = 0;
+            let mut previous = if recovery { None } else { prefetched.remove(&job.cursor) };
             let response = loop {
                 if wait_until(
                     rate.deadline.max(if rate.active == 1 {
@@ -612,7 +694,51 @@ pub fn run(
                     "INSERT OR REPLACE INTO api_rate_state VALUES(?1,?2)",
                     params![scope, storage(serde_json::to_string(&rate))?],
                 ))?;
-                let response = request(&client, profile, &input, &images, &job.mode, cancel);
+                let response = if let Some(previous) = previous.take() {
+                    previous
+                } else if !recovery
+                    && transport_retries == 0
+                    && rate_retries == 0
+                    && prefetched.is_empty()
+                    && rate.active > 1
+                    && rate.deadline <= now()
+                    && profile.concurrency > 1
+                {
+                    let parallelism = (rate.active.min(profile.concurrency) as usize).clamp(1, 16);
+                    let mut others = Vec::new();
+                    for index in 1..parallelism {
+                        let offset = job.cursor + index * maximum_batch;
+                        let following = job
+                            .ids
+                            .iter()
+                            .skip(offset)
+                            .take(maximum_batch)
+                            .copied()
+                            .filter(|id| !job.accepted.contains(id))
+                            .collect::<Vec<_>>();
+                        if following.is_empty() {
+                            continue;
+                        }
+                        let (next_items, next_images) =
+                            prepare_prefetch(&following, &all, &rules, profile, cancel);
+                        if !next_items.is_empty() {
+                            others.push((offset, next_items, next_images));
+                        }
+                    }
+                    let (first, remainder) = concurrent_requests(
+                        &client,
+                        profile,
+                        &input,
+                        &images,
+                        others,
+                        &job.mode,
+                        cancel,
+                    );
+                    prefetched.extend(remainder);
+                    first
+                } else {
+                    request(&client, profile, &input, &images, &job.mode, cancel)
+                };
                 match &response {
                     Err(AiError::RateLimited(seconds)) => {
                         rate.deadline = now() + seconds;
@@ -827,8 +953,8 @@ pub fn run(
             }
             if failed.is_empty() {
                 rate.successes += 1;
-                if rate.active == 1 && rate.successes >= 5 {
-                    rate.active = 2;
+                if rate.deadline != 0 && rate.successes >= 5 {
+                    rate.active = rate.active.saturating_add(1).min(profile.concurrency);
                     rate.successes = 0;
                 }
             }
