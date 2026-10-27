@@ -10,6 +10,7 @@ use std::{
 fn profile() -> AiProfile {
     AiProfile {
         id: "synthetic-test".into(),
+        concurrency: 2,
         endpoint: "http://127.0.0.1:1/v1".into(),
         model: "synthetic-model".into(),
         group: String::new(),
