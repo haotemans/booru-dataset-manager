@@ -1623,7 +1623,7 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
         endpoint: profile.endpoint.clone(),
         model: profile.model.clone(),
         settings: profile.settings.clone(),
-        ids: BTreeSet::from([media.id]),
+        ids: std::collections::BTreeSet::from([media.id]),
     });
     let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
     let mut tags = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
