@@ -150,7 +150,7 @@ fn candidate_features(
         rusqlite::params_from_iter(args.iter()),
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ))?;
-    storage(rows.collect())?
+    storage(rows.collect())
 }
 
 fn analysis_python(executable: Option<&Path>, override_path: Option<PathBuf>) -> PathBuf {
