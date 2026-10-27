@@ -7,6 +7,7 @@ use reqwest::blocking::Client;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::atomic::{AtomicBool, Ordering},
@@ -334,6 +335,7 @@ struct AiBatch {
     input: Vec<Value>,
     images: Vec<images::PreparedImage>,
     constraints: BTreeMap<i64, bdm_domain::tags::NormalizedTags>,
+    signatures: BTreeMap<i64, String>,
 }
 
 pub fn run(
@@ -425,14 +427,14 @@ pub fn run(
         .map(|m| (m.id, m))
         .collect::<BTreeMap<_, _>>();
     let mut rules = repo.tag_rules()?;
+    let rules_digest = format!("{:x}", Sha256::digest(storage(serde_json::to_vec(&rules))?));
     let artifacts = repo.list_artifacts()?;
     for artifact in artifacts.iter().filter(|a| {
         a.kind == job.mode
-            && a.provenance
-                == format!(
-                    "{}:{}:job-{}:bdm-text-v1",
-                    profile.id, profile.model, job.id
-                )
+            && a.provenance.starts_with(&format!(
+                "{}:{}:job-{}:bdm-text-v1",
+                profile.id, profile.model, job.id
+            ))
     }) {
         job.accepted.insert(artifact.media_id);
     }
@@ -495,6 +497,7 @@ pub fn run(
                     .filter(|id| !job.accepted.contains(id))
                     .collect();
                 let mut constraints = BTreeMap::new();
+                let mut signatures = BTreeMap::new();
                 let mut input = Vec::new();
                 let mut images = Vec::new();
                 for id in &work {
@@ -523,6 +526,59 @@ pub fn run(
                         } else {
                             None
                         };
+                        let prior = paired_txt.as_deref().unwrap_or("");
+                        let prompt = if job.mode == "tags" {
+                            &profile.settings.tag_system_prompt
+                        } else {
+                            &profile.settings.caption_system_prompt
+                        };
+                        let signature = format!(
+                            "{:x}",
+                            Sha256::digest(
+                                serde_json::to_vec(&json!({
+                                    "mode":job.mode,
+                                    "media_sha256":media.sha256,
+                                    "prior":prior,
+                                    "endpoint":profile.endpoint,
+                                    "model":profile.model,
+                                    "prompt":prompt,
+                                    "rules_digest":rules_digest,
+                                    "artist_format":profile.artist_tag_format,
+                                    "character_format":profile.character_tag_format,
+                                    "image_max_edge":profile.settings.image_max_edge,
+                                    "jpeg_quality":profile.settings.jpeg_quality
+                                }))
+                                .map_err(|_| IngestError::Storage)?
+                            )
+                        );
+                        signatures.insert(*id, signature.clone());
+                        if profile.settings.use_cache {
+                            let marker = format!(":cache={signature}");
+                            let hit: Option<String> = storage(
+                                repo.connection
+                                    .query_row(
+                                        "SELECT content FROM text_artifacts
+                                 WHERE media_id=?1 AND kind=?2 AND provenance LIKE ?3
+                                 ORDER BY id DESC LIMIT 1",
+                                        params![id, job.mode, format!("%{marker}")],
+                                        |row| row.get(0),
+                                    )
+                                    .optional(),
+                            )?;
+                            if let Some(content) = hit {
+                                repo.write_ai_artifact(
+                                    media,
+                                    &job.mode,
+                                    &content,
+                                    &format!(
+                                        "{}:{}:job-{}:bdm-text-v1:cache={signature}",
+                                        profile.id, profile.model, job.id
+                                    ),
+                                )?;
+                                job.accepted.insert(*id);
+                                continue;
+                            }
+                        }
                         if send_images {
                             match images::prepare(*id, &media.path, &profile.settings, cancel) {
                                 Ok(image) => images.push(image),
@@ -553,6 +609,7 @@ pub fn run(
                     input,
                     images,
                     constraints,
+                    signatures,
                 });
             }
             if cancel.load(Ordering::Relaxed) {
@@ -685,7 +742,9 @@ pub fn run(
                 let AiBatch {
                     ids,
                     work,
+                    input,
                     constraints,
+                    signatures,
                     ..
                 } = packet;
                 if work.is_empty() {
@@ -854,8 +913,11 @@ pub fn run(
                             &job.mode,
                             &text,
                             &format!(
-                                "{}:{}:job-{}:bdm-text-v1",
-                                profile.id, profile.model, job.id
+                                "{}:{}:job-{}:bdm-text-v1:cache={}",
+                                profile.id,
+                                profile.model,
+                                job.id,
+                                signatures.get(&id).map(String::as_str).unwrap_or("")
                             ),
                         )?;
                         job.accepted.insert(id);
@@ -882,7 +944,7 @@ pub fn run(
                 } else {
                     job.error = None;
                 }
-                if failed.is_empty() {
+                if failed.is_empty() && !input.is_empty() && response.is_ok() {
                     rate.successes += 1;
                     if rate.successes >= 5
                         && rate.active < profile.max_concurrency

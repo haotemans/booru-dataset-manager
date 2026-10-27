@@ -452,6 +452,10 @@ impl BdmApp {
                 .size(12.0)
                 .color(MUTED),
         );
+        ui.checkbox(
+            &mut self.profile_draft.request.use_cache,
+            "相同图片、元数据和提示词复用历史优化结果（关闭即可强制重跑）",
+        );
         ui.add_space(10.0);
         ui.collapsing("自然语言优化 · 系统提示词", |ui| {
             ui.add(

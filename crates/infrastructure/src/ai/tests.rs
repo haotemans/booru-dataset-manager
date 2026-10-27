@@ -372,6 +372,58 @@ fn caption_upload_requires_scope_approval_and_sends_compressed_json_to_local_ser
 }
 
 #[test]
+fn identical_second_caption_job_reuses_sqlite_artifact_without_another_http_request() {
+    let mut f = crate::workflow_tests::fixture();
+    let cancel = AtomicBool::new(false);
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
+    let id = f.repo.list_media().unwrap().remove(0).id;
+    let (endpoint, server) = server(vec![(
+        200,
+        response(json!([{"id":id,"caption":"A landscape."}])),
+    )]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    profile.settings.send_images = true;
+    profile.settings.use_cache = true;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([id]),
+    });
+    let mut first = f.repo.new_workflow("optimize", vec![id]).unwrap();
+    first.mode = "caption".into();
+    run(&mut f.repo, &mut first, &profile, &cancel, |_| {}).unwrap();
+    assert_eq!(server.join().unwrap().len(), 1);
+    assert_eq!(first.state, "completed");
+    let mut second = f.repo.new_workflow("optimize", vec![id]).unwrap();
+    second.mode = "caption".into();
+    // The mock HTTP server is gone. Reaching the network would fail this test.
+    run(&mut f.repo, &mut second, &profile, &cancel, |_| {}).unwrap();
+    assert_eq!(second.state, "completed");
+    assert!(second.accepted.contains(&id));
+    let artifact = f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.kind == "caption")
+        .unwrap();
+    assert_eq!(artifact.state, "complete");
+    assert!(artifact.provenance.contains(":cache="));
+}
+
+#[test]
 fn client_configuration_errors_pause_without_failing_items() {
     let mut f = crate::workflow_tests::fixture();
     let cancel = AtomicBool::new(false);
