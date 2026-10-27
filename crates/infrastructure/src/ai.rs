@@ -1,5 +1,6 @@
 use crate::{catalog::SqliteCatalog, danbooru::DanbooruProvider, ingest::storage, workflows::WorkflowJob};
 use bdm_config::AiRequestSettings;
+use bdm_domain::tags::TagRules;
 use bdm_ports::{ApiCredentials, IngestError};
 use reqwest::blocking::Client;
 use rusqlite::{params, OptionalExtension};
@@ -323,6 +324,56 @@ fn request(
     )
 }
 
+/// Resolve new model-suggested terms using Danbooru's authoritative category.
+fn update_candidate_categories(
+    repo: &mut SqliteCatalog,
+    rules: &mut TagRules,
+    already_checked: &mut BTreeSet<String>,
+    candidates: &[String],
+) -> Result<(), IngestError> {
+    let mut pending = Vec::new();
+    for candidate in candidates.iter().take(128) {
+        let normalized = candidate.trim().to_lowercase().replace(' ', "_");
+        if normalized.is_empty()
+            || normalized.len() > 256
+            || !normalized.bytes().all(|byte| byte.is_ascii_alphanumeric()
+                || matches!(byte, b'_' | b'(' | b')' | b'-'))
+        {
+            continue;
+        }
+        let canonical = rules.canonical(&normalized);
+        if !rules.categories.contains_key(&canonical)
+            && !rules.protected.contains(&canonical)
+            && already_checked.insert(canonical.clone())
+        {
+            pending.push(canonical);
+        }
+    }
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let Ok(provider) = DanbooruProvider::new(None) else {
+        return Ok(());
+    };
+    let mut changed = false;
+    for chunk in pending.chunks(32) {
+        let Ok(categories) = provider.lookup_many(chunk) else {
+            break;
+        };
+        for (name, category) in categories {
+            if matches!(category, 0 | 1 | 3 | 4 | 5)
+                && rules.categories.insert(name, category) != Some(category)
+            {
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        repo.save_tag_rules(rules)?;
+    }
+    Ok(())
+}
+
 pub fn run(
     repo: &mut SqliteCatalog,
     job: &mut WorkflowJob,
@@ -406,6 +457,7 @@ pub fn run(
         .map(|m| (m.id, m))
         .collect::<BTreeMap<_, _>>();
     let mut rules = repo.tag_rules()?;
+    let mut already_checked = BTreeSet::new();
     let artifacts = repo.list_artifacts()?;
     for artifact in artifacts.iter().filter(|a| {
         a.kind == job.mode
@@ -678,6 +730,12 @@ pub fn run(
                         {
                             continue;
                         }
+                        update_candidate_categories(
+                            repo,
+                            &mut rules,
+                            &mut already_checked,
+                            tags,
+                        )?;
                         let tags = identity::verified_visual_tags(tags, &rules);
                         if tags.is_empty() {
                             // Do not replace the last usable artifact with only rejected identity tags.
