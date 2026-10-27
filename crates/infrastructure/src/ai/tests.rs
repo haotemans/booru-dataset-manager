@@ -22,16 +22,6 @@ fn profile() -> AiProfile {
     }
 }
 
-fn approve(profile: &mut AiProfile, ids: &[i64]) {
-    profile.upload_approval = Some(UploadApproval {
-        profile_id: profile.id.clone(),
-        endpoint: profile.endpoint.clone(),
-        model: profile.model.clone(),
-        settings: profile.settings.clone(),
-        ids: ids.iter().copied().collect(),
-    });
-}
-
 fn server(responses: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();

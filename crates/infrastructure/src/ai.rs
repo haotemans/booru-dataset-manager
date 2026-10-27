@@ -895,7 +895,7 @@ pub fn run(
                             }
                             if identity::caption_mentions_identity(
                                 caption,
-                                &normalized,
+                                normalized,
                                 &rules,
                                 &media.post.tag_string_copyright,
                             ) {
