@@ -68,6 +68,34 @@ impl DanbooruProvider {
         read_bounded(response)
     }
 
+    /// Resolve a bounded set of exact Danbooru tags in one request.
+    /// This lets AI-only general tags be verified without N separate network calls.
+    pub fn lookup_many(
+        &self,
+        names: &[String],
+    ) -> Result<std::collections::BTreeMap<String, u8>, CatalogError> {
+        if names.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        if names.len() > 32
+            || names.iter().any(|name| {
+                name.is_empty()
+                    || name.len() > 256
+                    || name.contains(',')
+                    || name.chars().any(char::is_whitespace)
+            })
+        {
+            return Err(CatalogError::InvalidTag);
+        }
+        let query = names.join(",");
+        let bytes = Self::send(self.request("tags.json").query(&[
+            ("search[name]", query.as_str()),
+            ("limit", "64"),
+            ("only", "id,name,category,post_count"),
+        ]))?;
+        decode_tag_categories(&bytes, names)
+    }
+
     pub fn verify_credentials(&self) -> Result<(), CatalogError> {
         let credentials = self.credentials.as_ref().ok_or(CatalogError::Credentials)?;
         let bytes = Self::send(self.request("profile.json").query(&[("only", "id,name")]))?;
@@ -338,6 +366,29 @@ fn decode(reader: impl Read, name: &str) -> Result<Option<SourceTag>, CatalogErr
         .transpose()
 }
 
+/// Exact membership is mandatory: wildcard/alias matches may not invent a category.
+fn decode_tag_categories(
+    bytes: &[u8],
+    requested: &[String],
+) -> Result<std::collections::BTreeMap<String, u8>, CatalogError> {
+    let rows: Vec<TagPayload> =
+        serde_json::from_slice(bytes).map_err(|_| CatalogError::InvalidResponse)?;
+    let allowed = requested.iter().collect::<std::collections::BTreeSet<_>>();
+    if rows.len() > 64 {
+        return Err(CatalogError::InvalidResponse);
+    }
+    let mut resolved = std::collections::BTreeMap::new();
+    for row in rows {
+        if row.id <= 0 || row.post_count < 0 || !matches!(row.category, 0 | 1 | 3 | 4 | 5) {
+            return Err(CatalogError::InvalidResponse);
+        }
+        if allowed.contains(&row.name) && resolved.insert(row.name, row.category).is_some() {
+            return Err(CatalogError::InvalidResponse);
+        }
+    }
+    Ok(resolved)
+}
+
 impl TagProvider for DanbooruProvider {
     fn lookup(&self, name: &str) -> Result<Option<SourceTag>, CatalogError> {
         let request = self.request("tags.json").query(&[
@@ -352,6 +403,20 @@ impl TagProvider for DanbooruProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_tag_bulk_categories_filter_unrequested_and_preserve_identity_categories() {
+        let requested = vec!["blue_hair".into(), "known_artist".into()];
+        let records = br#"[
+            {"id":11,"name":"blue_hair","category":0,"post_count":350},
+            {"id":12,"name":"known_artist","category":1,"post_count":5},
+            {"id":13,"name":"unrequested","category":4,"post_count":5}
+        ]"#;
+        let found = decode_tag_categories(records, &requested).unwrap();
+        assert_eq!(found.get("blue_hair"), Some(&0));
+        assert_eq!(found.get("known_artist"), Some(&1));
+        assert_eq!(found.len(), 2);
+    }
 
     #[test]
     fn automatic_relation_input_requires_active_exact_well_formed_implications() {
