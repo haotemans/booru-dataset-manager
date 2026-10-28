@@ -15,6 +15,47 @@ pub(crate) struct Fixture {
     pub post: SourcePost,
     pub collection: i64,
 }
+
+#[test]
+fn task_cleanup_persists_and_preserves_retry_data_without_dismissing_workers() {
+    let mut f = fixture();
+    let mut job = f.repo.new_workflow("optimize", vec![7, 8]).unwrap();
+    assert!(f.repo.dismiss_task(false, job.id).is_err());
+    job.state = "paused".into();
+    job.accepted.insert(7);
+    job.deferred.push(8);
+    job.error = Some("synthetic failure".into());
+    f.repo.save_workflow(&job).unwrap();
+    f.repo.dismiss_task(false, job.id).unwrap();
+    let download = f
+        .repo
+        .new_job(
+            f.collection,
+            "character".into(),
+            f.directory.path().join("library"),
+            800,
+        )
+        .unwrap();
+    assert!(f.repo.dismiss_task(true, download.id).is_err());
+    let mut stopped = serde_json::to_value(&download).unwrap();
+    stopped["state"] = serde_json::json!("failed");
+    f.repo
+        .connection
+        .execute(
+            "UPDATE ingest_jobs SET metadata=?1 WHERE id=?2",
+            rusqlite::params![stopped.to_string(), download.id],
+        )
+        .unwrap();
+    f.repo.dismiss_task(true, download.id).unwrap();
+    let reopened = SqliteCatalog::open(&f.directory.path().join("catalog.sqlite3")).unwrap();
+    let saved = reopened.list_workflows().unwrap().remove(0);
+    assert!(saved.dismissed);
+    assert_eq!(saved.accepted, job.accepted);
+    assert_eq!(saved.deferred, job.deferred);
+    assert_eq!(saved.error, job.error);
+    assert!(reopened.list_jobs().unwrap()[0].dismissed);
+    assert_eq!(reopened.list_jobs().unwrap()[0].tag, download.tag);
+}
 pub(crate) struct Provider {
     pub bytes: Vec<u8>,
     pub calls: Cell<u32>,

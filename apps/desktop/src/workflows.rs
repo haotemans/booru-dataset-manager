@@ -1240,6 +1240,68 @@ impl BdmApp {
         }
     }
 
+    pub(crate) fn dismiss_dashboard_task(&mut self, download: bool, id: i64) {
+        self.dismiss_dashboard_tasks(&[(download, id)]);
+    }
+
+    fn dismiss_dashboard_tasks(&mut self, tasks: &[(bool, i64)]) {
+        // A worker may still hold the previous record until its receiver disconnects.
+        if self.ingest_active() || self.workflow_active() {
+            return;
+        }
+        let result = (|| {
+            let mut repo = self.workflow_repo()?;
+            for &(download, id) in tasks {
+                repo.dismiss_task(download, id).map_err(|e| e.to_string())?;
+            }
+            self.ingest.jobs = repo.list_jobs().map_err(|e| e.to_string())?;
+            self.workflows.jobs = repo.list_workflows().map_err(|e| e.to_string())?;
+            Ok::<_, String>(())
+        })();
+        if let Err(error) = result {
+            self.workflows.error = Some(error);
+        }
+    }
+
+    pub(crate) fn task_cleanup_controls(&mut self, ui: &mut egui::Ui) {
+        if self.demo || self.is_capture() || self.ingest_active() || self.workflow_active() {
+            return;
+        }
+        let tasks: Vec<_> = self
+            .ingest
+            .jobs
+            .iter()
+            .filter(|job| !job.dismissed && !matches!(job.state.as_str(), "running" | "queued"))
+            .map(|job| (true, job.id))
+            .chain(
+                self.workflows
+                    .jobs
+                    .iter()
+                    .filter(|job| {
+                        !job.dismissed && !matches!(job.state.as_str(), "running" | "queued")
+                    })
+                    .map(|job| (false, job.id)),
+            )
+            .collect();
+        if !tasks.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("完成任务自动移出进度区；已停止任务可清理。")
+                        .size(12.0)
+                        .color(MUTED),
+                );
+                if ui
+                    .small_button("清理已停止任务")
+                    .on_hover_text("清理已完成、失败、暂停及待重试的任务记录；保留图片和已生成结果")
+                    .clicked()
+                {
+                    self.dismiss_dashboard_tasks(&tasks);
+                }
+            });
+            ui.add_space(8.0);
+        }
+    }
+
     pub fn workflow_status(&mut self, ui: &mut egui::Ui) {
         if let Some(error) = &self.workflows.error {
             ui.add(egui::Label::new(RichText::new(error).color(AMBER)).wrap());
@@ -1300,6 +1362,7 @@ impl BdmApp {
                 } else {
                     None
                 };
+                let mut clear = false;
                 let clicked = task_row(
                     ui,
                     TaskRow {
@@ -1339,8 +1402,17 @@ impl BdmApp {
                                 task_metric(ui, "待重试", job.deferred.len(), AMBER);
                             }
                         }
+                        if !active && !self.demo && !self.is_capture() {
+                            clear = ui
+                                .small_button("清除")
+                                .on_hover_text("移出任务列表，保留已生成结果")
+                                .clicked();
+                        }
                     },
                 );
+                if clear {
+                    self.dismiss_dashboard_task(false, job.id);
+                }
                 if clicked {
                     if active {
                         self.pause_processing();
@@ -1428,6 +1500,9 @@ impl BdmApp {
                     .extend(job.ids.iter().copied());
                 continue;
             }
+            if job.dismissed {
+                continue;
+            }
             let remaining = if job.state == "needs_model" {
                 &job.ids[..]
             } else if job.state == "deferred" {
@@ -1458,13 +1533,20 @@ impl BdmApp {
     }
 
     pub fn workflow_history(&mut self, ui: &mut egui::Ui) {
-        if self.workflows.jobs.is_empty() {
+        let jobs: Vec<_> = self
+            .workflows
+            .jobs
+            .iter()
+            .filter(|job| !job.dismissed)
+            .cloned()
+            .collect();
+        if jobs.is_empty() {
             return;
         }
-        egui::CollapsingHeader::new(format!("历史任务 · {}", self.workflows.jobs.len()))
+        egui::CollapsingHeader::new(format!("历史任务 · {}", jobs.len()))
             .id_salt("workflow-history-logs")
             .show(ui, |ui| {
-                let mut jobs = self.workflows.jobs.clone();
+                let mut jobs = jobs.clone();
                 jobs.sort_by_key(|job| std::cmp::Reverse(job.id));
                 egui::ScrollArea::vertical()
                     .max_height(230.0)

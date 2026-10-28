@@ -13,6 +13,7 @@ use std::{collections::BTreeSet, fs, io::Write, path::Path};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkflowJob {
+    pub dismissed: bool,
     pub id: i64,
     pub kind: String,
     pub ids: Vec<i64>,
@@ -95,6 +96,38 @@ pub fn phash(path: &Path) -> Result<u64, IngestError> {
 }
 
 impl SqliteCatalog {
+    /// Archive progress records only; preserve outputs, retry metadata and audit history.
+    pub fn dismiss_task(&mut self, download: bool, id: i64) -> Result<(), IngestError> {
+        let table = if download {
+            "ingest_jobs"
+        } else {
+            "workflow_jobs"
+        };
+        let tx = storage(
+            self.connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
+        )?;
+        let metadata: String = storage(tx.query_row(
+            &format!("SELECT metadata FROM {table} WHERE id=?1"),
+            [id],
+            |row| row.get(0),
+        ))?;
+        let mut metadata: serde_json::Value = storage(serde_json::from_str(&metadata))?;
+        if matches!(metadata["state"].as_str(), Some("running" | "queued")) {
+            return Err(IngestError::InvalidMedia);
+        }
+        metadata["dismissed"] = serde_json::Value::Bool(true);
+        storage(tx.execute(
+            &format!("UPDATE {table} SET metadata=?2 WHERE id=?1"),
+            params![id, storage(serde_json::to_string(&metadata))?],
+        ))?;
+        storage(tx.execute(
+            "INSERT INTO audit_log(action,metadata) VALUES('dismiss_task',?1)",
+            [serde_json::json!({"download":download,"id":id}).to_string()],
+        ))?;
+        storage(tx.commit())
+    }
+
     pub fn tag_rules(&self) -> Result<TagRules, IngestError> {
         let json: String = storage(self.connection.query_row(
             "SELECT metadata FROM tag_rules WHERE id=1",

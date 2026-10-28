@@ -8,6 +8,7 @@ use eframe::egui::{self, vec2, Color32, RichText, Sense};
 
 impl BdmApp {
     pub fn dashboard(&mut self, ui: &mut egui::Ui) {
+        self.task_cleanup_controls(ui);
         self.ingestion_status(ui);
         self.workflow_status(ui);
         let pending = self.library.media.iter().filter(|m| !m.keep).count();
@@ -565,6 +566,7 @@ mod tests {
         crate::theme::setup(&ctx);
         let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
         app.ingest.jobs = vec![bdm_domain::ingest::IngestJob {
+            dismissed: false,
             id: 11,
             collection_id: 1,
             tag: "dashboard_download_fixture".into(),

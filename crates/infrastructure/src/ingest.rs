@@ -264,6 +264,7 @@ impl SqliteCatalog {
             [collection_id],
         ))?;
         let job = IngestJob {
+            dismissed: false,
             id: tx.last_insert_rowid(),
             collection_id,
             tag,

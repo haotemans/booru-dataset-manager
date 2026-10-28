@@ -114,6 +114,8 @@ pub struct IngestProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestJob {
+    #[serde(default)]
+    pub dismissed: bool,
     pub id: i64,
     pub collection_id: i64,
     pub tag: String,

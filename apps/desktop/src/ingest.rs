@@ -789,22 +789,21 @@ impl BdmApp {
         if let Some(error) = &self.ingest.error {
             ui.add(egui::Label::new(RichText::new(error).size(12.0).color(DANGER)).wrap());
         }
-        if self.ingest.jobs.is_empty() {
+        let jobs: Vec<_> = self
+            .ingest
+            .jobs
+            .iter()
+            .filter(|job| !job.dismissed && job.state != "completed")
+            .cloned()
+            .collect();
+        if jobs.is_empty() {
             return;
         }
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             section(ui, "图片下载", "");
             ui.add_space(10.0);
-            for (index, job) in self
-                .ingest
-                .jobs
-                .clone()
-                .into_iter()
-                .rev()
-                .take(6)
-                .enumerate()
-            {
+            for (index, job) in jobs.into_iter().rev().take(6).enumerate() {
                 if index > 0 {
                     ui.separator();
                     ui.add_space(6.0);
@@ -818,6 +817,7 @@ impl BdmApp {
                 } else {
                     None
                 };
+                let mut clear = false;
                 let clicked = task_row(
                     ui,
                     TaskRow {
@@ -848,8 +848,17 @@ impl BdmApp {
                         ] {
                             task_metric(ui, label, value, color);
                         }
+                        if !active && !self.demo && !self.is_capture() {
+                            clear = ui
+                                .small_button("清除")
+                                .on_hover_text("移出任务列表，保留已下载图片")
+                                .clicked();
+                        }
                     },
                 );
+                if clear {
+                    self.dismiss_dashboard_task(true, job.id);
+                }
                 if clicked {
                     if active {
                         if let Some(cancel) = &self.ingest.cancel {

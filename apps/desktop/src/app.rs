@@ -386,6 +386,7 @@ impl BdmApp {
                 .into_iter()
                 .enumerate()
                 .map(|(index, tag)| bdm_domain::ingest::IngestJob {
+                    dismissed: false,
                     id: index as i64 + 1,
                     tag: tag.into(),
                     state: "completed".into(),
