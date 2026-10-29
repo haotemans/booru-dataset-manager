@@ -194,14 +194,8 @@ impl ApiProfile {
         }
         let endpoint =
             url::Url::parse(self.endpoint.trim()).map_err(|_| "请填写有效的服务地址。")?;
-        let local = matches!(
-            endpoint.host_str(),
-            Some("localhost" | "127.0.0.1" | "[::1]")
-        );
-        if endpoint.host_str().is_none()
-            || (endpoint.scheme() != "https" && !(endpoint.scheme() == "http" && local))
-        {
-            return Err("请使用 HTTPS 地址，或本机 HTTP 服务地址。");
+        if endpoint.host_str().is_none() || !matches!(endpoint.scheme(), "http" | "https") {
+            return Err("请使用有效的 HTTP 或 HTTPS 服务地址。");
         }
         if !endpoint.username().is_empty()
             || endpoint.password().is_some()
@@ -390,7 +384,7 @@ mod tests {
         assert!(scope.iter().all(|m| m.artist == Some(0)));
     }
     #[test]
-    fn rejects_credentials_and_remote_plaintext_endpoints() {
+    fn accepts_http_and_https_but_rejects_credentials_and_invalid_endpoints() {
         let mut profile = ApiProfile {
             name: "local".into(),
             endpoint: "http://localhost:8000/v1".into(),
@@ -401,7 +395,15 @@ mod tests {
         };
         assert!(profile.validate().is_ok());
         for endpoint in [
-            "http://example.com",
+            "http://example.com/v1",
+            "http://192.168.1.10:8080/v1",
+            "https://example.com/v1",
+        ] {
+            profile.endpoint = endpoint.into();
+            assert!(profile.validate().is_ok());
+        }
+        for endpoint in [
+            "ftp://example.com",
             "https://user:secret@example.com",
             "https://example.com?key=secret",
             "https://",

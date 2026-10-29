@@ -226,21 +226,9 @@ fn wait_until(deadline: u64, cancel: &AtomicBool) -> Result<(), AiError> {
     Ok(())
 }
 
-fn request(
-    client: &Client,
-    profile: &AiProfile,
-    items: &[Value],
-    images: &[images::PreparedImage],
-    mode: &str,
-    cancel: &AtomicBool,
-) -> Result<BatchResponse, AiError> {
-    if cancel.load(Ordering::Relaxed) {
-        return Err(AiError::Cancelled);
-    }
-    let mut url =
-        reqwest::Url::parse(profile.endpoint.trim()).map_err(|_| AiError::Configuration)?;
-    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if (url.scheme() != "https" && !(url.scheme() == "http" && local))
+fn request_url(endpoint: &str) -> Result<reqwest::Url, AiError> {
+    let mut url = reqwest::Url::parse(endpoint.trim()).map_err(|_| AiError::Configuration)?;
+    if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
@@ -253,6 +241,21 @@ fn request(
     if !path.ends_with("/chat/completions") {
         url.set_path(&format!("{path}/chat/completions"));
     }
+    Ok(url)
+}
+
+fn request(
+    client: &Client,
+    profile: &AiProfile,
+    items: &[Value],
+    images: &[images::PreparedImage],
+    mode: &str,
+    cancel: &AtomicBool,
+) -> Result<BatchResponse, AiError> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(AiError::Cancelled);
+    }
+    let url = request_url(&profile.endpoint)?;
     let body = protocol::body(profile, items, images, mode)?;
     let bytes = serde_json::to_vec(&body).map_err(|_| AiError::Content)?;
     if bytes.len() > protocol::MAX_REQUEST_BYTES {

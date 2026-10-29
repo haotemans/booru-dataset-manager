@@ -86,6 +86,35 @@ fn response(rows: Value) -> Value {
 }
 
 #[test]
+fn http_endpoints_support_remote_hosts_and_preserve_url_validation() {
+    for endpoint in [
+        "http://example.com/v1",
+        "http://192.168.1.10:8080/v1",
+        "https://example.com/v1",
+    ] {
+        assert_eq!(
+            request_url(endpoint).unwrap().as_str(),
+            format!("{endpoint}/chat/completions")
+        );
+    }
+    assert_eq!(
+        request_url("http://example.com/v1/chat/completions/")
+            .unwrap()
+            .as_str(),
+        "http://example.com/v1/chat/completions/"
+    );
+    for endpoint in [
+        "ftp://example.com/v1",
+        "http://user:secret@example.com/v1",
+        "http://example.com/v1?key=secret",
+        "http://example.com/v1#fragment",
+        "http://",
+    ] {
+        assert!(matches!(request_url(endpoint), Err(AiError::Configuration)));
+    }
+}
+
+#[test]
 fn response_accepts_matching_operation_echo_without_relaxing_schema() {
     let expected = [1025, 1027].into_iter().collect();
     let mut envelope = json!({"operation":"caption","schema":"bdm-text-v1","items":[
