@@ -126,6 +126,34 @@ fn gateway_response_formats_preserve_ids_and_explain_incomplete_success() {
 }
 
 #[test]
+fn gateway_diagnostics_identify_invalid_fields_without_echoing_remote_text() {
+    let input = [json!({"id":7})];
+    for (value, expected) in [
+        (json!({"items":[]}), "schema"),
+        (
+            json!({"schema":"bdm-text-v1","items":[{"id":"7","caption":"private"}]}),
+            "不是整数",
+        ),
+        (
+            json!({"schema":"bdm-text-v1","items":[{"id":8,"caption":"private"}]}),
+            "不在本批",
+        ),
+        (
+            json!({"schema":"bdm-text-v1","items":[{"id":7,"description":"private"}]}),
+            "额外字段",
+        ),
+        (
+            json!({"schema":"bdm-text-v1","items":[{"id":7,"caption":42}]}),
+            "不是字符串",
+        ),
+    ] {
+        let message = invalid_result_reason(&value.to_string(), &input, "caption");
+        assert!(message.contains(expected));
+        assert!(!message.contains("private"));
+    }
+}
+
+#[test]
 fn http_endpoints_support_remote_hosts_and_preserve_url_validation() {
     for endpoint in [
         "http://example.com/v1",

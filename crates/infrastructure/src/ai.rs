@@ -100,6 +100,7 @@ fn now() -> u64 {
 }
 
 fn format_protected_tag(kind: &str, name: &str, format: &str) -> String {
+    let name = name.replace('_', " ");
     match format {
         "typed" => format!("{kind}:{name}"),
         "at" => format!("@{name}"),
@@ -178,7 +179,7 @@ mod formatting_tests {
             ..Default::default()
         };
         let body = "A solo girl sits against a white background.";
-        let expected = format!("@tupikeee, phoenix_reffaella, {body}");
+        let expected = format!("@tupikeee, phoenix reffaella, {body}");
         assert_eq!(format_caption(body, &names, "at", "plain"), expected);
         let legacy = format!("{body} Characters: phoenix_reffaella. Artist: @artist tupikeee.");
         assert_eq!(
@@ -195,7 +196,7 @@ mod formatting_tests {
         .is_none());
         names.artists.push("another_artist".into());
         names.characters.push("another_character".into());
-        assert_eq!(format_caption(body, &names, "plain", "typed"), format!("tupikeee, another_artist, character:phoenix_reffaella, character:another_character, {body}"));
+        assert_eq!(format_caption(body, &names, "plain", "typed"), format!("tupikeee, another artist, character:phoenix reffaella, character:another character, {body}"));
         assert_eq!(
             format_caption(body, &Default::default(), "at", "plain"),
             body
@@ -373,13 +374,75 @@ fn decode_response(
         content,
         &items.iter().filter_map(|v| v["id"].as_i64()).collect(),
         mode,
-    ).map_err(|_| AiError::Response("结果 JSON 不符合约定：需要 schema=bdm-text-v1、items 数组及匹配的 operation；不接受未知字段"))?;
+    )
+    .map_err(|_| AiError::Response(invalid_result_reason(content, items, mode)))?;
     if parsed.items.is_empty() {
-        return Err(AiError::Response(
-            "未找到有效图片结果：检查返回 ID、重复 ID、caption/tags 字段和文本长度",
-        ));
+        return Err(AiError::Response(invalid_result_reason(
+            content, items, mode,
+        )));
     }
     Ok(parsed)
+}
+
+// Diagnose structure without storing returned captions, identities or arbitrary remote text.
+fn invalid_result_reason(content: &str, input: &[Value], mode: &str) -> &'static str {
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return "结果不是有效 JSON（可能被截断或带有额外说明）";
+    };
+    let Some(object) = value.as_object() else {
+        return "JSON 顶层必须是对象，不能是数组或字符串";
+    };
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "schema" | "operation" | "items"))
+    {
+        return "JSON 顶层包含额外字段，只允许 schema、items 和可选 operation";
+    }
+    if value["schema"] != protocol::SCHEMA {
+        return "JSON 的 schema 缺失或不是 bdm-text-v1";
+    }
+    if value
+        .get("operation")
+        .is_some_and(|v| !v.is_null() && v.as_str() != Some(mode))
+    {
+        return "JSON 的 operation 与当前优化目标不一致";
+    }
+    let Some(rows) = value["items"].as_array() else {
+        return "JSON 的 items 缺失或不是数组";
+    };
+    if rows.is_empty() {
+        return "JSON 的 items 是空数组，未提供任何图片结果";
+    }
+    if rows.len() > 512 {
+        return "JSON 的 items 超过允许的数量";
+    }
+    let expected: BTreeSet<_> = input.iter().filter_map(|v| v["id"].as_i64()).collect();
+    let mut seen = BTreeSet::new();
+    for row in rows {
+        let Some(id) = row["id"].as_i64() else {
+            return "图片结果 id 缺失或不是整数（例如使用了字符串 ID）";
+        };
+        if !expected.contains(&id) {
+            return "图片结果 ID 不在本批请求中，不能按返回顺序猜测对应图片";
+        }
+        if !seen.insert(id) {
+            return "同一批响应重复返回了图片 ID";
+        }
+        let field = if mode == "tags" { "tags" } else { "caption" };
+        if row
+            .as_object()
+            .is_some_and(|o| o.keys().any(|k| k != "id" && k != field))
+        {
+            return "图片结果包含额外字段，只允许 id 和当前目标 caption/tags";
+        }
+        if mode == "caption" && row["caption"].as_str().is_none() {
+            return "图片结果 caption 缺失或不是字符串（不接受 text/description 替代字段）";
+        }
+        if mode == "tags" && row["tags"].as_array().is_none() {
+            return "图片结果 tags 缺失或不是数组";
+        }
+    }
+    "图片文本为空、过长或包含不支持的内容，请检查 caption/tags"
 }
 
 struct AiBatch {
@@ -598,6 +661,7 @@ pub fn run(
                                     "rules_digest":rules_digest,
                                     "artist_format":profile.artist_tag_format,
                                     "character_format":profile.character_tag_format,
+                                    "identity_spacing":"spaces-v1",
                                     "image_max_edge":profile.settings.image_max_edge,
                                     "jpeg_quality":profile.settings.jpeg_quality
                                 }))
