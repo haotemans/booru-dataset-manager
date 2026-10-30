@@ -139,6 +139,55 @@ mod tests {
     }
 
     #[test]
+    fn optimization_skips_existing_output_by_default_and_overwrite_is_explicit() {
+        let mut f = PipelineFixture::new();
+        let ctx = egui::Context::default();
+        f.app.prefs.profiles.push(crate::model::ApiProfile {
+            id: "test-profile".into(),
+            name: "test".into(),
+            endpoint: "http://127.0.0.1:1/v1".into(),
+            model: "test".into(),
+            concurrency: 2,
+            ..Default::default()
+        });
+        let media = f.app.ingest.stored.values().next().unwrap().clone();
+        f.app
+            .workflow_repo()
+            .unwrap()
+            .write_ai_artifact(&media, "caption", "A landscape.", "test-ai")
+            .unwrap();
+        f.app.action_mode = 0;
+        let error = f
+            .app
+            .start_workflow(&ctx, "optimize", vec![media.id], None)
+            .unwrap_err();
+        assert!(error.contains("均已有"));
+        assert!(!f.app.workflow_active());
+        assert!(f
+            .app
+            .workflow_repo()
+            .unwrap()
+            .list_workflows()
+            .unwrap()
+            .is_empty());
+        f.app.action_mode = 1;
+        f.app
+            .start_workflow(&ctx, "optimize", vec![media.id], None)
+            .unwrap();
+        assert!(
+            matches!(&f.app.dialog, Some(crate::app::Dialog::ImageUpload(scope)) if scope.mode == "tags" && scope.ids.contains(&media.id))
+        );
+        f.app.action_mode = 0;
+        f.app.workflows.overwrite_optimized = true;
+        f.app
+            .start_workflow(&ctx, "optimize", vec![media.id], None)
+            .unwrap();
+        assert!(
+            matches!(&f.app.dialog, Some(crate::app::Dialog::ImageUpload(scope)) if scope.mode == "caption" && scope.ids.contains(&media.id))
+        );
+    }
+
+    #[test]
     fn imported_local_tags_are_not_review_optimization_results_and_reading_starts_no_jobs() {
         let mut f = PipelineFixture::new();
         f.app.reload_workflow_data().unwrap();
@@ -699,6 +748,7 @@ mod tests {
 }
 #[derive(Default)]
 pub struct WorkflowSettings {
+    pub overwrite_optimized: bool,
     pub jobs: Vec<WorkflowJob>,
     pub artifacts: BTreeMap<(usize, String), TextArtifact>,
     pub rules: TagRules,
@@ -914,6 +964,19 @@ impl BdmApp {
                     "tags"
                 }
                 .into();
+                if !self.workflows.overwrite_optimized {
+                    let generated: BTreeSet<_> = repo
+                        .list_artifacts()
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .filter(|a| a.kind == job.mode && a.is_generated_output())
+                        .map(|a| a.media_id)
+                        .collect();
+                    job.ids.retain(|id| !generated.contains(id));
+                    if job.ids.is_empty() {
+                        return Err("所选图片均已有此类优化结果，无需调用 API；如需重做，请勾选“覆盖已有优化结果”。".into());
+                    }
+                }
             }
             if profile.request.send_images && approval.is_none() {
                 let ids = job

@@ -559,6 +559,11 @@ impl BdmApp {
                 ui.selectable_value(&mut self.action_mode, 1, "优化标签");
             });
             if kind == "优化" {
+                ui.checkbox(
+                    &mut self.workflows.overwrite_optimized,
+                    "覆盖已有优化结果（默认仅补全缺失结果）",
+                );
+                ui.label(RichText::new("自然语言与优化标签分别判断；已有成功结果默认跳过，即使更换模型或提示词。失败项可继续重试。").size(12.0).color(MUTED));
                 let selected = self
                     .prefs
                     .profiles

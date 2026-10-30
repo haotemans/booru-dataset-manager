@@ -47,6 +47,7 @@ pub struct AiProfile {
 enum AiError {
     Transport,
     Content,
+    Response(&'static str),
     ContentFiltered,
     Configuration,
     Image,
@@ -62,6 +63,7 @@ impl AiError {
                     .into()
             }
             Self::Content => "API 返回内容为空、格式无效或不符合任务要求，未生成有效结果。".into(),
+            Self::Response(reason) => format!("API 响应未通过校验：{reason}；已成功的结果保留。"),
             Self::Transport => "API 网络连接、请求超时或服务端错误，未生成有效结果。".into(),
             Self::Configuration => "API 认证、权限、模型或服务地址无效；修正配置后继续。".into(),
             Self::Image => "图片读取或压缩失败；未发送该图片。".into(),
@@ -304,7 +306,16 @@ fn request(
     if bytes.len() > protocol::MAX_RESPONSE_BYTES {
         return Err(AiError::Content);
     }
-    let response: Value = serde_json::from_slice(&bytes).map_err(|_| AiError::Content)?;
+    let response: Value =
+        serde_json::from_slice(&bytes).map_err(|_| AiError::Response("HTTP 响应不是有效 JSON"))?;
+    decode_response(&response, items, mode)
+}
+
+fn decode_response(
+    response: &Value,
+    items: &[Value],
+    mode: &str,
+) -> Result<BatchResponse, AiError> {
     if response
         .pointer("/choices/0/finish_reason")
         .and_then(Value::as_str)
@@ -315,21 +326,60 @@ fn request(
     {
         return Err(AiError::ContentFiltered);
     }
+    if response
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        == Some("length")
+    {
+        return Err(AiError::Response(
+            "模型输出被截断（finish_reason=length），请减少每批图片数量或提高服务端输出上限",
+        ));
+    }
     let content_value = response
         .pointer("/choices/0/message/content")
-        .ok_or(AiError::Content)?;
+        .ok_or(AiError::Response("缺少 choices[0].message.content"))?;
     let content = if let Some(content) = content_value.as_str() {
         content.to_owned()
+    } else if let Some(parts) = content_value.as_array() {
+        let mut text = String::new();
+        for part in parts {
+            if part["type"] == "text" {
+                text.push_str(
+                    part["text"]
+                        .as_str()
+                        .ok_or(AiError::Response("文本内容块缺少 text 字符串"))?,
+                );
+            } else {
+                return Err(AiError::Response("响应包含不支持的非文本内容块"));
+            }
+        }
+        text
     } else if content_value.is_object() {
         serde_json::to_string(content_value).map_err(|_| AiError::Content)?
     } else {
-        return Err(AiError::Content);
+        return Err(AiError::Response("message.content 为空或类型不受支持"));
     };
-    protocol::parse(
-        &content,
+    let content = content.trim();
+    if content.is_empty() {
+        return Err(AiError::Response("服务端返回空文本，HTTP 成功但未提供描述"));
+    }
+    let content = content
+        .strip_prefix("```json")
+        .or_else(|| content.strip_prefix("```"))
+        .and_then(|text| text.trim().strip_suffix("```"))
+        .map(str::trim)
+        .unwrap_or(content);
+    let parsed = protocol::parse(
+        content,
         &items.iter().filter_map(|v| v["id"].as_i64()).collect(),
         mode,
-    )
+    ).map_err(|_| AiError::Response("结果 JSON 不符合约定：需要 schema=bdm-text-v1、items 数组及匹配的 operation；不接受未知字段"))?;
+    if parsed.items.is_empty() {
+        return Err(AiError::Response(
+            "未找到有效图片结果：检查返回 ID、重复 ID、caption/tags 字段和文本长度",
+        ));
+    }
+    Ok(parsed)
 }
 
 struct AiBatch {
@@ -830,7 +880,10 @@ pub fn run(
                 }
                 let mut accepted = BTreeSet::new();
                 let content_failure = category_lookup_failed
-                    || matches!(response, Err(AiError::Content | AiError::ContentFiltered));
+                    || matches!(
+                        response,
+                        Err(AiError::Content | AiError::ContentFiltered | AiError::Response(_))
+                    );
                 if let Ok(ref value) = response {
                     for (&id, row) in &value.items {
                         let Some(media) = all.get(&id) else {
@@ -936,7 +989,7 @@ pub fn run(
                 if !failed.is_empty() {
                     let message = match &response {
                         Err(error) => error.message(),
-                        Ok(_) => "API 未返回对应图片的有效结果，或结果未通过本地校验。".into(),
+                        Ok(_) => "API 已返回 JSON，但部分图片结果缺失或本地校验未通过（ID 不匹配、重复、文本无效或包含受保护身份）；已通过的结果保留。".into(),
                     };
                     record_failure(job, &failed, &message);
                     repo.audit(

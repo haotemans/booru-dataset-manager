@@ -86,6 +86,46 @@ fn response(rows: Value) -> Value {
 }
 
 #[test]
+fn gateway_response_formats_preserve_ids_and_explain_incomplete_success() {
+    let items = [json!({"id":7})];
+    let payload = json!({"schema":"bdm-text-v1","items":[{"id":7,"caption":"A tree on a hill."}]})
+        .to_string();
+    for content in [
+        json!(payload),
+        json!(format!("```json\n{payload}\n```")),
+        json!([{"type":"text","text":payload}]),
+    ] {
+        let response = json!({"choices":[{"finish_reason":"stop","message":{"content":content}}]});
+        assert!(decode_response(&response, &items, "caption")
+            .unwrap()
+            .items
+            .contains_key(&7));
+    }
+    for (response, reason) in [
+        (
+            json!({"choices":[{"finish_reason":"length","message":{"content":"{"}}]}),
+            "length",
+        ),
+        (json!({"choices":[{"message":{"content":""}}]}), "空文本"),
+        (
+            json!({"choices":[{"message":{"content":"not json"}}]}),
+            "JSON",
+        ),
+        (
+            json!({"choices":[{"message":{"content":{"schema":"bdm-text-v1","items":[{"id":8,"caption":"wrong ID"}]}}}]}),
+            "ID",
+        ),
+    ] {
+        let error = match decode_response(&response, &items, "caption") {
+            Ok(_) => panic!("invalid response accepted"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains(reason));
+        assert!(!error.message().contains("not json"));
+    }
+}
+
+#[test]
 fn http_endpoints_support_remote_hosts_and_preserve_url_validation() {
     for endpoint in [
         "http://example.com/v1",
