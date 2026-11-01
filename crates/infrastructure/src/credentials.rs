@@ -52,6 +52,23 @@ pub struct NativeCredentialStore {
 }
 
 impl NativeCredentialStore {
+    /// Portable copies must not silently reuse a development account on this PC.
+    pub fn danbooru_portable(directory: &std::path::Path) -> Self {
+        #[cfg(windows)]
+        use sha2::{Digest, Sha256};
+        #[cfg(not(windows))]
+        let _ = directory;
+        Self {
+            #[cfg(windows)]
+            service: "Booru Dataset Manager".into(),
+            #[cfg(windows)]
+            account: format!(
+                "danbooru-portable-{:x}",
+                Sha256::digest(directory.to_string_lossy().to_lowercase().as_bytes())
+            ),
+        }
+    }
+
     pub fn danbooru() -> Self {
         Self {
             #[cfg(windows)]

@@ -22,12 +22,18 @@ pub struct DanbooruSettings {
 
 impl DanbooruSettings {
     pub fn new(username: String) -> Self {
+        let root = crate::paths::project_root();
+        let store = if root.join("portable.flag").is_file() {
+            bdm_infrastructure::credentials::NativeCredentialStore::danbooru_portable(&root)
+        } else {
+            bdm_infrastructure::credentials::NativeCredentialStore::danbooru()
+        };
         Self {
             username,
             api_key: String::new(),
             saved_username: None,
             error: None,
-            store: Box::new(bdm_infrastructure::credentials::NativeCredentialStore::danbooru()),
+            store: Box::new(store),
             verification: None,
             generation: 0,
             pending: None,

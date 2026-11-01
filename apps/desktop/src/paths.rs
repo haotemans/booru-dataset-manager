@@ -2,6 +2,10 @@ use std::path::{Path, PathBuf};
 
 pub fn project_root() -> PathBuf {
     let executable = std::env::current_exe().ok();
+    // A portable package must never inherit a nearby development catalog.
+    if let Some(directory) = executable.as_deref().and_then(portable_root) {
+        return directory;
+    }
     executable
         .as_deref()
         .and_then(repository_root)
@@ -12,6 +16,14 @@ pub fn project_root() -> PathBuf {
                 .unwrap_or(Path::new("."))
                 .to_owned()
         })
+}
+
+fn portable_root(executable: &Path) -> Option<PathBuf> {
+    let directory = executable.parent()?;
+    directory
+        .join("portable.flag")
+        .is_file()
+        .then(|| directory.to_owned())
 }
 
 fn repository_root(executable: &Path) -> Option<PathBuf> {
@@ -35,6 +47,22 @@ pub fn library_directory() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn portable_marker_takes_precedence_over_repository_discovery() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(directory.path().join("apps/desktop")).unwrap();
+        std::fs::write(directory.path().join("Cargo.toml"), "").unwrap();
+        let portable = directory.path().join("dist/portable");
+        std::fs::create_dir_all(&portable).unwrap();
+        let executable = portable.join("bdm-desktop.exe");
+        assert!(portable_root(&executable).is_none());
+        assert_eq!(
+            repository_root(&executable),
+            Some(directory.path().to_owned())
+        );
+        std::fs::write(portable.join("portable.flag"), "").unwrap();
+        assert_eq!(portable_root(&executable), Some(portable));
+    }
     #[test]
     fn development_defaults_stay_in_repository() {
         let root = project_root();
