@@ -139,6 +139,25 @@ mod tests {
     }
 
     #[test]
+    fn missing_original_notice_tracks_current_files_without_erasing_other_errors() {
+        let mut f = PipelineFixture::new();
+        let media = f.app.ingest.stored.values().next().unwrap().clone();
+        let temporary = media.path.with_extension("missing-test");
+        std::fs::rename(&media.path, &temporary).unwrap();
+        f.app.ingest.error = Some("unrelated download error".into());
+        f.app.reload_media().unwrap();
+        assert_eq!(f.app.ingest.missing_originals, 1);
+        std::fs::rename(&temporary, &media.path).unwrap();
+        f.app.reload_media().unwrap();
+        assert_eq!(f.app.ingest.missing_originals, 0);
+        assert_eq!(
+            f.app.ingest.error.as_deref(),
+            Some("unrelated download error")
+        );
+        assert_eq!(f.app.library.media.len(), 1);
+    }
+
+    #[test]
     fn optimization_skips_existing_output_by_default_and_overwrite_is_explicit() {
         let mut f = PipelineFixture::new();
         let ctx = egui::Context::default();

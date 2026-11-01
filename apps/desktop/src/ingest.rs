@@ -310,6 +310,7 @@ pub struct IngestSettings {
     pub thumbnails: crate::thumbnails::Thumbnails,
     pub collection_summaries: BTreeMap<usize, (usize, Option<usize>)>,
     pub error: Option<String>,
+    pub missing_originals: usize,
     pub detail_requested: Option<usize>,
     pub detail_texture: Option<(usize, egui::TextureHandle)>,
     pub detail_error: Option<(usize, String)>,
@@ -361,9 +362,7 @@ impl BdmApp {
         let records = bdm_ports::CollectionRepository::list(&repo).map_err(|e| e.to_string())?;
         self.refresh_collection_records(records)
             .map_err(|e| e.to_string())?;
-        if stored.iter().any(|m| !m.path.is_file()) {
-            self.ingest.error = Some("部分原图文件缺失，请检查托管目录；元数据仍已保留。".into());
-        }
+        self.ingest.missing_originals = stored.iter().filter(|m| !m.path.is_file()).count();
         self.ingest.jobs = repo.list_jobs().map_err(|e| e.to_string())?;
         self.library.media = stored
             .iter()
@@ -786,6 +785,22 @@ impl BdmApp {
     }
 
     pub fn ingestion_status(&mut self, ui: &mut egui::Ui) {
+        if self.ingest.missing_originals > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(
+                    DANGER,
+                    format!(
+                        "{} 张原图文件暂时找不到，元数据仍已保留。",
+                        self.ingest.missing_originals
+                    ),
+                );
+                if ui.small_button("重新检查").clicked() {
+                    if let Err(error) = self.reload_media() {
+                        self.ingest.error = Some(error);
+                    }
+                }
+            });
+        }
         if let Some(error) = &self.ingest.error {
             ui.add(egui::Label::new(RichText::new(error).size(12.0).color(DANGER)).wrap());
         }
