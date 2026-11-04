@@ -45,8 +45,14 @@ fn run_pages(
     progress: &mut impl FnMut(&IngestJob),
 ) -> Result<(), IngestError> {
     // Retry persisted failures only; never revisit successful page items.
+    if bdm_domain::catalog::normalize_download_query(&job.tag).as_deref() != Some(&job.tag) {
+        return Err(bdm_ports::CatalogError::InvalidQuery.into());
+    }
     let pending = job.failed_posts.clone();
     for post in pending {
+        if !bdm_domain::catalog::matches_download_query(&job.tag, &post.tag_string) {
+            return Err(bdm_ports::CatalogError::InvalidResponse.into());
+        }
         let outcome = process_post(provider, repo, job, &post, cancel).inspect_err(|error| {
             job.error = Some(format!("处理源图 {} 时失败：{error}", post.id));
         })?;
@@ -70,7 +76,7 @@ fn run_pages(
         for post in &posts {
             if post.id <= 0
                 || post.id >= previous
-                || !post.tag_string.split_whitespace().any(|tag| tag == job.tag)
+                || !bdm_domain::catalog::matches_download_query(&job.tag, &post.tag_string)
             {
                 return Err(bdm_ports::CatalogError::InvalidResponse.into());
             }

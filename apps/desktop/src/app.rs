@@ -270,7 +270,7 @@ impl BdmApp {
                 ui.painter().rect_filled(r.shrink(3.0), 9.0, INK);
                 icon(ui, r.shrink(11.0), "image", Color32::WHITE);
                 ui.add_space(34.0);
-                for page in Page::ALL.into_iter().take(4) {
+                for page in Page::ALL.into_iter().take(5) {
                     if icon_button(ui, page.icon(), page.title(), self.prefs.page == page).clicked()
                     {
                         self.navigate(page);
@@ -279,7 +279,7 @@ impl BdmApp {
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(8.0);
-                    for page in Page::ALL.into_iter().skip(4).rev() {
+                    for page in Page::ALL.into_iter().skip(5).rev() {
                         if icon_button(ui, page.icon(), page.title(), self.prefs.page == page)
                             .clicked()
                         {
@@ -311,11 +311,13 @@ impl BdmApp {
                                             Page::Dashboard
                                                 | Page::Artist
                                                 | Page::Character
+                                                | Page::Downloads
                                                 | Page::Api
                                         )
                                     {
                                         let label = match self.prefs.page {
                                             Page::Character => "添加角色",
+                                            Page::Downloads => "添加下载查询",
                                             Page::Api => "添加 API 配置",
                                             _ => "添加画师",
                                         };
@@ -337,7 +339,7 @@ impl BdmApp {
                         ui.add_space(24.0);
                         match self.prefs.page {
                             Page::Dashboard => self.dashboard(ui),
-                            Page::Artist | Page::Character => {
+                            Page::Artist | Page::Character | Page::Downloads => {
                                 if self.gallery {
                                     self.gallery_page(ui);
                                 } else {

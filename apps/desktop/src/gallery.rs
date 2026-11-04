@@ -12,6 +12,12 @@ impl BdmApp {
     }
 
     pub fn collections_page(&mut self, ui: &mut egui::Ui) {
+        if self.prefs.page == Page::Downloads {
+            ui.add(egui::Label::new(RichText::new(
+                "按标签组合下载 · 例如 official_art zenless_zone_zero，只下载同时符合这两个标签的图片。"
+            ).size(13.0).color(MUTED)).wrap());
+            ui.add_space(12.0);
+        }
         if self.prefs.page == Page::Character {
             self.character_relationships(ui);
         }
@@ -77,7 +83,11 @@ impl BdmApp {
                         "没有匹配的 Tag"
                     },
                     if self.query.is_empty() {
-                        "添加 Danbooru Tag"
+                        if self.prefs.page == Page::Downloads {
+                            "添加下载查询，例如 official_art zenless_zone_zero"
+                        } else {
+                            "添加 Danbooru Tag"
+                        }
                     } else {
                         "试试其他关键词"
                     },
@@ -218,12 +228,14 @@ impl BdmApp {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         ui.label(
-                                            RichText::new(c.api_count.map_or_else(|| "本地发现".into(), |count| format!("API {count}")))
+                                            RichText::new(c.api_count.map_or_else(|| if self.prefs.page == Page::Downloads { "标签组合".into() } else { "本地发现".into() }, |count| format!("API {count}")))
                                                 .color(MUTED)
                                                 .size(13.0),
                                         )
                                         .on_hover_text(
-                                            if c.api_count.is_none() {
+                                            if self.prefs.page == Page::Downloads {
+                                                "保存的标签组合；本地数量包含全部标签都匹配的图片。远程总数未查询。"
+                                            } else if c.api_count.is_none() {
                                                 "来自已下载图片的画师标签；远程总数尚未查询。可直接进入图库或下载。"
                                             } else if self.demo {
                                                 "示例 API 总数，未发起远程请求"

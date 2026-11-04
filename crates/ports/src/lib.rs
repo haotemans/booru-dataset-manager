@@ -120,6 +120,8 @@ pub trait ApiCredentialStore {
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogError {
+    #[error("请输入用空格分隔的完整标签；多个标签须同时满足，暂不支持网址、通配符或搜索操作符。")]
+    InvalidQuery,
     #[error("请输入单个完整 Tag，不要粘贴网址或搜索表达式。")]
     InvalidTag,
     #[error("未找到这个 Tag，请检查拼写。")]
@@ -162,6 +164,12 @@ pub trait TagProvider {
 
 pub trait CollectionRepository {
     fn list(&self) -> Result<Vec<bdm_domain::catalog::CollectionRecord>, CatalogError>;
+    fn add_query(
+        &mut self,
+        _query: &str,
+    ) -> Result<bdm_domain::catalog::AddCollectionResult, CatalogError> {
+        Err(CatalogError::InvalidQuery)
+    }
     // Atomic and idempotent by provider tag identity. Existing records are returned unchanged.
     fn add(
         &mut self,

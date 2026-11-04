@@ -12,13 +12,11 @@ impl BdmApp {
             return;
         };
         let title = match &dialog {
-            Dialog::Add => {
-                if self.prefs.page == Page::Artist {
-                    "添加画师"
-                } else {
-                    "添加角色"
-                }
-            }
+            Dialog::Add => match self.prefs.page {
+                Page::Downloads => "添加下载查询",
+                Page::Artist => "添加画师",
+                _ => "添加角色",
+            },
             Dialog::Action(kind) => kind,
             Dialog::Profile(_) => "API 配置",
             Dialog::ImageUpload(_) => "确认发送图片",
@@ -26,13 +24,11 @@ impl BdmApp {
             Dialog::Similarity => "相似图审核",
             Dialog::Media(_) => "图片审核",
             Dialog::Delete { .. } => "确认删除",
-            Dialog::DeleteCollections(scope) => {
-                if scope.page == Page::Artist {
-                    "删除画师"
-                } else {
-                    "删除角色"
-                }
-            }
+            Dialog::DeleteCollections(scope) => match scope.page {
+                Page::Downloads => "删除下载查询",
+                Page::Artist => "删除画师",
+                _ => "删除角色",
+            },
         };
         egui::Area::new("dialog_backdrop".into())
             .order(egui::Order::Middle)
@@ -150,7 +146,74 @@ impl BdmApp {
         }
     }
 
+    fn download_query_dialog(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.set_min_width(460.0);
+        ui.set_max_width(460.0);
+        ui.label("Danbooru 标签组合");
+        ui.add_space(8.0);
+        ui.add_sized(
+            [460.0, 38.0],
+            egui::TextEdit::singleline(&mut self.input_tag)
+                .hint_text("official_art zenless_zone_zero")
+                .margin(vec2(12.0, 10.0)),
+        );
+        ui.add_space(10.0);
+        ui.add(egui::Label::new(RichText::new(
+            "多个完整标签用空格分隔，下载同时满足所有标签的图片。可组合游戏／作品、官方美术、角色、画师等标签。"
+        ).color(MUTED).size(13.0)).wrap());
+        ui.add_space(6.0);
+        ui.add(egui::Label::new(RichText::new(
+            "保存查询不会请求网络。下载时使用来源站点账号与权限，进度统一显示在总览；已有图片直接复用。暂不支持通配符、排除词和搜索操作符。"
+        ).color(MUTED).size(12.0)).wrap());
+        ui.add_space(14.0);
+        let mut choice = None;
+        ui.horizontal(|ui| {
+            let enabled = !self.demo && !self.is_capture() && self.catalog.repository.is_some();
+            if ui
+                .add_enabled(enabled, egui::Button::new("保存查询"))
+                .clicked()
+            {
+                choice = Some(false);
+            }
+            if ui
+                .add_enabled_ui(enabled && !self.ingest_active(), |ui| {
+                    primary(ui, "保存并下载")
+                })
+                .inner
+                .clicked()
+            {
+                choice = Some(true);
+            }
+        });
+        if let Some(download) = choice {
+            match self.save_download_query() {
+                Ok(_) => {
+                    if download {
+                        if let Err(error) = self.start_ingest(ui.ctx(), None) {
+                            self.notify(ui.ctx(), &format!("查询已保存，下载未启动：{error}"));
+                            return true;
+                        }
+                        self.notify(ui.ctx(), "下载已启动，可在总览查看进度");
+                    } else {
+                        self.notify(ui.ctx(), "查询已保存，选中后点击下载或进入图库");
+                    }
+                    return true;
+                }
+                Err(error) => self.form_error = error,
+            }
+        }
+        if !self.form_error.is_empty() {
+            ui.add(
+                egui::Label::new(RichText::new(&self.form_error).color(AMBER).size(13.0)).wrap(),
+            );
+        }
+        false
+    }
+
     fn add_dialog(&mut self, ui: &mut egui::Ui) -> bool {
+        if self.prefs.page == Page::Downloads {
+            return self.download_query_dialog(ui);
+        }
         ui.set_min_width(460.0);
         ui.set_max_width(460.0);
         ui.label("Danbooru Tag");

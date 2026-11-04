@@ -35,6 +35,7 @@ pub fn collection_kind(page: Page) -> Option<CollectionKind> {
     match page {
         Page::Artist => Some(CollectionKind::Artist),
         Page::Character => Some(CollectionKind::Character),
+        Page::Downloads => Some(CollectionKind::Query),
         _ => None,
     }
 }
@@ -42,6 +43,12 @@ pub fn collection_kind(page: Page) -> Option<CollectionKind> {
 fn collection(record: &CollectionRecord) -> Result<Collection, CatalogError> {
     if let Some(tag) = &record.source {
         bdm_application::catalog::validate_tag(record.kind, tag)?;
+    } else if record.kind == CollectionKind::Query {
+        if bdm_domain::catalog::normalize_download_query(&record.name).as_deref()
+            != Some(&record.name)
+        {
+            return Err(CatalogError::InvalidQuery);
+        }
     } else if record.kind != CollectionKind::Artist
         || record.name.is_empty()
         || record.name.len() > 512
@@ -152,7 +159,7 @@ impl BdmApp {
         self.refresh_collection_records(records)?;
         self.catalog.repository = Some(repo);
         self.catalog.error = None;
-        self.log("INFO", "已加载本地画师和角色记录。");
+        self.log("INFO", "已加载本地画师、角色和下载查询记录。");
         Ok(())
     }
 
@@ -162,18 +169,25 @@ impl BdmApp {
     ) -> Result<(), CatalogError> {
         let mut artists = Vec::new();
         let mut characters = Vec::new();
+        let mut queries = Vec::new();
         for record in records {
             let item = collection(&record)?;
             match record.kind {
                 CollectionKind::Artist => artists.push(item),
                 CollectionKind::Character => characters.push(item),
+                CollectionKind::Query => queries.push(item),
             }
         }
         artists.sort_by_key(|item| item.id);
         characters.sort_by_key(|item| item.id);
-        if self.library.artists != artists || self.library.characters != characters {
+        queries.sort_by_key(|item| item.id);
+        if self.library.artists != artists
+            || self.library.characters != characters
+            || self.library.queries != queries
+        {
             self.library.artists = artists;
             self.library.characters = characters;
+            self.library.queries = queries;
             self.tags.invalidate();
         }
         Ok(())
@@ -187,6 +201,30 @@ impl BdmApp {
         self.catalog.edit_credentials = false;
         self.catalog.anonymous = false;
         self.dialog = Some(Dialog::Add);
+    }
+
+    pub fn save_download_query(&mut self) -> Result<usize, String> {
+        if self.demo || self.is_capture() || self.prefs.page != Page::Downloads {
+            return Err("请在标签下载页添加查询。".into());
+        }
+        let query = bdm_domain::catalog::normalize_download_query(&self.input_tag)
+            .ok_or_else(|| CatalogError::InvalidQuery.to_string())?;
+        let repo = self.catalog.repository.as_mut().ok_or("本地收藏未打开。")?;
+        let result = repo.add_query(&query).map_err(|e| e.to_string())?;
+        let id = usize::try_from(result.record.id).map_err(|_| "查询 ID 无效。")?;
+        let records = repo.list().map_err(|e| e.to_string())?;
+        self.refresh_collection_records(records)
+            .map_err(|e| e.to_string())?;
+        if let Some(path) = &self.catalog.path {
+            let mut repo = bdm_infrastructure::catalog::SqliteCatalog::open(path)
+                .map_err(|e| e.to_string())?;
+            repo.attach_known_collections().map_err(|e| e.to_string())?;
+            self.reload_media()?;
+        }
+        self.navigate(Page::Downloads);
+        self.selected.insert(id);
+        self.log("INFO", &format!("已保存标签下载查询：{query}"));
+        Ok(id)
     }
 
     pub fn cancel_tag_lookup(&mut self) {
@@ -315,6 +353,7 @@ impl BdmApp {
         let items = match kind {
             CollectionKind::Artist => &mut self.library.artists,
             CollectionKind::Character => &mut self.library.characters,
+            CollectionKind::Query => return Err("请使用标签下载入口。".into()),
         };
         if let Some(old) = items.iter_mut().find(|old| old.id == item.id) {
             *old = item;
@@ -325,6 +364,7 @@ impl BdmApp {
         let page = match kind {
             CollectionKind::Artist => Page::Artist,
             CollectionKind::Character => Page::Character,
+            CollectionKind::Query => Page::Downloads,
         };
         self.navigate(page);
         if let Some(path) = &self.catalog.path {
@@ -369,6 +409,34 @@ mod tests {
         app.navigate(Page::Character);
         app.begin_add_collection();
         app
+    }
+    #[test]
+    fn download_queries_save_without_remote_tag_identity_and_survive_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("catalog.sqlite3");
+        let mut app = app();
+        app.open_catalog(&path);
+        app.navigate(Page::Downloads);
+        app.begin_add_collection();
+        app.input_tag = " Official_Art  zenless_zone_zero ".into();
+        let id = app.save_download_query().unwrap();
+        assert_eq!(app.prefs.page, Page::Downloads);
+        assert_eq!(app.selected, BTreeSet::from([id]));
+        assert!(app.library.artists.is_empty());
+        assert!(app.library.characters.is_empty());
+        assert!(app.catalog.pending.is_none());
+        assert_eq!(app.library.queries[0].tag, "official_art zenless_zone_zero");
+        assert_eq!(app.library.queries[0].api_count, None);
+        app.input_tag = "official_art zenless_zone_zero".into();
+        assert_eq!(app.save_download_query().unwrap(), id);
+        assert_eq!(app.library.queries.len(), 1);
+        app.open_catalog(&path);
+        assert_eq!(app.library.queries[0].id, id);
+        let scope = app
+            .collection_deletion_scope(Page::Downloads, &BTreeSet::from([id]))
+            .unwrap();
+        app.confirm_collection_deletion(&scope).unwrap();
+        assert!(app.library.queries.is_empty());
     }
     fn tag(id: i64) -> SourceTag {
         SourceTag {

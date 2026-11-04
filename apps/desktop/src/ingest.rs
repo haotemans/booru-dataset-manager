@@ -638,7 +638,7 @@ impl BdmApp {
                 self.selected.clone()
             };
             if ids.is_empty() {
-                return Err("请先选择画师或角色，或进入其图库。".into());
+                return Err("请先选择画师、角色或下载查询，或进入其图库。".into());
             }
             let root = if self.prefs.root.is_empty() {
                 crate::paths::library_directory()

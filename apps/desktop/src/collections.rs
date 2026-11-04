@@ -20,7 +20,7 @@ impl BdmApp {
         page: Page,
         ids: &BTreeSet<usize>,
     ) -> Option<CollectionDeletion> {
-        if !matches!(page, Page::Artist | Page::Character) {
+        if !matches!(page, Page::Artist | Page::Character | Page::Downloads) {
             return None;
         }
         let ids: BTreeSet<_> = self
@@ -75,11 +75,7 @@ impl BdmApp {
             .cloned()
             .collect();
         let removed: BTreeSet<_> = records.iter().map(|record| record.id).collect();
-        let collections = if page == Page::Artist {
-            &mut self.library.artists
-        } else {
-            &mut self.library.characters
-        };
+        let collections = self.library.collections_mut(page);
         collections.retain(|record| !removed.contains(&record.id));
         // Media is unique across views: deleting it removes every collection's reference.
         self.remove_sample_media(&scope.media_ids);
@@ -183,11 +179,7 @@ impl BdmApp {
             .map_err(|e| e.to_string())?;
         self.remove_sample_media(&scope.media_ids);
         self.reload_media()?;
-        let items = if scope.page == Page::Artist {
-            &mut self.library.artists
-        } else {
-            &mut self.library.characters
-        };
+        let items = self.library.collections_mut(scope.page);
         items.retain(|item| !scope.ids.contains(&item.id));
         self.navigate(scope.page);
         self.action_snapshot.clear();

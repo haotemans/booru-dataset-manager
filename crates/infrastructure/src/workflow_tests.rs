@@ -131,6 +131,75 @@ pub(crate) fn fixture() -> Fixture {
 }
 
 #[test]
+fn combined_tag_downloads_validate_every_term_and_reuse_shared_imports() {
+    let mut f = fixture();
+    f.post
+        .tag_string
+        .push_str(" official_art zenless_zone_zero");
+    f.post.tag_string_general.push_str(" official_art");
+    f.post.tag_string_copyright = "zenless_zone_zero".into();
+    f.provider.posts = vec![f.post.clone()];
+    let saved = f
+        .repo
+        .add_query("official_art zenless_zone_zero")
+        .unwrap()
+        .record;
+    let root = f.directory.path().join("library");
+    let mut job = f
+        .repo
+        .new_job(saved.id, saved.name.clone(), root.clone(), 800)
+        .unwrap();
+    let cancel = AtomicBool::new(false);
+    bdm_application::ingest::run(&f.provider, &mut f.repo, &mut job, &cancel, |_| {}).unwrap();
+    assert_eq!(job.progress.imported, 1);
+    assert_eq!(job.state, "completed");
+    let media = f.repo.list_media().unwrap().remove(0);
+    assert!(media.collections.contains(&saved.id));
+    assert!(media.collections.contains(&f.collection));
+    assert!(f
+        .repo
+        .list()
+        .unwrap()
+        .iter()
+        .any(|record| record.kind == CollectionKind::Artist && record.name == "artist"));
+
+    // A newly saved query also groups images that were downloaded earlier.
+    let later = f.repo.add_query("zenless_zone_zero").unwrap().record;
+    f.repo.attach_known_collections().unwrap();
+    assert!(f.repo.list_media().unwrap()[0]
+        .collections
+        .contains(&later.id));
+    let mut repeat = f
+        .repo
+        .new_job(saved.id, saved.name, root.clone(), 800)
+        .unwrap();
+    bdm_application::ingest::run(&f.provider, &mut f.repo, &mut repeat, &cancel, |_| {}).unwrap();
+    assert_eq!(repeat.progress.duplicates, 1);
+    assert_eq!(f.provider.calls.get(), 1);
+
+    let bad = f
+        .repo
+        .add_query("official_art another_game")
+        .unwrap()
+        .record;
+    let mut mismatch = f.repo.new_job(bad.id, bad.name, root, 800).unwrap();
+    assert!(matches!(
+        bdm_application::ingest::run(&f.provider, &mut f.repo, &mut mismatch, &cancel, |_| {}),
+        Err(IngestError::Catalog(
+            bdm_ports::CatalogError::InvalidResponse
+        ))
+    ));
+    assert_eq!(mismatch.progress.examined, 0);
+    assert_eq!(f.provider.calls.get(), 1);
+    let reopened = SqliteCatalog::open(&f.directory.path().join("catalog.sqlite3")).unwrap();
+    assert_eq!(
+        reopened.list_jobs().unwrap()[0].tag,
+        "official_art zenless_zone_zero"
+    );
+    assert_eq!(reopened.list_media().unwrap().len(), 1);
+}
+
+#[test]
 fn transparent_import_is_flattened_to_white_and_tracks_both_hashes() {
     let mut f = fixture();
     let source_image = image::RgbaImage::from_fn(800, 800, |x, _| {
@@ -1578,7 +1647,7 @@ fn legacy_v1_catalog_migrates_with_records_intact() {
         .connection
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 }
 
 #[test]

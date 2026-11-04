@@ -18,6 +18,9 @@ pub fn normalize_tag(input: &str) -> Result<String, CatalogError> {
 }
 
 pub fn validate_tag(kind: CollectionKind, tag: &SourceTag) -> Result<(), CatalogError> {
+    if kind == CollectionKind::Query {
+        return Err(CatalogError::WrongCategory);
+    }
     if tag.id <= 0 || tag.post_count < 0 || normalize_tag(&tag.name)? != tag.name {
         return Err(CatalogError::InvalidResponse);
     }

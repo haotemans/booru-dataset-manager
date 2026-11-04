@@ -7,16 +7,18 @@ pub enum Page {
     Dashboard,
     Artist,
     Character,
+    Downloads,
     Tags,
     Api,
     Logs,
     Settings,
 }
 impl Page {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Dashboard,
         Self::Artist,
         Self::Character,
+        Self::Downloads,
         Self::Tags,
         Self::Api,
         Self::Logs,
@@ -27,6 +29,7 @@ impl Page {
             Self::Dashboard => "总览",
             Self::Artist => "画师",
             Self::Character => "角色",
+            Self::Downloads => "标签下载",
             Self::Tags => "标签管理",
             Self::Api => "API 配置",
             Self::Logs => "运行日志",
@@ -38,6 +41,7 @@ impl Page {
             Self::Dashboard => "dashboard",
             Self::Artist => "artist",
             Self::Character => "character",
+            Self::Downloads => "search",
             Self::Tags => "tag",
             Self::Api => "api",
             Self::Logs => "logs",
@@ -237,6 +241,7 @@ pub struct Media {
 pub struct Library {
     pub artists: Vec<Collection>,
     pub characters: Vec<Collection>,
+    pub queries: Vec<Collection>,
     pub media: Vec<Media>,
 }
 impl Library {
@@ -294,20 +299,37 @@ impl Library {
         Self {
             artists,
             characters,
+            queries: Vec::new(),
             media,
         }
     }
     pub fn collections(&self, page: Page) -> &[Collection] {
-        if page == Page::Artist {
-            &self.artists
-        } else {
-            &self.characters
+        match page {
+            Page::Downloads => &self.queries,
+            Page::Artist => &self.artists,
+            _ => &self.characters,
+        }
+    }
+    pub fn collections_mut(&mut self, page: Page) -> &mut Vec<Collection> {
+        match page {
+            Page::Downloads => &mut self.queries,
+            Page::Artist => &mut self.artists,
+            _ => &mut self.characters,
         }
     }
     pub fn associated(&self, page: Page, ids: &BTreeSet<usize>) -> Vec<&Media> {
         self.media
             .iter()
             .filter(|m| {
+                if page == Page::Downloads {
+                    return self.queries.iter().any(|query| {
+                        ids.contains(&query.id)
+                            && bdm_domain::catalog::matches_download_query(
+                                &query.tag,
+                                &m.tags.join(" "),
+                            )
+                    });
+                }
                 let association = if page == Page::Artist {
                     m.artist
                 } else {

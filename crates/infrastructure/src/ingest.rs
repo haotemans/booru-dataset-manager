@@ -485,6 +485,21 @@ fn attach_post_collections(
             storage(attach.execute(params![media, category, name]))?;
         }
     }
+    // Queries group existing and future imports, independently of the source artist.
+    let mut queries = storage(tx.prepare_cached(
+        "SELECT id,tag FROM collections WHERE provider='danbooru' AND category=0",
+    ))?;
+    let mut attach_query = storage(tx.prepare_cached(
+        "INSERT OR IGNORE INTO collection_media(collection_id,media_id) VALUES(?1,?2)",
+    ))?;
+    for row in storage(queries.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    }))? {
+        let (collection, query) = storage(row)?;
+        if bdm_domain::catalog::matches_download_query(&query, &post.tag_string) {
+            storage(attach_query.execute(params![collection, media]))?;
+        }
+    }
     Ok(())
 }
 
