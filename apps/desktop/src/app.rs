@@ -381,6 +381,16 @@ impl BdmApp {
             return;
         };
         let task_status = std::env::args().any(|arg| arg == "--capture-task-status");
+        let download_queries = std::env::args().any(|arg| arg == "--capture-download-queries");
+        if download_queries && self.capture_step == 0 && self.capture_frames == 0 {
+            self.library = crate::model::Library::demo();
+            self.library.queries.push(crate::model::Collection {
+                id: 500,
+                tag: "official_art zenless_zone_zero".into(),
+                api_count: None,
+            });
+            self.navigate(Page::Downloads);
+        }
         if task_status && self.capture_step == 0 && self.capture_frames == 0 {
             self.prefs.page = Page::Dashboard;
             self.library = crate::model::Library::demo();
@@ -475,7 +485,9 @@ impl BdmApp {
             }
         }
         if self.capture_step
-            >= if task_status {
+            >= if download_queries {
+                2
+            } else if task_status {
                 1
             } else if review_layout {
                 44
@@ -562,7 +574,13 @@ impl BdmApp {
                     image::save_buffer(
                         dir.join(format!(
                             "{}.png",
-                            if self.capture_step == 54
+                            if download_queries {
+                                if self.capture_step == 0 {
+                                    "download-queries"
+                                } else {
+                                    "download-query-add"
+                                }
+                            } else if self.capture_step == 54
                                 && std::env::args()
                                     .any(|arg| arg == "--capture-redownload-confirmation")
                             {
@@ -589,6 +607,13 @@ impl BdmApp {
                 self.capture_step += 1;
                 self.capture_frames = 0;
                 self.capture_waiting = false;
+                if download_queries {
+                    if self.capture_step == 1 {
+                        self.begin_add_collection();
+                        self.input_tag = "official_art zenless_zone_zero".into();
+                    }
+                    continue;
+                }
                 if task_status {
                     let _ = std::fs::write(
                         dir.join("capture.complete"),

@@ -193,7 +193,13 @@ fn combined_tag_downloads_validate_every_term_and_reuse_shared_imports() {
     assert_eq!(f.provider.calls.get(), 1);
     let reopened = SqliteCatalog::open(&f.directory.path().join("catalog.sqlite3")).unwrap();
     assert_eq!(
-        reopened.list_jobs().unwrap()[0].tag,
+        reopened
+            .list_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|saved| saved.id == job.id)
+            .unwrap()
+            .tag,
         "official_art zenless_zone_zero"
     );
     assert_eq!(reopened.list_media().unwrap().len(), 1);

@@ -50,6 +50,29 @@ pub fn matches_download_query(query: &str, tags: &str) -> bool {
             .all(|term| tags.split_whitespace().any(|tag| tag == term))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceTag {
+    pub id: i64,
+    pub name: String,
+    pub category: u8,
+    pub post_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionRecord {
+    pub id: i64,
+    pub kind: CollectionKind,
+    pub name: String,
+    /// Queries and discovered artists have no remote tag identity/count.
+    pub source: Option<SourceTag>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddCollectionResult {
+    pub record: CollectionRecord,
+    pub created: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,27 +104,4 @@ mod tests {
             assert!(normalize_download_query(invalid).is_none(), "{invalid}");
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceTag {
-    pub id: i64,
-    pub name: String,
-    pub category: u8,
-    pub post_count: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CollectionRecord {
-    pub id: i64,
-    pub kind: CollectionKind,
-    pub name: String,
-    /// Posts provide names but no remote tag ID or total. Keep that absence explicit.
-    pub source: Option<SourceTag>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AddCollectionResult {
-    pub record: CollectionRecord,
-    pub created: bool,
 }
