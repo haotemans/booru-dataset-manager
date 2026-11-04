@@ -316,6 +316,7 @@ impl BdmApp {
                                         )
                                     {
                                         let label = match self.prefs.page {
+                                            Page::Artist => "添加画师或标签合集",
                                             Page::Character => "添加角色",
                                             Page::Downloads => "添加下载查询",
                                             Page::Api => "添加 API 配置",
@@ -389,7 +390,7 @@ impl BdmApp {
                 tag: "official_art zenless_zone_zero".into(),
                 api_count: None,
             });
-            self.navigate(Page::Downloads);
+            self.navigate(Page::Artist);
         }
         if task_status && self.capture_step == 0 && self.capture_frames == 0 {
             self.prefs.page = Page::Dashboard;
@@ -610,6 +611,7 @@ impl BdmApp {
                 if download_queries {
                     if self.capture_step == 1 {
                         self.begin_add_collection();
+                        self.catalog.kind = Some(bdm_domain::catalog::CollectionKind::Query);
                         self.input_tag = "official_art zenless_zone_zero".into();
                     }
                     continue;

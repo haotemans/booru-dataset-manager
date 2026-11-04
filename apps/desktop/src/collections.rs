@@ -75,8 +75,7 @@ impl BdmApp {
             .cloned()
             .collect();
         let removed: BTreeSet<_> = records.iter().map(|record| record.id).collect();
-        let collections = self.library.collections_mut(page);
-        collections.retain(|record| !removed.contains(&record.id));
+        self.library.remove_collections(page, &removed);
         // Media is unique across views: deleting it removes every collection's reference.
         self.remove_sample_media(&scope.media_ids);
         self.action_snapshot.clear();
@@ -161,6 +160,17 @@ impl BdmApp {
             .map_err(|_| "记录 ID 无效。".to_owned())?;
         let kind = crate::catalog::collection_kind(scope.page)
             .ok_or_else(|| "删除范围无效。".to_owned())?;
+        let records: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                let kind = if scope.page == Page::Artist && self.library.is_query(*id as usize) {
+                    bdm_domain::catalog::CollectionKind::Query
+                } else {
+                    kind
+                };
+                (kind, *id)
+            })
+            .collect();
         if !scope.media_ids.is_empty() {
             let mut media_repo = bdm_infrastructure::catalog::SqliteCatalog::open(
                 self.catalog.path.as_deref().ok_or("本地收藏未打开。")?,
@@ -175,12 +185,11 @@ impl BdmApp {
                 .map_err(|e| e.to_string())?;
         }
         let repo = self.catalog.repository.as_mut().ok_or("本地收藏未打开。")?;
-        bdm_application::catalog::delete_empty_collections(repo.as_mut(), kind, &ids)
+        repo.delete_empty_records(&records)
             .map_err(|e| e.to_string())?;
         self.remove_sample_media(&scope.media_ids);
         self.reload_media()?;
-        let items = self.library.collections_mut(scope.page);
-        items.retain(|item| !scope.ids.contains(&item.id));
+        self.library.remove_collections(scope.page, &scope.ids);
         self.navigate(scope.page);
         self.action_snapshot.clear();
         self.dialog = None;

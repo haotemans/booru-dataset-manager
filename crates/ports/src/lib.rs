@@ -182,4 +182,20 @@ pub trait CollectionRepository {
         kind: bdm_domain::catalog::CollectionKind,
         ids: &[i64],
     ) -> Result<(), CatalogError>;
+    /// Delete a mixed view atomically, checking each persisted record's actual kind.
+    fn delete_empty_records(
+        &mut self,
+        records: &[(bdm_domain::catalog::CollectionKind, i64)],
+    ) -> Result<(), CatalogError> {
+        let Some((kind, _)) = records.first() else {
+            return Err(CatalogError::Changed);
+        };
+        if records.iter().any(|(other, _)| other != kind) {
+            return Err(CatalogError::Changed);
+        }
+        self.delete_empty(
+            *kind,
+            &records.iter().map(|(_, id)| *id).collect::<Vec<_>>(),
+        )
+    }
 }

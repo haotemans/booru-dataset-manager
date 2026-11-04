@@ -336,7 +336,14 @@ impl CollectionRepository for SqliteCatalog {
     }
 
     fn delete_empty(&mut self, kind: CollectionKind, ids: &[i64]) -> Result<(), CatalogError> {
-        if ids.is_empty() || ids.iter().any(|id| *id <= 0) {
+        self.delete_empty_records(&ids.iter().map(|id| (kind, *id)).collect::<Vec<_>>())
+    }
+
+    fn delete_empty_records(
+        &mut self,
+        records: &[(CollectionKind, i64)],
+    ) -> Result<(), CatalogError> {
+        if records.is_empty() || records.iter().any(|(_, id)| *id <= 0) {
             return Err(CatalogError::Changed);
         }
         // Check the persisted associations in the same transaction as deletion.
@@ -350,7 +357,7 @@ impl CollectionRepository for SqliteCatalog {
         if version != 5 {
             return Err(CatalogError::Schema);
         }
-        for id in ids {
+        for (kind, id) in records {
             let count: i64 = tx
                 .query_row(
                     "SELECT count(*) FROM collection_media WHERE collection_id=?1",
@@ -379,6 +386,51 @@ impl CollectionRepository for SqliteCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mixed_artist_and_query_deletion_validates_all_kinds_atomically() {
+        let mut repo = SqliteCatalog::in_memory().unwrap();
+        let artist = repo
+            .add(
+                CollectionKind::Artist,
+                &SourceTag {
+                    id: 99,
+                    name: "synthetic_artist".into(),
+                    category: 1,
+                    post_count: 1,
+                },
+            )
+            .unwrap()
+            .record
+            .id;
+        let query = repo
+            .add_query("official_art zenless_zone_zero")
+            .unwrap()
+            .record
+            .id;
+        assert_eq!(
+            repo.delete_empty_records(&[
+                (CollectionKind::Artist, artist),
+                (CollectionKind::Query, query + 1)
+            ]),
+            Err(CatalogError::Changed)
+        );
+        assert_eq!(repo.list().unwrap().len(), 2);
+        assert_eq!(
+            repo.delete_empty_records(&[
+                (CollectionKind::Artist, artist),
+                (CollectionKind::Artist, query)
+            ]),
+            Err(CatalogError::Changed)
+        );
+        assert_eq!(repo.list().unwrap().len(), 2);
+        repo.delete_empty_records(&[
+            (CollectionKind::Artist, artist),
+            (CollectionKind::Query, query),
+        ])
+        .unwrap();
+        assert!(repo.list().unwrap().is_empty());
+    }
 
     #[test]
     fn v4_query_migration_backs_up_and_preserves_shared_references_and_id_sequence() {

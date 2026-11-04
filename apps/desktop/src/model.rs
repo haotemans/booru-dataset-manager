@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::{borrow::Cow, collections::BTreeSet};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Page {
@@ -303,39 +303,64 @@ impl Library {
             media,
         }
     }
-    pub fn collections(&self, page: Page) -> &[Collection] {
+    pub fn collections(&self, page: Page) -> Cow<'_, [Collection]> {
         match page {
-            Page::Downloads => &self.queries,
-            Page::Artist => &self.artists,
-            _ => &self.characters,
+            Page::Downloads => Cow::Borrowed(&self.queries),
+            Page::Artist if !self.queries.is_empty() => {
+                let mut items = self.artists.clone();
+                items.extend_from_slice(&self.queries);
+                items.sort_by_key(|item| item.id);
+                Cow::Owned(items)
+            }
+            Page::Artist => Cow::Borrowed(&self.artists),
+            _ => Cow::Borrowed(&self.characters),
         }
     }
-    pub fn collections_mut(&mut self, page: Page) -> &mut Vec<Collection> {
+    pub fn collection(&self, page: Page, id: usize) -> Option<&Collection> {
         match page {
-            Page::Downloads => &mut self.queries,
-            Page::Artist => &mut self.artists,
-            _ => &mut self.characters,
+            Page::Artist => self
+                .artists
+                .iter()
+                .chain(&self.queries)
+                .find(|item| item.id == id),
+            Page::Downloads => self.queries.iter().find(|item| item.id == id),
+            _ => self.characters.iter().find(|item| item.id == id),
+        }
+    }
+    pub fn is_query(&self, id: usize) -> bool {
+        self.queries.iter().any(|item| item.id == id)
+    }
+    pub fn remove_collections(&mut self, page: Page, ids: &BTreeSet<usize>) {
+        if matches!(page, Page::Artist | Page::Downloads) {
+            self.queries.retain(|item| !ids.contains(&item.id));
+        }
+        if page == Page::Artist {
+            self.artists.retain(|item| !ids.contains(&item.id));
+        } else if page == Page::Character {
+            self.characters.retain(|item| !ids.contains(&item.id));
         }
     }
     pub fn associated(&self, page: Page, ids: &BTreeSet<usize>) -> Vec<&Media> {
         self.media
             .iter()
             .filter(|m| {
-                if page == Page::Downloads {
-                    return self.queries.iter().any(|query| {
+                let in_query = matches!(page, Page::Artist | Page::Downloads)
+                    && self.queries.iter().any(|query| {
                         ids.contains(&query.id)
                             && bdm_domain::catalog::matches_download_query(
                                 &query.tag,
                                 &m.tags.join(" "),
                             )
                     });
+                if page == Page::Downloads {
+                    return in_query;
                 }
                 let association = if page == Page::Artist {
                     m.artist
                 } else {
                     m.character
                 };
-                association.is_some_and(|id| ids.contains(&id))
+                in_query || association.is_some_and(|id| ids.contains(&id))
             })
             .collect()
     }

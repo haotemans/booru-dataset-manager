@@ -14,7 +14,7 @@ impl BdmApp {
     pub fn collections_page(&mut self, ui: &mut egui::Ui) {
         if self.prefs.page == Page::Downloads {
             ui.add(egui::Label::new(RichText::new(
-                "按标签组合下载 · 例如 official_art zenless_zone_zero，只下载同时符合这两个标签的图片。"
+                "例如 official_art zenless_zone_zero：下载同时符合这些标签的图片，并在画师页显示为一个标签合集，统一审核。"
             ).size(13.0).color(MUTED)).wrap());
             ui.add_space(12.0);
         }
@@ -143,6 +143,7 @@ impl BdmApp {
     }
 
     fn collection_card(&mut self, ui: &mut egui::Ui, c: &Collection, width: f32) {
+        let is_query = self.library.is_query(c.id);
         ui.allocate_ui_with_layout(
             vec2(width, 0.0),
             egui::Layout::top_down(egui::Align::LEFT),
@@ -217,7 +218,7 @@ impl BdmApp {
                                 }
                             }
                             ui.add_space(5.0);
-                            if self.prefs.page == Page::Downloads {
+                            if is_query {
                                 ui.add(egui::Label::new(RichText::new(&c.tag).size(13.0).strong()).wrap())
                                     .on_hover_text(&c.tag);
                                 ui.add_space(4.0);
@@ -233,12 +234,12 @@ impl BdmApp {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         ui.label(
-                                            RichText::new(c.api_count.map_or_else(|| if self.prefs.page == Page::Downloads { "标签组合".into() } else { "本地发现".into() }, |count| format!("API {count}")))
+                                            RichText::new(c.api_count.map_or_else(|| if is_query { "标签合集".into() } else { "本地发现".into() }, |count| format!("API {count}")))
                                                 .color(MUTED)
                                                 .size(13.0),
                                         )
                                         .on_hover_text(
-                                            if self.prefs.page == Page::Downloads {
+                                            if is_query {
                                                 "保存的标签组合；本地数量包含全部标签都匹配的图片。远程总数未查询。"
                                             } else if c.api_count.is_none() {
                                                 "来自已下载图片的画师标签；远程总数尚未查询。可直接进入图库或下载。"
@@ -399,12 +400,7 @@ impl BdmApp {
             }
             let tag = self
                 .context
-                .and_then(|id| {
-                    self.library
-                        .collections(self.prefs.page)
-                        .iter()
-                        .find(|c| c.id == id)
-                })
+                .and_then(|id| self.library.collection(self.prefs.page, id))
                 .map(|c| c.tag.clone())
                 .unwrap_or_else(|| "全部图片".into());
             ui.label(RichText::new(tag).color(MUTED).size(13.0));
@@ -731,6 +727,48 @@ mod tests {
                 },
             );
         }
+    }
+
+    #[test]
+    fn artist_collection_card_keeps_one_review_scope_across_artists_and_unattributed_images() {
+        let ctx = egui::Context::default();
+        crate::theme::setup(&ctx);
+        let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
+        app.navigate(Page::Artist);
+        app.library.artists.clear();
+        app.library.queries.push(Collection {
+            id: 500,
+            tag: "official_art zenless_zone_zero".into(),
+            api_count: None,
+        });
+        for media in app.library.media.iter_mut().take(2) {
+            media
+                .tags
+                .extend(["official_art".into(), "zenless_zone_zero".into()]);
+        }
+        app.library.media[1].artist = None;
+        click_collection_ui(&ctx, &mut app, egui::pos2(205.0, 85.0));
+        assert!(app.gallery);
+        assert_eq!(app.context, Some(500));
+        assert_eq!(
+            app.scope_media()
+                .iter()
+                .map(|m| m.id)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([0, 1])
+        );
+        app.open_media(0);
+        assert!(matches!(app.dialog, Some(Dialog::Media(0))));
+        assert_eq!(
+            app.review_order.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([0, 1])
+        );
+        app.open_action("优化");
+        assert_eq!(
+            app.action_snapshot.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([0, 1])
+        );
+        assert!(app.library.artists.is_empty());
     }
 
     #[test]

@@ -12,11 +12,17 @@ impl BdmApp {
             return;
         };
         let title = match &dialog {
-            Dialog::Add => match self.prefs.page {
-                Page::Downloads => "添加下载查询",
-                Page::Artist => "添加画师",
-                _ => "添加角色",
-            },
+            Dialog::Add => {
+                if self.catalog.kind == Some(bdm_domain::catalog::CollectionKind::Query) {
+                    "添加标签合集"
+                } else {
+                    match self.prefs.page {
+                        Page::Downloads => "添加标签合集",
+                        Page::Artist => "添加画师",
+                        _ => "添加角色",
+                    }
+                }
+            }
             Dialog::Action(kind) => kind,
             Dialog::Profile(_) => "API 配置",
             Dialog::ImageUpload(_) => "确认发送图片",
@@ -159,7 +165,7 @@ impl BdmApp {
         );
         ui.add_space(10.0);
         ui.add(egui::Label::new(RichText::new(
-            "多个完整标签用空格分隔，下载同时满足所有标签的图片。可组合游戏／作品、官方美术、角色、画师等标签。"
+            "多个完整标签用空格分隔。合集会显示在画师页，点进去即可统一审核、裁剪、优化和导出；每张图片保留自己的真实画师信息。"
         ).color(MUTED).size(13.0)).wrap());
         ui.add_space(6.0);
         ui.add(egui::Label::new(RichText::new(
@@ -170,7 +176,7 @@ impl BdmApp {
         ui.horizontal(|ui| {
             let enabled = !self.demo && !self.is_capture() && self.catalog.repository.is_some();
             if ui
-                .add_enabled(enabled, egui::Button::new("保存查询"))
+                .add_enabled(enabled, egui::Button::new("保存合集"))
                 .clicked()
             {
                 choice = Some(false);
@@ -190,12 +196,15 @@ impl BdmApp {
                 Ok(_) => {
                     if download {
                         if let Err(error) = self.start_ingest(ui.ctx(), None) {
-                            self.notify(ui.ctx(), &format!("查询已保存，下载未启动：{error}"));
+                            self.notify(
+                                ui.ctx(),
+                                &format!("合集已加入画师页，下载未启动：{error}"),
+                            );
                             return true;
                         }
-                        self.notify(ui.ctx(), "下载已启动，可在总览查看进度");
+                        self.notify(ui.ctx(), "合集已加入画师页，下载进度在总览查看");
                     } else {
-                        self.notify(ui.ctx(), "查询已保存，选中后点击下载或进入图库");
+                        self.notify(ui.ctx(), "合集已加入画师页，点击卡片进入图库审核");
                     }
                     return true;
                 }
@@ -211,7 +220,30 @@ impl BdmApp {
     }
 
     fn add_dialog(&mut self, ui: &mut egui::Ui) -> bool {
-        if self.prefs.page == Page::Downloads {
+        if self.prefs.page == Page::Artist {
+            use bdm_domain::catalog::CollectionKind;
+            ui.horizontal(|ui| {
+                for (kind, label) in [
+                    (CollectionKind::Artist, "画师"),
+                    (CollectionKind::Query, "标签合集"),
+                ] {
+                    if ui
+                        .selectable_label(self.catalog.kind == Some(kind), label)
+                        .clicked()
+                        && self.catalog.kind != Some(kind)
+                    {
+                        self.cancel_tag_lookup();
+                        self.catalog.kind = Some(kind);
+                        self.input_tag.clear();
+                        self.form_error.clear();
+                    }
+                }
+            });
+            ui.add_space(12.0);
+        }
+        if self.prefs.page == Page::Downloads
+            || self.catalog.kind == Some(bdm_domain::catalog::CollectionKind::Query)
+        {
             return self.download_query_dialog(ui);
         }
         ui.set_min_width(460.0);

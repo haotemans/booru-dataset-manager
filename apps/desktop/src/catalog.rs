@@ -204,8 +204,12 @@ impl BdmApp {
     }
 
     pub fn save_download_query(&mut self) -> Result<usize, String> {
-        if self.demo || self.is_capture() || self.prefs.page != Page::Downloads {
-            return Err("请在标签下载页添加查询。".into());
+        if self.demo
+            || self.is_capture()
+            || !matches!(self.prefs.page, Page::Artist | Page::Downloads)
+            || self.catalog.kind != Some(CollectionKind::Query)
+        {
+            return Err("请使用添加标签合集入口。".into());
         }
         let query = bdm_domain::catalog::normalize_download_query(&self.input_tag)
             .ok_or_else(|| CatalogError::InvalidQuery.to_string())?;
@@ -221,7 +225,7 @@ impl BdmApp {
             repo.attach_known_collections().map_err(|e| e.to_string())?;
             self.reload_media()?;
         }
-        self.navigate(Page::Downloads);
+        self.navigate(Page::Artist);
         self.selected.insert(id);
         self.log("INFO", &format!("已保存标签下载查询：{query}"));
         Ok(id)
@@ -416,24 +420,28 @@ mod tests {
         let path = directory.path().join("catalog.sqlite3");
         let mut app = app();
         app.open_catalog(&path);
-        app.navigate(Page::Downloads);
+        app.navigate(Page::Artist);
         app.begin_add_collection();
+        app.catalog.kind = Some(CollectionKind::Query);
         app.input_tag = " Official_Art  zenless_zone_zero ".into();
         let id = app.save_download_query().unwrap();
-        assert_eq!(app.prefs.page, Page::Downloads);
+        assert_eq!(app.prefs.page, Page::Artist);
         assert_eq!(app.selected, BTreeSet::from([id]));
         assert!(app.library.artists.is_empty());
         assert!(app.library.characters.is_empty());
         assert!(app.catalog.pending.is_none());
         assert_eq!(app.library.queries[0].tag, "official_art zenless_zone_zero");
         assert_eq!(app.library.queries[0].api_count, None);
+        assert_eq!(app.library.collections(Page::Artist)[0].id, id);
+        app.navigate(Page::Downloads);
+        app.begin_add_collection();
         app.input_tag = "official_art zenless_zone_zero".into();
         assert_eq!(app.save_download_query().unwrap(), id);
         assert_eq!(app.library.queries.len(), 1);
         app.open_catalog(&path);
         assert_eq!(app.library.queries[0].id, id);
         let scope = app
-            .collection_deletion_scope(Page::Downloads, &BTreeSet::from([id]))
+            .collection_deletion_scope(Page::Artist, &BTreeSet::from([id]))
             .unwrap();
         app.confirm_collection_deletion(&scope).unwrap();
         assert!(app.library.queries.is_empty());
@@ -559,7 +567,8 @@ mod tests {
             file_size: bytes.len() as u64,
             image_width: 32,
             image_height: 24,
-            tag_string: "artist collaborator synthetic_character_41".into(),
+            tag_string: "artist collaborator synthetic_character_41 official_art zenless_zone_zero"
+                .into(),
             tag_string_artist: "artist collaborator".into(),
             tag_string_character: "synthetic_character_41".into(),
             tag_string_general: String::new(),
@@ -595,6 +604,11 @@ mod tests {
             &Provider(bytes),
         )
         .unwrap();
+        let query = repo
+            .add_query("official_art zenless_zone_zero")
+            .unwrap()
+            .record;
+        repo.attach_known_collections().unwrap();
         let job = repo
             .new_job(
                 character,
@@ -608,6 +622,11 @@ mod tests {
         sender.send(job.clone()).unwrap();
         app.poll_ingest(&egui::Context::default());
         assert_eq!(app.library.artists.len(), 2);
+        assert_eq!(app.library.collections(Page::Artist).len(), 3);
+        assert!(app
+            .library
+            .collection(Page::Artist, query.id as usize)
+            .is_some());
         assert!(app
             .library
             .artists
@@ -647,6 +666,14 @@ mod tests {
         assert_eq!(app.scope_media()[0].id, media_id);
         app.open_media(media_id);
         assert!(matches!(app.dialog,Some(Dialog::Media(id)) if id == media_id));
+        app.context = Some(query.id as usize);
+        assert_eq!(app.scope_media()[0].id, media_id);
+        app.open_media(media_id);
+        assert_eq!(app.review_order, vec![media_id]);
+        assert_eq!(
+            app.ingest.stored[&media_id].post.tag_string_artist,
+            "artist collaborator"
+        );
         let mut reopened = BdmApp::from_preferences(Preferences::default(), false, None);
         reopened.open_catalog(&path);
         assert_eq!(reopened.library.artists, app.library.artists);

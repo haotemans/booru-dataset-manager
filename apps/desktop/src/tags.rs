@@ -463,6 +463,22 @@ fn table_cell(ui: &mut egui::Ui, text: &str, width: f32, color: egui::Color32) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn artist_page_query_collections_do_not_become_artist_tags() {
+        let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
+        let query = "official_art zenless_zone_zero";
+        app.library.queries.push(Collection {
+            id: 500,
+            tag: query.into(),
+            api_count: None,
+        });
+        assert!(app.library.collection(Page::Artist, 500).is_some());
+        assert!(!TagSummary::build(&app)
+            .rows
+            .iter()
+            .any(|row| row.tag == query));
+    }
+
     fn large_app() -> BdmApp {
         let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
         app.library.artists.clear();
