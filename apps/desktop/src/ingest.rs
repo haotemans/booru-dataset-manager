@@ -771,7 +771,7 @@ impl BdmApp {
         if ui
             .add_enabled_ui(enabled, |ui| icon_button(ui, "download", "下载图片", false))
             .inner
-            .on_disabled_hover_text("选择画师／角色卡片，或进入单个收藏的图库。")
+            .on_disabled_hover_text("选择画师、角色或标签查询卡片，或进入单个收藏的图库。")
             .clicked()
         {
             match self.start_ingest(ui.ctx(), None) {

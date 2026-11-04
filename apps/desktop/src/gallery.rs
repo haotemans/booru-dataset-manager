@@ -217,6 +217,11 @@ impl BdmApp {
                                 }
                             }
                             ui.add_space(5.0);
+                            if self.prefs.page == Page::Downloads {
+                                ui.add(egui::Label::new(RichText::new(&c.tag).size(13.0).strong()).wrap())
+                                    .on_hover_text(&c.tag);
+                                ui.add_space(4.0);
+                            }
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(format!("{image_count}")).strong().size(16.0),
