@@ -680,7 +680,7 @@ impl BdmApp {
                     };
                     bdm_ports::IngestRepository::save_job(&mut repo, &job)
                         .map_err(|e| e.to_string())?;
-                    Ok(job)
+                    Ok::<_, String>(job)
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };

@@ -245,7 +245,9 @@ fn rows<'a>(value: &'a Value, key: &str) -> Result<Vec<&'a Value>, CatalogError>
     match value.get(key) {
         Some(Value::Array(items)) => Ok(items.iter().collect()),
         Some(Value::Object(_)) => Ok(vec![&value[key]]),
-        None if integer(value.get("@attributes").and_then(|a| a.get("count"))) == Some(0) => {
+        None | Some(Value::Null)
+            if integer(value.get("@attributes").and_then(|a| a.get("count"))) == Some(0) =>
+        {
             Ok(Vec::new())
         }
         _ => Err(CatalogError::InvalidResponse),
@@ -269,8 +271,9 @@ fn decode_tags(value: &Value) -> Result<Vec<SourceTag>, CatalogError> {
             let post_count = integer(row.get("count"))
                 .filter(|count| *count <= i64::MAX as u64)
                 .ok_or(CatalogError::InvalidResponse)? as i64;
-            if bdm_domain::catalog::normalize_download_query(&name).as_deref() != Some(&name)
-                || name.contains(' ')
+            if name.is_empty()
+                || name.len() > 512
+                || name.chars().any(|c| c.is_control() || c.is_whitespace())
             {
                 return Err(CatalogError::InvalidResponse);
             }
@@ -475,6 +478,7 @@ mod tests {
         .unwrap();
         assert_eq!(tags[0].provider, SourceProvider::Gelbooru);
         assert_eq!(tags[0].category, 1);
+        assert!(decode_tags(&json!({"tag":[{"id":5,"name":"?","type":0,"count":1}]})).is_ok());
     }
 
     #[test]

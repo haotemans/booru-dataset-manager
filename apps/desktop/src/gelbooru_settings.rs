@@ -226,6 +226,17 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
     struct Store(Rc<RefCell<Option<SourceCredentials>>>);
+    #[derive(Default)]
+    struct Storage(String);
+    impl eframe::Storage for Storage {
+        fn get_string(&self, _: &str) -> Option<String> {
+            Some(self.0.clone())
+        }
+        fn set_string(&mut self, _: &str, value: String) {
+            self.0 = value;
+        }
+        fn flush(&mut self) {}
+    }
     impl SourceCredentialStore for Store {
         fn load(&self) -> Result<Option<SourceCredentials>, bdm_ports::CredentialError> {
             Ok(self.0.borrow().as_ref().map(|v| SourceCredentials {
@@ -255,9 +266,10 @@ mod tests {
         app.save_gelbooru_settings().unwrap();
         assert_eq!(app.prefs.gelbooru_user_id, "123");
         assert!(app.gelbooru.api_key.is_empty());
-        assert!(!serde_json::to_string(&app.prefs)
-            .unwrap()
-            .contains("synthetic-gelbooru-key"));
+        let mut storage = Storage::default();
+        eframe::set_value(&mut storage, eframe::APP_KEY, &app.prefs);
+        assert!(storage.0.contains("123"));
+        assert!(!storage.0.contains("synthetic-gelbooru-key"));
         app.save_gelbooru_settings().unwrap();
         app.gelbooru.user_id = "456".into();
         assert!(app.save_gelbooru_settings().is_err());
