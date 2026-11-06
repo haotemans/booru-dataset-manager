@@ -3,7 +3,7 @@ use bdm_domain::{catalog::SourceTag, ingest::SourcePost, sources::SourceProvider
 use bdm_ports::{CatalogError, IngestError, MediaProvider, SourceCredentials, TagProvider};
 use reqwest::{
     blocking::{Client, Response},
-    header::{ACCEPT, CONTENT_TYPE},
+    header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, REFERER},
 };
 use serde_json::Value;
 use std::{
@@ -54,6 +54,12 @@ impl GelbooruProvider {
             .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
             .user_agent("BooruDatasetManager/0.1")
+            // Original image hosts redirect requests without this public site
+            // referer to hotlink.php. Never attach the authenticated API URL.
+            .default_headers(HeaderMap::from_iter([(
+                REFERER,
+                HeaderValue::from_static("https://gelbooru.com/"),
+            )]))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(90))
             .build()
@@ -571,6 +577,11 @@ mod tests {
         let url = media_url("https://img3.gelbooru.com/images/ab/cd/fixture.png").unwrap();
         let download = provider.media_client.get(url).build().unwrap();
         assert!(download.url().query().is_none());
+        assert_eq!(download.headers()[REFERER], "https://gelbooru.com/");
+        assert!(!download.headers().iter().any(|(_, value)| value
+            .as_bytes()
+            .windows(b"unit-secret".len())
+            .any(|part| part == b"unit-secret")));
         assert!(!download
             .headers()
             .contains_key(reqwest::header::AUTHORIZATION));
