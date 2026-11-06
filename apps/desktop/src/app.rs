@@ -387,6 +387,10 @@ impl BdmApp {
             return;
         };
         let task_status = std::env::args().any(|arg| arg == "--capture-task-status");
+        let source_settings = std::env::args().any(|arg| arg == "--capture-source-settings");
+        if source_settings && self.capture_step == 0 && self.capture_frames == 0 {
+            self.navigate(Page::Settings);
+        }
         let download_queries = std::env::args().any(|arg| arg == "--capture-download-queries");
         if download_queries && self.capture_step == 0 && self.capture_frames == 0 {
             self.library = crate::model::Library::demo();
@@ -498,7 +502,7 @@ impl BdmApp {
         if self.capture_step
             >= if download_queries {
                 2
-            } else if task_status {
+            } else if task_status || source_settings {
                 1
             } else if review_layout {
                 44
@@ -585,7 +589,9 @@ impl BdmApp {
                     image::save_buffer(
                         dir.join(format!(
                             "{}.png",
-                            if download_queries {
+                            if source_settings {
+                                "source-settings"
+                            } else if download_queries {
                                 if self.capture_step == 0 {
                                     "download-queries"
                                 } else {
@@ -626,7 +632,7 @@ impl BdmApp {
                     }
                     continue;
                 }
-                if task_status {
+                if task_status || source_settings {
                     let _ = std::fs::write(
                         dir.join("capture.complete"),
                         "Task status capture completed",
