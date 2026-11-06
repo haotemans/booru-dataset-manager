@@ -3,7 +3,7 @@ use bdm_domain::{catalog::SourceTag, ingest::SourcePost, sources::SourceProvider
 use bdm_ports::{CatalogError, IngestError, MediaProvider, SourceCredentials, TagProvider};
 use reqwest::{
     blocking::{Client, Response},
-    header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, REFERER},
+    header::{ACCEPT, CONTENT_TYPE, REFERER},
 };
 use serde_json::Value;
 use std::{
@@ -54,12 +54,6 @@ impl GelbooruProvider {
             .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
             .user_agent("BooruDatasetManager/0.1")
-            // Original image hosts redirect requests without this public site
-            // referer to hotlink.php. Never attach the authenticated API URL.
-            .default_headers(HeaderMap::from_iter([(
-                REFERER,
-                HeaderValue::from_static("https://gelbooru.com/"),
-            )]))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(90))
             .build()
@@ -97,6 +91,15 @@ impl GelbooruProvider {
             ]);
         }
         request
+    }
+
+    fn media_request(&self, value: &str) -> Result<reqwest::blocking::RequestBuilder, IngestError> {
+        // Original hosts redirect requests without this public site referer to
+        // hotlink.php. Never attach the authenticated API URL or its credentials.
+        Ok(self
+            .media_client
+            .get(media_url(value)?)
+            .header(REFERER, "https://gelbooru.com/"))
     }
 
     fn json(&self, section: &str, params: &[(&str, &str)]) -> Result<Value, IngestError> {
@@ -472,8 +475,10 @@ impl MediaProvider for GelbooruProvider {
         if cancel.load(Ordering::Relaxed) {
             return Err(IngestError::Cancelled);
         }
-        let url = media_url(post.file_url.as_deref().ok_or(IngestError::InvalidUrl)?)?;
-        let mut response = self.media_client.get(url).send().map_err(network_error)?;
+        let mut response = self
+            .media_request(post.file_url.as_deref().ok_or(IngestError::InvalidUrl)?)?
+            .send()
+            .map_err(network_error)?;
         self.check_status(&response)?;
         if response.content_length().is_some_and(|size| {
             size > 64 * 1024 * 1024 || (post.file_size != 0 && size != post.file_size)
@@ -574,8 +579,11 @@ mod tests {
             .url()
             .query_pairs()
             .any(|(name, value)| name == "api_key" && value == "unit-secret"));
-        let url = media_url("https://img3.gelbooru.com/images/ab/cd/fixture.png").unwrap();
-        let download = provider.media_client.get(url).build().unwrap();
+        let download = provider
+            .media_request("https://img3.gelbooru.com/images/ab/cd/fixture.png")
+            .unwrap()
+            .build()
+            .unwrap();
         assert!(download.url().query().is_none());
         assert_eq!(download.headers()[REFERER], "https://gelbooru.com/");
         assert!(!download.headers().iter().any(|(_, value)| value
