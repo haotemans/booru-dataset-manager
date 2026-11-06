@@ -8,6 +8,7 @@ mod collections;
 mod diagnostics;
 mod dialogs;
 mod gallery;
+mod gelbooru_settings;
 mod image_editor;
 mod ingest;
 mod media_review;

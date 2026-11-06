@@ -468,6 +468,7 @@ mod tests {
         let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
         let query = "official_art zenless_zone_zero";
         app.library.queries.push(Collection {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 500,
             tag: query.into(),
             api_count: None,

@@ -107,6 +107,7 @@ mod tests {
     #[test]
     fn source_identity_and_category_are_required_before_creating_records() {
         let mut tag = SourceTag {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 1,
             name: "character_(series)".into(),
             category: 4,

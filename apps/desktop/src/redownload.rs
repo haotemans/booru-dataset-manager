@@ -95,9 +95,12 @@ impl BdmApp {
             return Err("当前记录没有来源原图地址，无法自动下载。".into());
         }
         let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
-        let credentials = self
-            .saved_danbooru_credentials()
-            .map_err(|error| error.to_string())?;
+        let source = self.ingest.stored[&id].post.provider;
+        let credentials = match source {
+            bdm_domain::sources::SourceProvider::Danbooru => self.saved_danbooru_credentials(),
+            bdm_domain::sources::SourceProvider::Gelbooru => self.saved_gelbooru_credentials(),
+        }
+        .map_err(|error| error.to_string())?;
         let (sender, receiver) = mpsc::channel();
         let repaint = ctx.clone();
         std::thread::Builder::new()
@@ -106,11 +109,19 @@ impl BdmApp {
                 let result = (|| {
                     let mut repo = bdm_infrastructure::catalog::SqliteCatalog::open(&path)
                         .map_err(|error| error.to_string())?;
-                    let provider = bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
-                        .map_err(|error| error.to_string())?;
+                    let provider: Box<dyn bdm_ports::MediaProvider> = match source {
+                        bdm_domain::sources::SourceProvider::Danbooru => Box::new(
+                            bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
+                                .map_err(|e| e.to_string())?,
+                        ),
+                        bdm_domain::sources::SourceProvider::Gelbooru => Box::new(
+                            bdm_infrastructure::gelbooru::GelbooruProvider::new(credentials)
+                                .map_err(|e| e.to_string())?,
+                        ),
+                    };
                     repo.redownload_original(
                         id as i64,
-                        &provider,
+                        provider.as_ref(),
                         &std::sync::atomic::AtomicBool::new(false),
                     )
                     .map_err(|error| error.to_string())

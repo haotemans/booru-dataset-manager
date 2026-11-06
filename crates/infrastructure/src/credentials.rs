@@ -52,6 +52,26 @@ pub struct NativeCredentialStore {
 }
 
 impl NativeCredentialStore {
+    pub fn gelbooru(directory: Option<&std::path::Path>) -> Self {
+        #[cfg(windows)]
+        use sha2::{Digest, Sha256};
+        #[cfg(not(windows))]
+        let _ = directory;
+        Self {
+            #[cfg(windows)]
+            service: "Booru Dataset Manager".into(),
+            #[cfg(windows)]
+            account: directory.map_or_else(
+                || "gelbooru".into(),
+                |root| {
+                    format!(
+                        "gelbooru-portable-{:x}",
+                        Sha256::digest(root.to_string_lossy().to_lowercase().as_bytes())
+                    )
+                },
+            ),
+        }
+    }
     /// Portable copies must not silently reuse a development account on this PC.
     pub fn danbooru_portable(directory: &std::path::Path) -> Self {
         #[cfg(windows)]

@@ -148,8 +148,11 @@ impl MediaProvider for DanbooruProvider {
         if bytes.len() as u64 > LIMIT {
             return Err(CatalogError::InvalidResponse.into());
         }
-        let posts: Vec<bdm_domain::ingest::SourcePost> =
+        let mut posts: Vec<bdm_domain::ingest::SourcePost> =
             serde_json::from_slice(&bytes).map_err(|_| CatalogError::InvalidResponse)?;
+        for post in &mut posts {
+            post.provider = bdm_domain::sources::SourceProvider::Danbooru;
+        }
         if posts.len() > 100 {
             return Err(CatalogError::InvalidResponse.into());
         }
@@ -357,6 +360,7 @@ fn decode(reader: impl Read, name: &str) -> Result<Option<SourceTag>, CatalogErr
                 return Err(CatalogError::InvalidResponse);
             }
             Ok(SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: tag.id,
                 name: tag.name,
                 category: tag.category,
@@ -584,6 +588,7 @@ mod tests {
             .add(
                 bdm_domain::catalog::CollectionKind::Character,
                 &SourceTag {
+                    provider: bdm_domain::sources::SourceProvider::Danbooru,
                     id: 1,
                     name: "public-smoke-scope".into(),
                     category: 4,

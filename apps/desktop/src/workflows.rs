@@ -57,6 +57,7 @@ mod tests {
                 .add(
                     bdm_domain::catalog::CollectionKind::Character,
                     &bdm_domain::catalog::SourceTag {
+                        provider: bdm_domain::sources::SourceProvider::Danbooru,
                         id: 1,
                         name: "character".into(),
                         category: 4,
@@ -76,6 +77,7 @@ mod tests {
             .unwrap();
             let bytes = bytes.into_inner();
             let post = bdm_domain::ingest::SourcePost {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 10,
                 md5: format!("{:x}", Md5::digest(&bytes)),
                 file_url: Some("https://cdn.donmai.us/image.png".into()),

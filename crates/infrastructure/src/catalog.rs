@@ -9,6 +9,7 @@ const MEDIA_MIGRATION: &str = include_str!("migrations/002_media.sql");
 const WORKFLOW_MIGRATION: &str = include_str!("migrations/003_workflows.sql");
 const DISCOVERY_MIGRATION: &str = include_str!("migrations/004_discovered_artists.sql");
 const QUERY_MIGRATION: &str = include_str!("migrations/005_download_queries.sql");
+const SOURCE_MIGRATION: &str = include_str!("migrations/006_source_providers.sql");
 
 pub struct SqliteCatalog {
     pub(crate) connection: Connection,
@@ -27,7 +28,7 @@ impl SqliteCatalog {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(|_| CatalogError::Schema)?;
-        if (1..5).contains(&version) {
+        if (1..6).contains(&version) {
             let backup = path.with_extension(format!("pre-v{version}.sqlite3"));
             if !backup.exists() {
                 connection
@@ -76,7 +77,7 @@ impl SqliteCatalog {
                 )
                 .map_err(|_| CatalogError::Schema)?;
             }
-            1..=5 => {
+            1..=6 => {
                 let saved: String = tx
                     .query_row(
                         "SELECT checksum FROM schema_migrations WHERE version=1",
@@ -186,6 +187,30 @@ impl SqliteCatalog {
                 return Err(CatalogError::Schema);
             }
         }
+        let source_checksum = format!(
+            "{:x}",
+            Sha256::digest(SOURCE_MIGRATION.replace("\r\n", "\n").as_bytes())
+        );
+        if version < 6 {
+            tx.execute_batch(SOURCE_MIGRATION)
+                .map_err(|_| CatalogError::Schema)?;
+            tx.execute(
+                "INSERT INTO schema_migrations(version,checksum) VALUES(6,?1)",
+                [&source_checksum],
+            )
+            .map_err(|_| CatalogError::Schema)?;
+        } else {
+            let saved: String = tx
+                .query_row(
+                    "SELECT checksum FROM schema_migrations WHERE version=6",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| CatalogError::Schema)?;
+            if saved != source_checksum {
+                return Err(CatalogError::Schema);
+            }
+        }
         let broken: bool = tx
             .prepare("PRAGMA foreign_key_check")
             .and_then(|mut query| Ok(query.query([])?.next()?.is_some()))
@@ -211,6 +236,11 @@ impl SqliteCatalog {
 }
 
 fn record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRecord> {
+    let provider = match row.get::<_, String>(5)?.as_str() {
+        "danbooru" => bdm_domain::sources::SourceProvider::Danbooru,
+        "gelbooru" => bdm_domain::sources::SourceProvider::Gelbooru,
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
     let category: u8 = row.get(2)?;
     let kind = match category {
         0 => CollectionKind::Query,
@@ -227,10 +257,12 @@ fn record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRecord> {
     let source_id: Option<i64> = row.get(1)?;
     let post_count: Option<i64> = row.get(4)?;
     Ok(CollectionRecord {
+        provider,
         id: row.get(0)?,
         kind,
         name: name.clone(),
         source: source_id.map(|id| SourceTag {
+            provider,
             id,
             category,
             name,
@@ -241,7 +273,7 @@ fn record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRecord> {
 
 impl CollectionRepository for SqliteCatalog {
     fn list(&self) -> Result<Vec<CollectionRecord>, CatalogError> {
-        self.connection.prepare("SELECT id, source_tag_id, category, tag, remote_post_count FROM collections ORDER BY id")
+        self.connection.prepare("SELECT id, source_tag_id, category, tag, remote_post_count, provider FROM collections ORDER BY id")
             .and_then(|mut query| query.query_map([], record)?.collect()).map_err(|_| CatalogError::Storage)
     }
 
@@ -260,7 +292,7 @@ impl CollectionRepository for SqliteCatalog {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| CatalogError::Storage)?;
-        let existing = tx.query_row("SELECT id, source_tag_id, category, tag, remote_post_count FROM collections WHERE provider='danbooru' AND (source_tag_id=?1 OR (tag=?2 AND category=?3))", params![tag.id, tag.name, kind.category()], record).optional().map_err(|_| CatalogError::Storage)?;
+        let existing = tx.query_row("SELECT id, source_tag_id, category, tag, remote_post_count, provider FROM collections WHERE provider=?4 AND (source_tag_id=?1 OR (tag=?2 AND category=?3))", params![tag.id, tag.name, kind.category(), tag.provider.key()], record).optional().map_err(|_| CatalogError::Storage)?;
         if let Some(record) = existing {
             if record.kind != kind
                 || record
@@ -286,8 +318,9 @@ impl CollectionRepository for SqliteCatalog {
                 created: false,
             });
         }
-        tx.execute("INSERT INTO collections(provider, source_tag_id, category, tag, remote_post_count) VALUES('danbooru', ?1, ?2, ?3, ?4)", params![tag.id, tag.category, tag.name, tag.post_count]).map_err(|_| CatalogError::Storage)?;
+        tx.execute("INSERT INTO collections(provider, source_tag_id, category, tag, remote_post_count) VALUES(?5, ?1, ?2, ?3, ?4)", params![tag.id, tag.category, tag.name, tag.post_count, tag.provider.key()]).map_err(|_| CatalogError::Storage)?;
         let record = CollectionRecord {
+            provider: tag.provider,
             id: tx.last_insert_rowid(),
             kind,
             name: tag.name.clone(),
@@ -308,7 +341,7 @@ impl CollectionRepository for SqliteCatalog {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| CatalogError::Storage)?;
         let existing = tx.query_row(
-            "SELECT id,source_tag_id,category,tag,remote_post_count FROM collections WHERE provider='danbooru' AND category=0 AND tag=?1",
+            "SELECT id,source_tag_id,category,tag,remote_post_count,provider FROM collections WHERE provider='danbooru' AND category=0 AND tag=?1",
             [&query], record
         ).optional().map_err(|_| CatalogError::Storage)?;
         if let Some(record) = existing {
@@ -323,6 +356,7 @@ impl CollectionRepository for SqliteCatalog {
         )
         .map_err(|_| CatalogError::Storage)?;
         let record = CollectionRecord {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: tx.last_insert_rowid(),
             kind: CollectionKind::Query,
             name: query,
@@ -354,7 +388,7 @@ impl CollectionRepository for SqliteCatalog {
         let version: i64 = tx
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|_| CatalogError::Schema)?;
-        if version != 5 {
+        if version != 6 {
             return Err(CatalogError::Schema);
         }
         for (kind, id) in records {
@@ -388,12 +422,99 @@ mod tests {
     use super::*;
 
     #[test]
+    fn v5_provider_migration_preserves_original_identities_jobs_and_foreign_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("catalog.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        for (index, sql) in [
+            MIGRATION,
+            MEDIA_MIGRATION,
+            WORKFLOW_MIGRATION,
+            DISCOVERY_MIGRATION,
+            QUERY_MIGRATION,
+        ]
+        .iter()
+        .enumerate()
+        {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(?1,?2)",
+                    params![
+                        index + 1,
+                        format!("{:x}", Sha256::digest(sql.replace("\r\n", "\n").as_bytes()))
+                    ],
+                )
+                .unwrap();
+        }
+        connection.execute("INSERT INTO collections(id,provider,source_tag_id,category,tag,remote_post_count) VALUES(7,'danbooru',9,4,'character',1)",[]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO media(id,md5,metadata) VALUES(11,'fixture','{}')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO media_sources(post_id,media_id,metadata) VALUES(101,11,'{}')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("INSERT INTO collection_media VALUES(7,11)", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO ingest_jobs(id,collection_id,metadata) VALUES(3,7,'{}')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("INSERT INTO ingest_outcomes VALUES(3,101,'imported')", [])
+            .unwrap();
+        drop(connection);
+        let repo = SqliteCatalog::open(&path).unwrap();
+        assert!(path.with_extension("pre-v5.sqlite3").is_file());
+        repo.connection.execute("INSERT INTO media_sources(post_id,media_id,metadata,provider) VALUES(101,11,'{}','gelbooru')",[]).unwrap();
+        repo.connection.execute("INSERT INTO ingest_outcomes(job_id,post_id,outcome,provider) VALUES(3,101,'duplicate','gelbooru')",[]).unwrap();
+        assert_eq!(repo.list().unwrap()[0].id, 7);
+        assert_eq!(
+            repo.list().unwrap()[0].provider,
+            bdm_domain::sources::SourceProvider::Danbooru
+        );
+        assert_eq!(
+            repo.connection
+                .query_row("SELECT count(*) FROM media_sources", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            repo.connection
+                .query_row("SELECT count(*) FROM ingest_outcomes", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            repo.connection
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn mixed_artist_and_query_deletion_validates_all_kinds_atomically() {
         let mut repo = SqliteCatalog::in_memory().unwrap();
         let artist = repo
             .add(
                 CollectionKind::Artist,
                 &SourceTag {
+                    provider: bdm_domain::sources::SourceProvider::Danbooru,
                     id: 99,
                     name: "synthetic_artist".into(),
                     category: 1,
@@ -521,6 +642,7 @@ mod tests {
 
     fn tag() -> SourceTag {
         SourceTag {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 41,
             name: "synthetic_character".into(),
             category: 4,

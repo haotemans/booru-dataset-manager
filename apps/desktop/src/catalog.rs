@@ -11,6 +11,7 @@ use std::{
 };
 
 struct PendingLookup {
+    source: std::sync::Arc<std::sync::atomic::AtomicU8>,
     generation: u64,
     kind: CollectionKind,
     receiver: Receiver<Result<SourceTag, CatalogError>>,
@@ -18,6 +19,7 @@ struct PendingLookup {
 
 #[derive(Default)]
 pub struct CatalogSettings {
+    pub lookup_provider: Option<bdm_domain::sources::SourceProvider>,
     pub repository: Option<Box<dyn CollectionRepository>>,
     pub path: Option<PathBuf>,
     pub error: Option<CatalogError>,
@@ -60,6 +62,7 @@ fn collection(record: &CollectionRecord) -> Result<Collection, CatalogError> {
         return Err(CatalogError::InvalidResponse);
     }
     Ok(Collection {
+        provider: record.provider,
         id: usize::try_from(record.id)
             .ok()
             .filter(|id| *id > 0)
@@ -88,6 +91,7 @@ impl BdmApp {
                 let (sender, receiver) = mpsc::channel();
                 self.catalog.capture_sender = Some(sender);
                 self.catalog.pending = Some(PendingLookup {
+                    source: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
                     generation: self.catalog.generation,
                     kind: CollectionKind::Character,
                     receiver,
@@ -111,6 +115,7 @@ impl BdmApp {
             }
             _ => {
                 self.catalog.found = Some(SourceTag {
+                    provider: bdm_domain::sources::SourceProvider::Danbooru,
                     id: 41,
                     name: self.input_tag.clone(),
                     category: 4,
@@ -235,6 +240,7 @@ impl BdmApp {
         self.catalog.generation = self.catalog.generation.wrapping_add(1);
         self.catalog.found = None;
         self.catalog.lookup_error = None;
+        self.catalog.lookup_provider = None;
     }
 
     pub fn tag_lookup_pending(&self) -> bool {
@@ -262,27 +268,68 @@ impl BdmApp {
         let name =
             bdm_application::catalog::normalize_tag(&self.input_tag).map_err(|e| e.to_string())?;
         // Only explicitly saved credentials are sent. An unsaved account/key draft is never used.
-        let credentials = self.tag_lookup_credentials().map_err(|error| {
-            self.catalog.lookup_error = Some(error);
-            error.to_string()
-        })?;
+        let mode = self.prefs.download_source;
+        let credentials = if mode == bdm_domain::sources::DownloadSource::Gelbooru {
+            Ok(None)
+        } else {
+            self.tag_lookup_credentials()
+        };
+        if let Err(error) = &credentials {
+            self.catalog.lookup_error = Some(*error);
+            self.catalog.lookup_provider = Some(bdm_domain::sources::SourceProvider::Danbooru);
+            return Err(error.to_string());
+        }
+        let gelbooru_credentials = self.saved_gelbooru_credentials();
         self.catalog.found = None;
         self.form_error.clear();
         self.catalog.lookup_error = None;
         let (sender, receiver) = mpsc::channel();
         let repaint = ctx.clone();
+        let source = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+            if mode == bdm_domain::sources::DownloadSource::Gelbooru {
+                1
+            } else {
+                0
+            },
+        ));
+        let worker_source = source.clone();
         std::thread::Builder::new()
             .name("danbooru-tag-lookup".into())
             .spawn(move || {
-                let result = bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
-                    .and_then(|provider| {
-                        bdm_application::catalog::lookup_tag(&provider, kind, &name)
-                    });
+                let primary = if mode == bdm_domain::sources::DownloadSource::Gelbooru {
+                    Err(CatalogError::Network)
+                } else {
+                    credentials
+                        .and_then(bdm_infrastructure::danbooru::DanbooruProvider::new)
+                        .and_then(|provider| {
+                            bdm_application::catalog::lookup_tag(&provider, kind, &name)
+                        })
+                };
+                let use_gelbooru = mode == bdm_domain::sources::DownloadSource::Gelbooru
+                    || (mode == bdm_domain::sources::DownloadSource::Automatic
+                        && matches!(
+                            primary,
+                            Err(CatalogError::Network
+                                | CatalogError::Timeout
+                                | CatalogError::Service
+                                | CatalogError::NotFound)
+                        ));
+                let result = if use_gelbooru {
+                    worker_source.store(1, std::sync::atomic::Ordering::Relaxed);
+                    gelbooru_credentials
+                        .and_then(bdm_infrastructure::gelbooru::GelbooruProvider::new)
+                        .and_then(|provider| {
+                            bdm_application::catalog::lookup_tag(&provider, kind, &name)
+                        })
+                } else {
+                    primary
+                };
                 let _ = sender.send(result);
                 repaint.request_repaint();
             })
             .map_err(|_| CatalogError::Service.to_string())?;
         self.catalog.pending = Some(PendingLookup {
+            source,
             generation: self.catalog.generation,
             kind,
             receiver,
@@ -318,6 +365,13 @@ impl BdmApp {
             return;
         }
         self.catalog.found = None;
+        self.catalog.lookup_provider = Some(
+            if pending.source.load(std::sync::atomic::Ordering::Relaxed) == 1 {
+                bdm_domain::sources::SourceProvider::Gelbooru
+            } else {
+                bdm_domain::sources::SourceProvider::Danbooru
+            },
+        );
         self.catalog.lookup_error = result.as_ref().err().copied();
         match result {
             Ok(tag) => self.catalog.found = Some(tag),
@@ -448,6 +502,7 @@ mod tests {
     }
     fn tag(id: i64) -> SourceTag {
         SourceTag {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id,
             name: format!("synthetic_character_{id}"),
             category: 4,
@@ -461,6 +516,7 @@ mod tests {
     fn pending(app: &mut BdmApp) -> mpsc::Sender<Result<SourceTag, CatalogError>> {
         let (sender, receiver) = mpsc::channel();
         app.catalog.pending = Some(PendingLookup {
+            source: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             generation: app.catalog.generation,
             kind: CollectionKind::Character,
             receiver,
@@ -560,6 +616,7 @@ mod tests {
         .unwrap();
         let bytes = bytes.into_inner();
         let post = bdm_domain::ingest::SourcePost {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 100,
             md5: format!("{:x}", Md5::digest(&bytes)),
             file_url: Some("https://cdn.donmai.us/fixture.png".into()),
@@ -647,6 +704,7 @@ mod tests {
         repo.add(
             CollectionKind::Artist,
             &SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 42,
                 name: "later_artist".into(),
                 category: 1,
@@ -736,6 +794,7 @@ mod tests {
         assert!(app.library.characters.is_empty());
         assert!(app.catalog.found.is_some());
         app.library.characters.push(Collection {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 1,
             tag: "keep".into(),
             api_count: Some(0),

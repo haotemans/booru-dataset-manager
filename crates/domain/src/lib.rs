@@ -7,4 +7,5 @@ pub mod ingest;
 pub mod media;
 pub mod metadata;
 pub mod review;
+pub mod sources;
 pub mod tags;

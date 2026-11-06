@@ -372,7 +372,15 @@ impl BdmApp {
                         || if self.demo {
                             (m.id % 2 + 1) == self.source_filter
                         } else {
-                            self.source_filter == 1
+                            let provider = if self.source_filter == 1 {
+                                bdm_domain::sources::SourceProvider::Danbooru
+                            } else {
+                                bdm_domain::sources::SourceProvider::Gelbooru
+                            };
+                            self.ingest
+                                .source_providers
+                                .get(&m.id)
+                                .is_some_and(|sources| sources.contains(&provider))
                         })
                     && (!self.minimum_only || (m.width >= 1600 && m.height >= 1600))
             })
@@ -621,7 +629,14 @@ impl BdmApp {
                                 .on_hover_text(format!(
                                     "{} · {}",
                                     self.media_name(m.id),
-                                    if !self.demo || m.id.is_multiple_of(2) {
+                                    if !self.demo {
+                                        self.ingest
+                                            .stored
+                                            .get(&m.id)
+                                            .map_or("来源未知", |media| {
+                                                media.post.provider.label()
+                                            })
+                                    } else if m.id.is_multiple_of(2) {
                                         "Danbooru"
                                     } else {
                                         "Gelbooru"
@@ -737,6 +752,7 @@ mod tests {
         app.navigate(Page::Artist);
         app.library.artists.clear();
         app.library.queries.push(Collection {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 500,
             tag: "official_art zenless_zone_zero".into(),
             api_count: None,

@@ -1928,6 +1928,7 @@ mod tests {
     #[test]
     fn original_tag_groups_use_source_categories_without_losing_tokens_or_copy_text() {
         let post = bdm_domain::ingest::SourcePost {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 3,
             md5: String::new(),
             file_url: None,

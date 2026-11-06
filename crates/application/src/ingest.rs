@@ -1,6 +1,102 @@
 use bdm_domain::ingest::IngestJob;
+use bdm_domain::sources::{DownloadSource, SourceProvider};
 use bdm_ports::{IngestError, IngestRepository, MediaProvider};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+pub fn source_unavailable(error: &IngestError) -> bool {
+    matches!(
+        error,
+        IngestError::Catalog(
+            bdm_ports::CatalogError::Network
+                | bdm_ports::CatalogError::Timeout
+                | bdm_ports::CatalogError::Service
+        )
+    )
+}
+
+struct SourceRouter<'a> {
+    metadata: &'a dyn MediaProvider,
+    danbooru: &'a dyn MediaProvider,
+    gelbooru: &'a dyn MediaProvider,
+}
+impl MediaProvider for SourceRouter<'_> {
+    fn posts(
+        &self,
+        tag: &str,
+        before: Option<i64>,
+    ) -> Result<Vec<bdm_domain::ingest::SourcePost>, IngestError> {
+        self.metadata.posts(tag, before)
+    }
+    fn download(
+        &self,
+        post: &bdm_domain::ingest::SourcePost,
+        path: &std::path::Path,
+        cancel: &AtomicBool,
+    ) -> Result<(), IngestError> {
+        match post.provider {
+            SourceProvider::Danbooru => self.danbooru.download(post, path, cancel),
+            SourceProvider::Gelbooru => self.gelbooru.download(post, path, cancel),
+        }
+    }
+}
+
+/// A persisted source switch has its own cursor; old failures retain their original provider.
+pub fn run_with_fallback(
+    danbooru: &dyn MediaProvider,
+    gelbooru: &dyn MediaProvider,
+    repo: &mut dyn IngestRepository,
+    job: &mut IngestJob,
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(&IngestJob),
+) -> Result<(), IngestError> {
+    let metadata = match job.provider {
+        SourceProvider::Danbooru => danbooru,
+        SourceProvider::Gelbooru => gelbooru,
+    };
+    let router = SourceRouter {
+        metadata,
+        danbooru,
+        gelbooru,
+    };
+    let result = run(&router, repo, job, cancel, &mut progress);
+    let no_eligible = result.is_ok()
+        && job.progress.imported == 0
+        && job.progress.duplicates == 0
+        && job.progress.failed == 0;
+    if job.provider == SourceProvider::Danbooru
+        && job.source_mode == DownloadSource::Automatic
+        && !cancel.load(Ordering::Relaxed)
+        && (result.as_ref().err().is_some_and(source_unavailable) || no_eligible)
+    {
+        job.primary_before_id = job.before_id;
+        job.provider = SourceProvider::Gelbooru;
+        job.before_id = None;
+        job.fallback_reason = Some(
+            if no_eligible {
+                "Danbooru 没有符合下载条件的结果，已切换 Gelbooru。"
+            } else {
+                "Danbooru 连接／服务异常，有限重试后已切换 Gelbooru。"
+            }
+            .into(),
+        );
+        job.error = None;
+        job.state = "queued".into();
+        repo.save_job(job)?;
+        progress(job);
+        return run(
+            &SourceRouter {
+                metadata: gelbooru,
+                danbooru,
+                gelbooru,
+            },
+            repo,
+            job,
+            cancel,
+            progress,
+        );
+    }
+    result
+}
 
 /// Descending ID cursors avoid numbered-page limits and make explicit resume idempotent.
 pub fn run(
@@ -56,9 +152,12 @@ fn run_pages(
         let outcome = process_post(provider, repo, job, &post, cancel).inspect_err(|error| {
             job.error = Some(format!("处理源图 {} 时失败：{error}", post.id));
         })?;
-        retry(cancel, || repo.record_outcome(job.id, post.id, outcome))?;
+        retry(cancel, || {
+            repo.record_source_outcome(job.id, &post, outcome)
+        })?;
         if outcome != "failed" {
-            job.failed_posts.retain(|p| p.id != post.id);
+            job.failed_posts
+                .retain(|p| p.id != post.id || p.provider != post.provider);
             job.progress.failed = job.progress.failed.saturating_sub(1);
         }
         retry(cancel, || repo.save_job(job))?;
@@ -75,6 +174,7 @@ fn run_pages(
         let mut previous = job.before_id.unwrap_or(i64::MAX);
         for post in &posts {
             if post.id <= 0
+                || post.provider != job.provider
                 || post.id >= previous
                 || !bdm_domain::catalog::matches_download_query(&job.tag, &post.tag_string)
             {
@@ -90,11 +190,18 @@ fn run_pages(
                 process_post(provider, repo, job, &post, cancel).inspect_err(|error| {
                     job.error = Some(format!("处理源图 {} 时失败：{error}", post.id));
                 })?;
-            if outcome == "failed" && !job.failed_posts.iter().any(|p| p.id == post.id) {
+            if outcome == "failed"
+                && !job
+                    .failed_posts
+                    .iter()
+                    .any(|p| p.id == post.id && p.provider == post.provider)
+            {
                 job.failed_posts.push(post.clone());
                 job.progress.failed += 1;
             }
-            retry(cancel, || repo.record_outcome(job.id, post.id, outcome))?;
+            retry(cancel, || {
+                repo.record_source_outcome(job.id, &post, outcome)
+            })?;
             job.progress.examined += 1;
             job.before_id = Some(post.id);
             retry(cancel, || repo.save_job(job))?;

@@ -50,6 +50,7 @@ pub struct BdmApp {
     pub model_draft: String,
     pub minimum_short_side_draft: u32,
     pub danbooru: crate::sources::DanbooruSettings,
+    pub gelbooru: crate::gelbooru_settings::GelbooruSettings,
     pub catalog: crate::catalog::CatalogSettings,
     pub ingest: crate::ingest::IngestSettings,
     pub workflows: crate::workflows::WorkflowSettings,
@@ -81,6 +82,7 @@ impl BdmApp {
         let mut app = Self::from_preferences(prefs, preview, capture_dir);
         if app.capture_dir.is_none() && !app.demo {
             app.load_danbooru_settings();
+            app.load_gelbooru_settings();
             if !app.demo {
                 app.open_catalog(&crate::paths::data_directory().join("catalog.sqlite3"));
             }
@@ -101,6 +103,8 @@ impl BdmApp {
         let model_draft = prefs.model_path.clone();
         let minimum_short_side_draft = prefs.minimum_short_side;
         let danbooru = crate::sources::DanbooruSettings::new(prefs.danbooru_username.clone());
+        let gelbooru =
+            crate::gelbooru_settings::GelbooruSettings::new(prefs.gelbooru_user_id.clone());
         Self {
             prefs,
             library: if demo {
@@ -145,6 +149,7 @@ impl BdmApp {
             model_draft,
             minimum_short_side_draft,
             danbooru,
+            gelbooru,
             catalog: crate::catalog::CatalogSettings::default(),
             ingest: crate::ingest::IngestSettings::default(),
             workflows: crate::workflows::WorkflowSettings::default(),
@@ -386,6 +391,7 @@ impl BdmApp {
         if download_queries && self.capture_step == 0 && self.capture_frames == 0 {
             self.library = crate::model::Library::demo();
             self.library.queries.push(crate::model::Collection {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 500,
                 tag: "official_art zenless_zone_zero".into(),
                 api_count: None,
@@ -399,6 +405,10 @@ impl BdmApp {
                 .into_iter()
                 .enumerate()
                 .map(|(index, tag)| bdm_domain::ingest::IngestJob {
+                    provider: bdm_domain::sources::SourceProvider::Danbooru,
+                    source_mode: bdm_domain::sources::DownloadSource::Automatic,
+                    primary_before_id: None,
+                    fallback_reason: None,
                     dismissed: false,
                     id: index as i64 + 1,
                     tag: tag.into(),
@@ -1068,6 +1078,7 @@ impl eframe::App for BdmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_tag_lookup(ctx);
         self.poll_danbooru_verification(ctx);
+        self.poll_gelbooru_verification(ctx);
         self.poll_ingest(ctx);
         self.ingest.thumbnails.poll(ctx, &mut self.ingest.textures);
         self.poll_workflows(ctx);

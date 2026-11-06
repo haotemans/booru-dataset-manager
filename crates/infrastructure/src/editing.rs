@@ -733,7 +733,10 @@ impl SqliteCatalog {
             return Err(IngestError::Cancelled);
         }
         let bytes = storage(fs::read(&downloaded))?;
-        if bytes.len() as u64 != media.post.file_size || bytes.len() > 64 * 1024 * 1024 {
+        if (media.post.file_size != 0 && bytes.len() as u64 != media.post.file_size)
+            || bytes.is_empty()
+            || bytes.len() > 64 * 1024 * 1024
+        {
             return Err(IngestError::InvalidMedia);
         }
         if format!("{:x}", md5::Md5::digest(&bytes)) != media.post.md5 {

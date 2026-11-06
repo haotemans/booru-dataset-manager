@@ -117,6 +117,33 @@ pub(crate) fn flatten_on_white(image: &image::DynamicImage) -> image::DynamicIma
 }
 
 impl SqliteCatalog {
+    pub fn media_source_providers(
+        &self,
+    ) -> Result<
+        std::collections::BTreeMap<usize, BTreeSet<bdm_domain::sources::SourceProvider>>,
+        IngestError,
+    > {
+        let mut query = storage(
+            self.connection
+                .prepare("SELECT media_id,provider FROM media_sources"),
+        )?;
+        let mut providers: std::collections::BTreeMap<
+            usize,
+            BTreeSet<bdm_domain::sources::SourceProvider>,
+        > = Default::default();
+        for row in storage(query.query_map([], |row| {
+            Ok((row.get::<_, usize>(0)?, row.get::<_, String>(1)?))
+        }))? {
+            let (id, provider) = storage(row)?;
+            let provider = match provider.as_str() {
+                "danbooru" => bdm_domain::sources::SourceProvider::Danbooru,
+                "gelbooru" => bdm_domain::sources::SourceProvider::Gelbooru,
+                _ => return Err(IngestError::Storage),
+            };
+            providers.entry(id).or_default().insert(provider);
+        }
+        Ok(providers)
+    }
     pub fn media_by_id(&self, id: i64) -> Result<Option<StoredMedia>, IngestError> {
         let row: Option<(String, bool)> = storage(
             self.connection
@@ -264,6 +291,10 @@ impl SqliteCatalog {
             [collection_id],
         ))?;
         let job = IngestJob {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
+            source_mode: bdm_domain::sources::DownloadSource::Automatic,
+            primary_before_id: None,
+            fallback_reason: None,
             dismissed: false,
             id: tx.last_insert_rowid(),
             collection_id,
@@ -292,16 +323,18 @@ impl SqliteCatalog {
     ) -> Result<BTreeSet<i64>, IngestError> {
         let mut ids = BTreeSet::from([collection]);
         let mut query = storage(self.connection.prepare_cached(
-            "SELECT id FROM collections WHERE provider='danbooru' AND tag=?1 AND category=?2",
+            "SELECT id FROM collections WHERE provider=?3 AND tag=?1 AND category=?2",
         ))?;
         for (tags, category) in [
             (&post.tag_string_artist, 1),
             (&post.tag_string_character, 4),
         ] {
             for name in tags.split_whitespace() {
-                for row in
-                    storage(query.query_map(params![name, category], |row| row.get::<_, i64>(0)))?
-                {
+                for row in storage(
+                    query.query_map(params![name, category, post.provider.key()], |row| {
+                        row.get::<_, i64>(0)
+                    }),
+                )? {
                     ids.insert(storage(row)?);
                 }
             }
@@ -335,8 +368,8 @@ impl SqliteCatalog {
             ))?;
         }
         storage(tx.execute(
-            "INSERT OR IGNORE INTO media_sources(post_id,media_id,metadata) VALUES(?1,?2,?3)",
-            params![media.post.id, id, source],
+            "INSERT OR IGNORE INTO media_sources(post_id,media_id,metadata,provider) VALUES(?1,?2,?3,?4)",
+            params![media.post.id, id, source, media.post.provider.key()],
         ))?;
         for collection in &media.collections {
             storage(tx.execute(
@@ -452,6 +485,11 @@ impl SqliteCatalog {
             (&post.tag_string_meta, 5),
         ] {
             for name in tags.split_whitespace() {
+                if post.provider == bdm_domain::sources::SourceProvider::Gelbooru
+                    && rules.categories.contains_key(name)
+                {
+                    continue;
+                }
                 changed |= rules.categories.insert(name.into(), category) != Some(category);
             }
         }
@@ -471,18 +509,18 @@ fn attach_post_collections(
     media: i64,
 ) -> Result<(), IngestError> {
     let mut insert = storage(tx.prepare_cached(
-        "INSERT OR IGNORE INTO collections(provider, category, tag) VALUES('danbooru', 1, ?1)",
+        "INSERT OR IGNORE INTO collections(provider, category, tag) VALUES(?2, 1, ?1)",
     ))?;
     for name in post.tag_string_artist.split_whitespace() {
-        storage(insert.execute([name]))?;
+        storage(insert.execute(params![name, post.provider.key()]))?;
     }
-    let mut attach = storage(tx.prepare_cached("INSERT OR IGNORE INTO collection_media(collection_id,media_id) SELECT id,?1 FROM collections WHERE provider='danbooru' AND category=?2 AND tag=?3"))?;
+    let mut attach = storage(tx.prepare_cached("INSERT OR IGNORE INTO collection_media(collection_id,media_id) SELECT id,?1 FROM collections WHERE provider=?4 AND category=?2 AND tag=?3"))?;
     for (tags, category) in [
         (&post.tag_string_artist, 1),
         (&post.tag_string_character, 4),
     ] {
         for name in tags.split_whitespace() {
-            storage(attach.execute(params![media, category, name]))?;
+            storage(attach.execute(params![media, category, name, post.provider.key()]))?;
         }
     }
     // Queries group existing and future imports, independently of the source artist.
@@ -518,8 +556,21 @@ impl IngestRepository for SqliteCatalog {
 
     fn record_outcome(&mut self, job: i64, post: i64, outcome: &str) -> Result<(), IngestError> {
         storage(self.connection.execute(
-            "INSERT OR REPLACE INTO ingest_outcomes VALUES(?1,?2,?3)",
+            "INSERT OR REPLACE INTO ingest_outcomes(job_id,post_id,outcome) VALUES(?1,?2,?3)",
             params![job, post, outcome],
+        ))?;
+        Ok(())
+    }
+
+    fn record_source_outcome(
+        &mut self,
+        job: i64,
+        post: &SourcePost,
+        outcome: &str,
+    ) -> Result<(), IngestError> {
+        storage(self.connection.execute(
+            "INSERT OR REPLACE INTO ingest_outcomes(job_id,post_id,outcome,provider) VALUES(?1,?2,?3,?4)",
+            params![job,post.id,outcome,post.provider.key()]
         ))?;
         Ok(())
     }
@@ -578,7 +629,7 @@ impl SqliteCatalog {
         post: &SourcePost,
         collection: i64,
     ) -> Result<bool, IngestError> {
-        let existing: Option<(i64,String)> = storage(self.connection.query_row("SELECT m.id,s.metadata FROM media m JOIN media_sources s ON s.media_id=m.id WHERE s.post_id=?1", [post.id], |row| Ok((row.get(0)?,row.get(1)?))).optional())?;
+        let existing: Option<(i64,String)> = storage(self.connection.query_row("SELECT m.id,s.metadata FROM media m JOIN media_sources s ON s.media_id=m.id WHERE s.post_id=?1 AND s.provider=?2", params![post.id,post.provider.key()], |row| Ok((row.get(0)?,row.get(1)?))).optional())?;
         let Some((id, source)) = existing else {
             return Ok(false);
         };
@@ -658,7 +709,10 @@ impl SqliteCatalog {
                 .take(64 * 1024 * 1024 + 1)
                 .read_to_end(&mut bytes),
         )?;
-        if bytes.len() as u64 != post.file_size || bytes.len() > 64 * 1024 * 1024 {
+        if (post.file_size != 0 && bytes.len() as u64 != post.file_size)
+            || bytes.is_empty()
+            || bytes.len() > 64 * 1024 * 1024
+        {
             return Err(IngestError::InvalidMedia);
         }
         if format!("{:x}", Md5::digest(&bytes)) != post.md5 {

@@ -47,6 +47,7 @@ mod tests {
                 flatten_transparency: true,
                 edit: None,
                 post: SourcePost {
+                    provider: bdm_domain::sources::SourceProvider::Danbooru,
                     id: 100,
                     md5: String::new(),
                     file_url: None,
@@ -304,6 +305,7 @@ mod tests {
 
 #[derive(Default)]
 pub struct IngestSettings {
+    pub source_providers: BTreeMap<usize, BTreeSet<bdm_domain::sources::SourceProvider>>,
     pub jobs: Vec<IngestJob>,
     pub stored: BTreeMap<usize, StoredMedia>,
     pub textures: BTreeMap<usize, egui::TextureHandle>,
@@ -364,6 +366,7 @@ impl BdmApp {
             .map_err(|e| e.to_string())?;
         self.ingest.missing_originals = stored.iter().filter(|m| !m.path.is_file()).count();
         self.ingest.jobs = repo.list_jobs().map_err(|e| e.to_string())?;
+        self.ingest.source_providers = repo.media_source_providers().map_err(|e| e.to_string())?;
         self.library.media = stored
             .iter()
             .map(|item| {
@@ -474,7 +477,14 @@ impl BdmApp {
         self.ingest
             .stored
             .get(&id)
-            .map(|m| format!("danbooru_{}.{}", m.post.id, m.post.file_ext))
+            .map(|m| {
+                format!(
+                    "{}_{}.{}",
+                    m.post.provider.key(),
+                    m.post.id,
+                    m.post.file_ext
+                )
+            })
             .unwrap_or_else(|| format!("sample_{:03}.png", id + 1))
     }
 
@@ -619,9 +629,8 @@ impl BdmApp {
             return Err("正在处理图片，请等待完成或暂停处理任务后再下载。".into());
         }
         let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
-        let credentials = self
-            .saved_danbooru_credentials()
-            .map_err(|e| e.to_string())?;
+        let credentials = self.saved_danbooru_credentials();
+        let gelbooru_credentials = self.saved_gelbooru_credentials();
         let mut repo =
             bdm_infrastructure::catalog::SqliteCatalog::open(&path).map_err(|e| e.to_string())?;
         let jobs = if let Some(id) = resume {
@@ -650,14 +659,28 @@ impl BdmApp {
                 .iter()
                 .filter(|c| ids.contains(&c.id))
                 .map(|c| {
-                    repo.new_job_with_transparency(
-                        c.id as i64,
-                        c.tag.clone(),
-                        root.clone(),
-                        self.prefs.minimum_short_side,
-                        self.prefs.flatten_transparency,
-                    )
-                    .map_err(|e| e.to_string())
+                    let mut job = repo
+                        .new_job_with_transparency(
+                            c.id as i64,
+                            c.tag.clone(),
+                            root.clone(),
+                            self.prefs.minimum_short_side,
+                            self.prefs.flatten_transparency,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    job.source_mode = self.prefs.download_source;
+                    job.provider = match job.source_mode {
+                        bdm_domain::sources::DownloadSource::Danbooru => {
+                            bdm_domain::sources::SourceProvider::Danbooru
+                        }
+                        bdm_domain::sources::DownloadSource::Gelbooru => {
+                            bdm_domain::sources::SourceProvider::Gelbooru
+                        }
+                        bdm_domain::sources::DownloadSource::Automatic => c.provider,
+                    };
+                    bdm_ports::IngestRepository::save_job(&mut repo, &job)
+                        .map_err(|e| e.to_string())?;
+                    Ok(job)
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
@@ -668,21 +691,34 @@ impl BdmApp {
         std::thread::Builder::new()
             .name("image-ingestion".into())
             .spawn(move || {
-                let provider = bdm_infrastructure::danbooru::DanbooruProvider::new(credentials);
+                let danbooru: Box<dyn bdm_ports::MediaProvider> = match credentials
+                    .and_then(bdm_infrastructure::danbooru::DanbooruProvider::new)
+                {
+                    Ok(provider) => Box::new(provider),
+                    Err(error) => {
+                        Box::new(bdm_infrastructure::providers::UnavailableProvider(error))
+                    }
+                };
+                let gelbooru: Box<dyn bdm_ports::MediaProvider> = match gelbooru_credentials
+                    .and_then(bdm_infrastructure::gelbooru::GelbooruProvider::new)
+                {
+                    Ok(provider) => Box::new(provider.with_cancel(signal.clone())),
+                    Err(error) => {
+                        Box::new(bdm_infrastructure::providers::UnavailableProvider(error))
+                    }
+                };
                 for mut job in jobs {
-                    let result = match &provider {
-                        Ok(provider) => bdm_application::ingest::run(
-                            provider,
-                            &mut repo,
-                            &mut job,
-                            &signal,
-                            |j| {
-                                let _ = sender.send(j.clone());
-                                repaint.request_repaint();
-                            },
-                        ),
-                        Err(error) => Err(bdm_ports::IngestError::Catalog(*error)),
-                    };
+                    let result = bdm_application::ingest::run_with_fallback(
+                        danbooru.as_ref(),
+                        gelbooru.as_ref(),
+                        &mut repo,
+                        &mut job,
+                        &signal,
+                        |j| {
+                            let _ = sender.send(j.clone());
+                            repaint.request_repaint();
+                        },
+                    );
                     if let Err(error) = result {
                         job.state = if error == bdm_ports::IngestError::Cancelled {
                             "cancelled"
@@ -690,9 +726,14 @@ impl BdmApp {
                             "failed"
                         }
                         .into();
-                        if job.error.is_none() {
-                            job.error = Some(error.to_string());
-                        }
+                        job.error = Some(format!(
+                            "{}：{}",
+                            job.provider.label(),
+                            job.error
+                                .as_deref()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| error.to_string())
+                        ));
                         let _ = bdm_ports::IngestRepository::save_job(&mut repo, &job);
                         let _ = sender.send(job);
                         break;
@@ -838,12 +879,16 @@ impl BdmApp {
                     TaskRow {
                         kind: "image",
                         title: &job.tag,
-                        subtitle: &format!("短边 ≥ {} px", job.minimum_short_side),
+                        subtitle: &format!(
+                            "{} · 短边 ≥ {} px",
+                            job.provider.label(),
+                            job.minimum_short_side
+                        ),
                         state,
                         color,
                         action,
                         enabled: !self.demo && !self.is_capture(),
-                        error: job.error.as_deref(),
+                        error: job.error.as_deref().or(job.fallback_reason.as_deref()),
                     },
                     |ui| {
                         for (label, value, color) in [

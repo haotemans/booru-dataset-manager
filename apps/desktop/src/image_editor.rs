@@ -1071,6 +1071,7 @@ mod tests {
             .add(
                 bdm_domain::catalog::CollectionKind::Character,
                 &bdm_domain::catalog::SourceTag {
+                    provider: bdm_domain::sources::SourceProvider::Danbooru,
                     id: 1,
                     name: "character".into(),
                     category: 4,
@@ -1098,6 +1099,7 @@ mod tests {
         let bytes = bytes.into_inner();
         use md5::Digest;
         let post = bdm_domain::ingest::SourcePost {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id: 10,
             md5: format!("{:x}", md5::Md5::digest(&bytes)),
             file_url: Some("https://synthetic/image.png".into()),

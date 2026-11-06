@@ -155,7 +155,7 @@ impl BdmApp {
     fn download_query_dialog(&mut self, ui: &mut egui::Ui) -> bool {
         ui.set_min_width(460.0);
         ui.set_max_width(460.0);
-        ui.label("Danbooru 标签组合");
+        ui.label("来源标签组合");
         ui.add_space(8.0);
         ui.add_sized(
             [460.0, 38.0],
@@ -248,7 +248,7 @@ impl BdmApp {
         }
         ui.set_min_width(460.0);
         ui.set_max_width(460.0);
-        ui.label("Danbooru Tag");
+        ui.label(format!("来源 Tag · {}", self.prefs.download_source.label()));
         ui.add(
             egui::Label::new(
                 RichText::new(if self.catalog.anonymous {
@@ -315,7 +315,8 @@ impl BdmApp {
             ui.add_space(12.0);
             ui.label(&tag.name);
             ui.label(format!(
-                "{} · API 总数 {} · 本地图片 0",
+                "{} · {} · API 总数 {} · 本地图片 0",
+                tag.provider.label(),
                 if tag.category == 1 {
                     "画师"
                 } else {
@@ -355,12 +356,25 @@ impl BdmApp {
             ui.add(
                 egui::Label::new(RichText::new(&self.form_error).color(AMBER).size(13.0)).wrap(),
             );
-            if matches!(
-                self.catalog.lookup_error,
-                Some(
-                    bdm_ports::CatalogError::Authentication | bdm_ports::CatalogError::Credentials
+            let from_gelbooru = self.catalog.lookup_provider
+                == Some(bdm_domain::sources::SourceProvider::Gelbooru)
+                || self.catalog.lookup_error == Some(bdm_ports::CatalogError::GelbooruCredentials);
+            if from_gelbooru {
+                if ui.button("打开 Gelbooru 来源设置").clicked() {
+                    self.navigate(Page::Settings);
+                    return true;
+                }
+                ui.hyperlink_to("在浏览器中检查 Gelbooru", "https://gelbooru.com/");
+            }
+            if !from_gelbooru
+                && matches!(
+                    self.catalog.lookup_error,
+                    Some(
+                        bdm_ports::CatalogError::Authentication
+                            | bdm_ports::CatalogError::Credentials
+                    )
                 )
-            ) {
+            {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button("修改凭据").clicked() {
@@ -381,13 +395,15 @@ impl BdmApp {
                     }
                 });
             }
-            if matches!(
-                self.catalog.lookup_error,
-                Some(
-                    bdm_ports::CatalogError::WebsiteVerification
-                        | bdm_ports::CatalogError::AccessDenied
+            if !from_gelbooru
+                && matches!(
+                    self.catalog.lookup_error,
+                    Some(
+                        bdm_ports::CatalogError::WebsiteVerification
+                            | bdm_ports::CatalogError::AccessDenied
+                    )
                 )
-            ) {
+            {
                 ui.add_space(8.0);
                 ui.hyperlink_to("在浏览器中检查 Danbooru", "https://danbooru.donmai.us/");
             }

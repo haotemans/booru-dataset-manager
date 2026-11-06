@@ -24,7 +24,7 @@ pub enum IngestError {
     InvalidMedia,
     #[error("原图校验失败，文件未入库。")]
     Integrity,
-    #[error("Danbooru 限流，等待 {0} 秒后重试。")]
+    #[error("来源站点限流，等待 {0} 秒后重试。")]
     RateLimited(u64),
     #[error("图片存储操作失败，请检查目录权限及剩余空间。")]
     Storage,
@@ -82,6 +82,14 @@ pub trait IngestRepository {
         self.import(post, root, collection, minimum_short_side, cancel, provider)
     }
     fn record_outcome(&mut self, job: i64, post: i64, outcome: &str) -> Result<(), IngestError>;
+    fn record_source_outcome(
+        &mut self,
+        job: i64,
+        post: &bdm_domain::ingest::SourcePost,
+        outcome: &str,
+    ) -> Result<(), IngestError> {
+        self.record_outcome(job, post.id, outcome)
+    }
 }
 
 // Deliberately neither Debug nor Serialize: secrets do not belong in logs/config.
@@ -120,6 +128,8 @@ pub trait ApiCredentialStore {
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogError {
+    #[error("Gelbooru 要求 API 凭据，请在系统设置填写 Gelbooru User ID 和 API Key。")]
+    GelbooruCredentials,
     #[error("请输入用空格分隔的完整标签；多个标签须同时满足，暂不支持网址、通配符或搜索操作符。")]
     InvalidQuery,
     #[error("请输入单个完整 Tag，不要粘贴网址或搜索表达式。")]
@@ -132,21 +142,21 @@ pub enum CatalogError {
     CharacterTag,
     #[error("这个 Tag 不属于画师或角色。")]
     WrongCategory,
-    #[error("Danbooru 认证失败（401），请检查已保存的用户名和 API Key。")]
+    #[error("来源站点认证失败（401），请检查已保存的用户名和 API Key。")]
     Authentication,
-    #[error("Danbooru 要求 Cloudflare 网站验证，当前无法查询。请在浏览器中手动检查网站访问，再返回重试；浏览器验证不保证应用请求可用。")]
+    #[error("来源站点要求 Cloudflare 网站验证，当前无法查询。请在浏览器中手动检查网站访问，再返回重试；浏览器验证不保证应用请求可用。")]
     WebsiteVerification,
-    #[error("Danbooru 拒绝访问（403），请检查账号权限和网站访问情况；这不一定是 API Key 错误。")]
+    #[error("来源站点拒绝访问（403），请检查账号权限和网站访问情况；这不一定是 API Key 错误。")]
     AccessDenied,
-    #[error("Danbooru 暂时限制请求，请稍后再试。")]
+    #[error("来源站点暂时限制请求，请稍后再试。")]
     RateLimited,
-    #[error("Danbooru 暂时不可用，请稍后再试。")]
+    #[error("来源站点暂时不可用，请稍后再试。")]
     Service,
-    #[error("无法连接 Danbooru，请检查网络后重试。")]
+    #[error("无法连接来源站点，请检查网络后重试。")]
     Network,
-    #[error("连接 Danbooru 超时，请重试。")]
+    #[error("连接来源站点超时，请重试。")]
     Timeout,
-    #[error("Danbooru 返回的数据无效，请稍后重试。")]
+    #[error("来源站点返回的数据无效，请稍后重试。")]
     InvalidResponse,
     #[error("无法读取 Danbooru 凭据，请在系统设置重新保存。")]
     Credentials,

@@ -292,6 +292,8 @@ impl BdmApp {
     }
 
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
+        self.gelbooru_settings_card(ui);
+        ui.add_space(16.0);
         self.danbooru_settings_card(ui);
         ui.add_space(16.0);
         card().show(ui, |ui| {
@@ -566,6 +568,10 @@ mod tests {
         crate::theme::setup(&ctx);
         let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
         app.ingest.jobs = vec![bdm_domain::ingest::IngestJob {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
+            source_mode: bdm_domain::sources::DownloadSource::Automatic,
+            primary_before_id: None,
+            fallback_reason: None,
             dismissed: false,
             id: 11,
             collection_id: 1,

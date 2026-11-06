@@ -82,6 +82,7 @@ pub(crate) fn fixture() -> Fixture {
         .add(
             CollectionKind::Character,
             &SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 1,
                 name: "character".into(),
                 category: 4,
@@ -100,6 +101,7 @@ pub(crate) fn fixture() -> Fixture {
         .unwrap();
     let bytes = bytes.into_inner();
     let post = SourcePost {
+        provider: bdm_domain::sources::SourceProvider::Danbooru,
         id: 100,
         md5: format!("{:x}", Md5::digest(&bytes)),
         file_url: Some("https://cdn.donmai.us/original/example.png".into()),
@@ -128,6 +130,124 @@ pub(crate) fn fixture() -> Fixture {
         post,
         collection,
     }
+}
+
+#[test]
+fn unavailable_primary_switches_once_and_preserves_independent_cursor_and_resume_source() {
+    use bdm_domain::sources::SourceProvider;
+    let mut f = fixture();
+    let mut gelpost = f.post.clone();
+    gelpost.provider = SourceProvider::Gelbooru;
+    let secondary = Provider {
+        bytes: f.provider.bytes.clone(),
+        calls: Cell::new(0),
+        posts: vec![gelpost],
+    };
+    let root = f.directory.path().join("library");
+    let mut job = f
+        .repo
+        .new_job(f.collection, "character".into(), root, 800)
+        .unwrap();
+    job.before_id = Some(77);
+    bdm_application::ingest::run_with_fallback(
+        &crate::providers::UnavailableProvider(bdm_ports::CatalogError::Service),
+        &secondary,
+        &mut f.repo,
+        &mut job,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(job.provider, SourceProvider::Gelbooru);
+    assert_eq!(job.primary_before_id, Some(77));
+    assert_eq!(job.before_id, Some(100));
+    assert!(job.fallback_reason.is_some());
+    assert_eq!(job.progress.imported, 1);
+    let saved = f.repo.list_jobs().unwrap().remove(0);
+    assert_eq!(saved.provider, SourceProvider::Gelbooru);
+    assert_eq!(saved.primary_before_id, Some(77));
+    assert_eq!(
+        f.repo.list_media().unwrap()[0].post.provider,
+        SourceProvider::Gelbooru
+    );
+    for error in [
+        bdm_ports::CatalogError::Authentication,
+        bdm_ports::CatalogError::AccessDenied,
+        bdm_ports::CatalogError::WebsiteVerification,
+        bdm_ports::CatalogError::GelbooruCredentials,
+        bdm_ports::CatalogError::RateLimited,
+    ] {
+        assert!(!bdm_application::ingest::source_unavailable(
+            &IngestError::Catalog(error)
+        ));
+    }
+    assert!(!bdm_application::ingest::source_unavailable(
+        &IngestError::RateLimited(0)
+    ));
+}
+
+#[test]
+fn identical_remote_ids_are_independent_while_identical_bytes_share_media_without_overwriting_source_text(
+) {
+    use bdm_domain::sources::SourceProvider;
+    let mut f = fixture();
+    let root = f.directory.path().join("library");
+    let cancel = AtomicBool::new(false);
+    f.repo
+        .import(&f.post, &root, f.collection, 800, &cancel, &f.provider)
+        .unwrap();
+    let original = f.repo.list_media().unwrap().remove(0);
+    let raw = std::fs::read(original.path.with_extension("raw_tags.txt")).unwrap();
+    let mut image = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(800, 800, image::Rgb([3, 5, 7])))
+        .write_to(&mut image, image::ImageFormat::Png)
+        .unwrap();
+    let bytes = image.into_inner();
+    let mut other = f.post.clone();
+    other.provider = SourceProvider::Gelbooru;
+    other.md5 = format!("{:x}", Md5::digest(&bytes));
+    other.file_size = 0;
+    let secondary = Provider {
+        bytes,
+        calls: Cell::new(0),
+        posts: vec![other.clone()],
+    };
+    assert!(f
+        .repo
+        .import(&other, &root, f.collection, 800, &cancel, &secondary)
+        .unwrap());
+    assert_eq!(f.repo.list_media().unwrap().len(), 2);
+    let gelcollection = f
+        .repo
+        .add(
+            CollectionKind::Character,
+            &SourceTag {
+                provider: SourceProvider::Gelbooru,
+                id: 1,
+                name: "character".into(),
+                category: 4,
+                post_count: 2,
+            },
+        )
+        .unwrap()
+        .record;
+    assert_ne!(gelcollection.id, f.collection);
+    let mut same = f.post.clone();
+    same.provider = SourceProvider::Gelbooru;
+    same.id = 101;
+    assert!(!f
+        .repo
+        .import(&same, &root, gelcollection.id, 800, &cancel, &f.provider)
+        .unwrap());
+    assert_eq!(f.repo.list_media().unwrap().len(), 2);
+    let sources = f.repo.media_source_providers().unwrap();
+    assert_eq!(sources[&(original.id as usize)].len(), 2);
+    assert_eq!(
+        std::fs::read(original.path.with_extension("raw_tags.txt")).unwrap(),
+        raw
+    );
+    assert!(f.repo.has_source(&f.post, f.collection).unwrap());
+    assert!(f.repo.has_source(&other, gelcollection.id).unwrap());
 }
 
 #[test]
@@ -454,6 +574,7 @@ fn character_import_discovers_all_artists_and_remote_lookup_reuses_their_ids() {
         .add(
             CollectionKind::Artist,
             &SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 22,
                 name: "artist".into(),
                 category: 1,
@@ -632,6 +753,7 @@ fn v3_discovery_migration_preserves_shared_media_jobs_and_collection_sequence() 
         .add(
             CollectionKind::Artist,
             &SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 73,
                 name: "another_artist".into(),
                 category: 1,
@@ -1409,6 +1531,7 @@ fn dedup_delete_consolidates_sources_and_associations_permanently() {
         .add(
             CollectionKind::Artist,
             &SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
                 id: 2,
                 name: "other_artist".into(),
                 category: 1,
@@ -1653,7 +1776,7 @@ fn legacy_v1_catalog_migrates_with_records_intact() {
         .connection
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 }
 
 #[test]

@@ -91,6 +91,8 @@ impl ProtectedTagFormat {
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    pub download_source: bdm_domain::sources::DownloadSource,
+    pub gelbooru_user_id: String,
     pub page: Page,
     pub layout: GalleryLayout,
     pub page_size: usize,
@@ -118,6 +120,8 @@ fn default_artist_tag_format() -> ProtectedTagFormat {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            download_source: bdm_domain::sources::DownloadSource::Automatic,
+            gelbooru_user_id: String::new(),
             page: Page::default(),
             layout: GalleryLayout::default(),
             page_size: 50,
@@ -220,6 +224,7 @@ impl ApiProfile {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Collection {
+    pub provider: bdm_domain::sources::SourceProvider,
     pub id: usize,
     pub tag: String,
     pub api_count: Option<usize>,
@@ -257,6 +262,7 @@ impl Library {
         .iter()
         .enumerate()
         .map(|(id, tag)| Collection {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id,
             tag: tag.to_string(),
             api_count: Some(120 + id * 39),
@@ -273,6 +279,7 @@ impl Library {
         .iter()
         .enumerate()
         .map(|(id, tag)| Collection {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
             id,
             tag: tag.to_string(),
             api_count: Some(248 + id * 173),

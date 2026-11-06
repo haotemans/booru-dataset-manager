@@ -52,6 +52,7 @@ pub fn matches_download_query(query: &str, tags: &str) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceTag {
+    pub provider: crate::sources::SourceProvider,
     pub id: i64,
     pub name: String,
     pub category: u8,
@@ -60,6 +61,7 @@ pub struct SourceTag {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectionRecord {
+    pub provider: crate::sources::SourceProvider,
     pub id: i64,
     pub kind: CollectionKind,
     pub name: String,

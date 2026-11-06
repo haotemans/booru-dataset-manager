@@ -1022,6 +1022,7 @@ mod tests {
                     flatten_transparency: true,
                     edit: None,
                     post: bdm_domain::ingest::SourcePost {
+                        provider: bdm_domain::sources::SourceProvider::Danbooru,
                         id: id as i64,
                         md5: String::new(),
                         file_url: None,

@@ -17,6 +17,8 @@ pub fn default_flatten_transparency() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourcePost {
+    #[serde(default)]
+    pub provider: crate::sources::SourceProvider,
     pub id: i64,
     #[serde(default, deserialize_with = "nullable_string")]
     pub md5: String,
@@ -64,7 +66,9 @@ impl SourcePost {
             || self.image_height < minimum_short_side
         {
             Some("resolution_below_minimum")
-        } else if self.file_size == 0 || self.file_size > 64 * 1024 * 1024 {
+        } else if (self.file_size == 0 && self.provider == crate::sources::SourceProvider::Danbooru)
+            || self.file_size > 64 * 1024 * 1024
+        {
             Some("file_size_limit")
         } else {
             None
@@ -114,6 +118,14 @@ pub struct IngestProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestJob {
+    #[serde(default)]
+    pub provider: crate::sources::SourceProvider,
+    #[serde(default)]
+    pub source_mode: crate::sources::DownloadSource,
+    #[serde(default)]
+    pub primary_before_id: Option<i64>,
+    #[serde(default)]
+    pub fallback_reason: Option<String>,
     #[serde(default)]
     pub dismissed: bool,
     pub id: i64,

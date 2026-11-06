@@ -1,5 +1,15 @@
 # Source provider adapters
 
+## Gelbooru implementation (2026-11-06)
+
+The native adapter uses Gelbooru's official JSON DAPI for exact tag lookup, bulk tag categories and post listing, with bounded original-image downloads from validated Gelbooru image hosts. User ID and API Key are independent from Danbooru/AI credentials and are stored in Windows Credential Manager (with portable-folder isolation). Gelbooru requires credentials in the API query parameters; requests, response bodies and secret-bearing URLs must never be logged. Image requests receive no API credentials and follow no redirects.
+
+Download preferences select Automatic, Danbooru-only or Gelbooru-only. Automatic jobs try the primary with finite retries, then switch after network/service failure or no eligible primary results; they never switch because of 401, 403, challenge headers or 429. A switched job keeps its Danbooru cursor, starts a fresh Gelbooru cursor and records the reason. Resume preserves the selected source. Failed individual posts retain their source and are retried through that adapter. The same saved collection, local review and export scope remain in use.
+
+SQLite migration 6 namespaces collection/source identities and download outcomes by provider, preserving old IDs/references and creating a pre-upgrade backup. Source payloads retain their original category fields. MD5/source SHA-256 checks remain required; Gelbooru's optional size field may be unknown, but actual file size, format, dimensions and hash remain validated. Existing category rules are not silently replaced by another source. Gelbooru does not supply fabricated Danbooru aliases/character implications.
+
+Official API reference: https://gelbooru.com/index.php?page=wiki&s=view&id=18780 . Authenticated live access is not claimed without a user-provided account and a successful explicit connection check.
+
 ## Common contract
 
 Each provider adapter returns normalized source records: provider ID, canonical page URL, remote media ID, original-file URL when legitimately available, original dimensions when known, raw tags as supplied, artist/character/work metadata, publication time if supplied, and provider-specific provenance. Preserve the raw provider payload only when useful and lawful; do not store secrets in provenance.
