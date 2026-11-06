@@ -1841,6 +1841,7 @@ fn ai_local_http_round_trip_protects_names_and_isolates_caption() {
         }
     });
     let mut profile = crate::ai::AiProfile {
+        source_tag_categories: None,
         id: "local-test".into(),
         endpoint: format!("http://{address}/v1"),
         model: "test".into(),
@@ -1988,6 +1989,7 @@ fn ai_partial_batch_recovery_only_dispatches_failed_ids_and_resume_is_idempotent
         seen
     });
     let mut profile = crate::ai::AiProfile {
+        source_tag_categories: None,
         id: "partial-test".into(),
         endpoint: format!("http://{address}/v1"),
         model: "test".into(),

@@ -9,6 +9,7 @@ use std::{
 
 fn profile() -> AiProfile {
     AiProfile {
+        source_tag_categories: None,
         id: "synthetic-test".into(),
         endpoint: "http://127.0.0.1:1/v1".into(),
         model: "synthetic-model".into(),
@@ -20,6 +21,77 @@ fn profile() -> AiProfile {
         artist_tag_format: "legacy".into(),
         character_tag_format: "plain".into(),
     }
+}
+
+#[test]
+fn source_category_lookup_validates_new_visual_tags_without_sending_its_key_to_ai() {
+    struct Categories(std::sync::Arc<std::sync::atomic::AtomicUsize>, &'static str);
+    impl bdm_ports::TagCategoryProvider for Categories {
+        fn lookup_categories(
+            &self,
+            names: &[String],
+        ) -> Result<BTreeMap<String, u8>, bdm_ports::CatalogError> {
+            assert_eq!(self.1, "synthetic-source-only-key");
+            self.0.fetch_add(1, Ordering::Relaxed);
+            assert!(names.contains(&"new_visual_tag".into()));
+            Ok(BTreeMap::from([
+                ("new_visual_tag".into(), 0),
+                ("new_artist_name".into(), 1),
+            ]))
+        }
+    }
+    let mut f = crate::workflow_tests::fixture();
+    let cancel = AtomicBool::new(false);
+    f.post.provider = bdm_domain::sources::SourceProvider::Gelbooru;
+    f.post.file_url = Some("https://img3.gelbooru.com/images/ab/cd/fixture.png".into());
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let (endpoint, worker) = server(vec![(
+        200,
+        response(json!([{"id":media.id,"tags":["new_visual_tag","new_artist_name"]}])),
+    )]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    profile.settings.send_images = true;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    profile.source_tag_categories = Some(Box::new(Categories(
+        calls.clone(),
+        "synthetic-source-only-key",
+    )));
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
+    let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
+    job.mode = "tags".into();
+    run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
+    assert!(calls.load(Ordering::Relaxed) > 0);
+    let requests = worker.join().unwrap();
+    assert!(!requests[0]
+        .to_string()
+        .contains("synthetic-source-only-key"));
+    assert_eq!(job.state, "completed");
+    let artifact = f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.kind == "tags")
+        .unwrap();
+    assert!(artifact.content.contains("new_visual_tag"));
+    assert!(!artifact.content.contains("new_artist_name"));
 }
 
 fn server(responses: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<Value>>) {

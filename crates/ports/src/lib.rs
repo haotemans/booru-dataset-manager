@@ -172,6 +172,13 @@ pub trait TagProvider {
     fn lookup(&self, name: &str) -> Result<Option<bdm_domain::catalog::SourceTag>, CatalogError>;
 }
 
+pub trait TagCategoryProvider: Send + Sync {
+    fn lookup_categories(
+        &self,
+        names: &[String],
+    ) -> Result<std::collections::BTreeMap<String, u8>, CatalogError>;
+}
+
 pub trait CollectionRepository {
     fn list(&self) -> Result<Vec<bdm_domain::catalog::CollectionRecord>, CatalogError>;
     fn add_query(

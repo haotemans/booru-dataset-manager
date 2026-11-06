@@ -160,6 +160,30 @@ impl GelbooruProvider {
         rows(&value, "post").map(|_| ())
     }
 
+    pub fn lookup_many(&self, names: &[String]) -> Result<BTreeMap<String, u8>, CatalogError> {
+        if names.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        if names.len() > 64
+            || names.iter().any(|name| {
+                name.is_empty()
+                    || name.len() > 512
+                    || name.chars().any(|c| c.is_control() || c.is_whitespace())
+            })
+        {
+            return Err(CatalogError::InvalidTag);
+        }
+        let joined = names.join(" ");
+        let value = self
+            .json("tag", &[("names", &joined), ("limit", "100")])
+            .map_err(catalog_error)?;
+        Ok(decode_tags(&value)?
+            .into_iter()
+            .filter(|tag| names.contains(&tag.name))
+            .map(|tag| (tag.name, tag.category))
+            .collect())
+    }
+
     fn classify(&self, posts: &mut [SourcePost]) -> Result<(), IngestError> {
         let all: BTreeSet<_> = posts
             .iter()

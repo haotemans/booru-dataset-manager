@@ -31,6 +31,8 @@ pub struct UploadApproval {
 }
 
 pub struct AiProfile {
+    /// Source credentials are used only for category lookup and never serialized to AI requests.
+    pub source_tag_categories: Option<Box<dyn bdm_ports::TagCategoryProvider>>,
     pub id: String,
     pub endpoint: String,
     pub model: String,
@@ -914,29 +916,30 @@ pub fn run(
                             if proposed.len() > 128 {
                                 category_lookup_failed = true;
                             } else {
-                                match DanbooruProvider::new(None) {
-                                    Ok(provider) => {
-                                        let mut updated = false;
-                                        for chunk in proposed.chunks(32) {
-                                            match provider.lookup_many(chunk) {
-                                                Ok(categories) => {
-                                                    for (name, category) in categories {
-                                                        updated |=
-                                                            rules.categories.insert(name, category)
-                                                                != Some(category);
-                                                    }
-                                                }
-                                                Err(_) => {
-                                                    category_lookup_failed = true;
-                                                    break;
-                                                }
+                                let mut updated = false;
+                                for chunk in proposed.chunks(32) {
+                                    let categories =
+                                        if let Some(provider) = &profile.source_tag_categories {
+                                            provider.lookup_categories(chunk)
+                                        } else {
+                                            DanbooruProvider::new(None)
+                                                .and_then(|provider| provider.lookup_many(chunk))
+                                        };
+                                    match categories {
+                                        Ok(categories) => {
+                                            for (name, category) in categories {
+                                                updated |= rules.categories.insert(name, category)
+                                                    != Some(category);
                                             }
                                         }
-                                        if updated {
-                                            repo.save_tag_rules(&rules)?;
+                                        Err(_) => {
+                                            category_lookup_failed = true;
+                                            break;
                                         }
                                     }
-                                    Err(_) => category_lookup_failed = true,
+                                }
+                                if updated {
+                                    repo.save_tag_rules(&rules)?;
                                 }
                             }
                         }

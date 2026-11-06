@@ -1039,6 +1039,13 @@ impl BdmApp {
                 .load(&profile.id)
                 .map_err(|e| e.to_string())?;
             Some(bdm_infrastructure::ai::AiProfile {
+                source_tag_categories: Some(Box::new(
+                    bdm_infrastructure::providers::SourceTagCategories::new(
+                        self.prefs.download_source,
+                        self.saved_danbooru_credentials(),
+                        self.saved_gelbooru_credentials(),
+                    ),
+                )),
                 id: profile.id.clone(),
                 endpoint: profile.endpoint.clone(),
                 model: profile.model.clone(),
