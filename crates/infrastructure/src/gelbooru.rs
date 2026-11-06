@@ -160,6 +160,29 @@ impl GelbooruProvider {
         rows(&value, "post").map(|_| ())
     }
 
+    /// Prefix candidates are suggestions, never an alias/identity assertion.
+    pub fn suggest_tags(&self, prefix: &str, category: u8) -> Result<Vec<SourceTag>, CatalogError> {
+        if prefix.len() < 2
+            || prefix.len() > 512
+            || prefix.chars().any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Ok(Vec::new());
+        }
+        let pattern = format!("{prefix}%");
+        let value = self
+            .json(
+                "tag",
+                &[
+                    ("name_pattern", &pattern),
+                    ("limit", "50"),
+                    ("orderby", "count"),
+                    ("order", "DESC"),
+                ],
+            )
+            .map_err(catalog_error)?;
+        Ok(prefix_candidates(decode_tags(&value)?, prefix, category))
+    }
+
     pub fn lookup_many(&self, names: &[String]) -> Result<BTreeMap<String, u8>, CatalogError> {
         if names.is_empty() {
             return Ok(BTreeMap::new());
@@ -309,6 +332,15 @@ fn decode_tags(value: &Value) -> Result<Vec<SourceTag>, CatalogError> {
                 post_count,
             })
         })
+        .collect()
+}
+
+fn prefix_candidates(tags: Vec<SourceTag>, prefix: &str, category: u8) -> Vec<SourceTag> {
+    tags.into_iter()
+        .filter(|tag| {
+            tag.category == category && tag.name.starts_with(prefix) && tag.name != prefix
+        })
+        .take(6)
         .collect()
 }
 fn decode_posts(value: &Value) -> Result<Vec<SourcePost>, CatalogError> {
@@ -474,6 +506,21 @@ impl MediaProvider for GelbooruProvider {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn prefix_candidates_filter_wildcards_and_categories_without_claiming_aliases() {
+        let tags = decode_tags(&json!({"tag": [
+            {"id":1,"name":"synthetic_ore_p","type":1,"count":11},
+            {"id":2,"name":"synthetic_ore_character","type":4,"count":12},
+            {"id":3,"name":"syntheticXore_p","type":1,"count":13},
+            {"id":4,"name":"synthetic_ore","type":1,"count":14}
+        ]}))
+        .unwrap();
+        let candidates = prefix_candidates(tags, "synthetic_ore", 1);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].name, "synthetic_ore_p");
+        assert_eq!(candidates[0].provider, SourceProvider::Gelbooru);
+    }
 
     #[test]
     fn api_shapes_preserve_source_and_allow_unknown_size_without_weakening_hash_validation() {

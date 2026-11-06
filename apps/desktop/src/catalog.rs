@@ -11,6 +11,7 @@ use std::{
 };
 
 struct PendingLookup {
+    suggestions: std::sync::Arc<std::sync::Mutex<Vec<SourceTag>>>,
     source: std::sync::Arc<std::sync::atomic::AtomicU8>,
     generation: u64,
     kind: CollectionKind,
@@ -19,6 +20,7 @@ struct PendingLookup {
 
 #[derive(Default)]
 pub struct CatalogSettings {
+    pub suggestions: Vec<SourceTag>,
     pub lookup_provider: Option<bdm_domain::sources::SourceProvider>,
     pub repository: Option<Box<dyn CollectionRepository>>,
     pub path: Option<PathBuf>,
@@ -78,6 +80,50 @@ fn collection(record: &CollectionRecord) -> Result<Collection, CatalogError> {
 }
 
 impl BdmApp {
+    pub fn tag_lookup_account_label(&self) -> &'static str {
+        use bdm_domain::sources::{DownloadSource, SourceProvider};
+        let gelbooru = self.prefs.download_source == DownloadSource::Gelbooru
+            || (self.prefs.download_source == DownloadSource::Automatic
+                && self.catalog.lookup_provider == Some(SourceProvider::Gelbooru));
+        if gelbooru {
+            if self.gelbooru.saved_user_id.is_some() {
+                "使用已保存的 Gelbooru 账号"
+            } else {
+                "Gelbooru 未配置账号"
+            }
+        } else if self.prefs.download_source == DownloadSource::Automatic {
+            match (
+                self.danbooru.saved_username.is_some() && !self.catalog.anonymous,
+                self.gelbooru.saved_user_id.is_some(),
+            ) {
+                (true, true) => "自动来源 · Danbooru、Gelbooru 账号已保存",
+                (false, true) => "自动来源 · Gelbooru 账号已保存",
+                (true, false) => "自动来源 · Danbooru 账号已保存",
+                (false, false) => "自动来源 · 未配置来源账号",
+            }
+        } else if self.catalog.anonymous {
+            "公开查询 · 不使用账号"
+        } else if self.danbooru.saved_username.is_some() {
+            "使用已保存的 Danbooru 账号"
+        } else {
+            "公开查询 · 未配置账号"
+        }
+    }
+
+    pub fn select_tag_suggestion(&mut self, tag: &SourceTag) -> Result<(), String> {
+        let kind = self.catalog.kind.ok_or("添加类型已变化，请重新查询。")?;
+        if !self.catalog.suggestions.contains(tag) {
+            return Err("候选标签已变化，请重新查询。".into());
+        }
+        bdm_application::catalog::validate_tag(kind, tag).map_err(|e| e.to_string())?;
+        self.input_tag = tag.name.clone();
+        self.catalog.found = Some(tag.clone());
+        self.catalog.lookup_provider = Some(tag.provider);
+        self.catalog.suggestions.clear();
+        self.catalog.lookup_error = None;
+        self.form_error.clear();
+        Ok(())
+    }
     pub fn capture_tag_state(&mut self, state: u8) {
         if !self.is_capture() {
             return;
@@ -91,6 +137,7 @@ impl BdmApp {
                 let (sender, receiver) = mpsc::channel();
                 self.catalog.capture_sender = Some(sender);
                 self.catalog.pending = Some(PendingLookup {
+                    suggestions: Default::default(),
                     source: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
                     generation: self.catalog.generation,
                     kind: CollectionKind::Character,
@@ -237,6 +284,7 @@ impl BdmApp {
     }
 
     pub fn cancel_tag_lookup(&mut self) {
+        self.catalog.suggestions.clear();
         self.catalog.generation = self.catalog.generation.wrapping_add(1);
         self.catalog.found = None;
         self.catalog.lookup_error = None;
@@ -283,6 +331,7 @@ impl BdmApp {
         self.catalog.found = None;
         self.form_error.clear();
         self.catalog.lookup_error = None;
+        self.catalog.suggestions.clear();
         let (sender, receiver) = mpsc::channel();
         let repaint = ctx.clone();
         let source = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
@@ -293,6 +342,8 @@ impl BdmApp {
             },
         ));
         let worker_source = source.clone();
+        let suggestions = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let worker_suggestions = suggestions.clone();
         std::thread::Builder::new()
             .name("danbooru-tag-lookup".into())
             .spawn(move || {
@@ -319,7 +370,18 @@ impl BdmApp {
                     gelbooru_credentials
                         .and_then(bdm_infrastructure::gelbooru::GelbooruProvider::new)
                         .and_then(|provider| {
-                            bdm_application::catalog::lookup_tag(&provider, kind, &name)
+                            let result =
+                                bdm_application::catalog::lookup_tag(&provider, kind, &name);
+                            if result == Err(CatalogError::NotFound) {
+                                if let Ok(candidates) =
+                                    provider.suggest_tags(&name, kind.category())
+                                {
+                                    if let Ok(mut found) = worker_suggestions.lock() {
+                                        *found = candidates;
+                                    }
+                                }
+                            }
+                            result
                         })
                 } else {
                     primary
@@ -329,6 +391,7 @@ impl BdmApp {
             })
             .map_err(|_| CatalogError::Service.to_string())?;
         self.catalog.pending = Some(PendingLookup {
+            suggestions,
             source,
             generation: self.catalog.generation,
             kind,
@@ -365,6 +428,11 @@ impl BdmApp {
             return;
         }
         self.catalog.found = None;
+        self.catalog.suggestions = pending
+            .suggestions
+            .lock()
+            .map(|found| found.clone())
+            .unwrap_or_default();
         self.catalog.lookup_provider = Some(
             if pending.source.load(std::sync::atomic::Ordering::Relaxed) == 1 {
                 bdm_domain::sources::SourceProvider::Gelbooru
@@ -376,7 +444,15 @@ impl BdmApp {
         match result {
             Ok(tag) => self.catalog.found = Some(tag),
             Err(error) => {
-                self.form_error = error.to_string();
+                self.form_error = if error == CatalogError::NotFound
+                    && self.catalog.lookup_provider
+                        == Some(bdm_domain::sources::SourceProvider::Gelbooru)
+                {
+                    "Gelbooru 没有这个精确 Tag；不同站点的标签名可能不同，请核对来源站点的名称。"
+                        .into()
+                } else {
+                    error.to_string()
+                };
                 self.log("WARN", &error.to_string());
             }
         }
@@ -469,6 +545,62 @@ mod tests {
         app
     }
     #[test]
+    fn selected_source_account_status_uses_its_own_saved_identity() {
+        use bdm_domain::sources::{DownloadSource, SourceProvider};
+        let mut app = app();
+        app.gelbooru.saved_user_id = Some("123".into());
+        app.prefs.download_source = DownloadSource::Gelbooru;
+        assert_eq!(app.tag_lookup_account_label(), "使用已保存的 Gelbooru 账号");
+        app.prefs.download_source = DownloadSource::Automatic;
+        assert_eq!(
+            app.tag_lookup_account_label(),
+            "自动来源 · Gelbooru 账号已保存"
+        );
+        app.catalog.lookup_provider = Some(SourceProvider::Gelbooru);
+        assert_eq!(app.tag_lookup_account_label(), "使用已保存的 Gelbooru 账号");
+        app.prefs.download_source = DownloadSource::Danbooru;
+        assert_eq!(app.tag_lookup_account_label(), "公开查询 · 未配置账号");
+    }
+
+    #[test]
+    fn prefix_candidate_requires_selection_and_confirmation_before_saving() {
+        use bdm_domain::sources::{DownloadSource, SourceProvider};
+        let mut app = app();
+        app.navigate(Page::Artist);
+        app.begin_add_collection();
+        app.prefs.download_source = DownloadSource::Gelbooru;
+        app.input_tag = "synthetic_ore".into();
+        let candidate = SourceTag {
+            provider: SourceProvider::Gelbooru,
+            id: 501,
+            name: "synthetic_ore_p".into(),
+            category: 1,
+            post_count: 11,
+        };
+        let (sender, receiver) = mpsc::channel();
+        app.catalog.pending = Some(PendingLookup {
+            suggestions: std::sync::Arc::new(std::sync::Mutex::new(vec![candidate.clone()])),
+            source: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)),
+            generation: app.catalog.generation,
+            kind: CollectionKind::Artist,
+            receiver,
+        });
+        sender.send(Err(CatalogError::NotFound)).unwrap();
+        app.poll_tag_lookup(&egui::Context::default());
+        assert_eq!(app.input_tag, "synthetic_ore");
+        assert!(app.catalog.found.is_none());
+        assert!(app.library.artists.is_empty());
+        assert!(app.form_error.contains("Gelbooru"));
+        app.select_tag_suggestion(&candidate).unwrap();
+        assert_eq!(app.input_tag, candidate.name);
+        assert!(app.library.artists.is_empty());
+        assert!(app.select_tag_suggestion(&candidate).is_err());
+        assert_eq!(app.save_found_collection(), Ok(true));
+        assert_eq!(app.library.artists[0].tag, candidate.name);
+        assert_eq!(app.library.artists[0].provider, SourceProvider::Gelbooru);
+    }
+
+    #[test]
     fn download_queries_save_without_remote_tag_identity_and_survive_restart() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("catalog.sqlite3");
@@ -516,6 +648,7 @@ mod tests {
     fn pending(app: &mut BdmApp) -> mpsc::Sender<Result<SourceTag, CatalogError>> {
         let (sender, receiver) = mpsc::channel();
         app.catalog.pending = Some(PendingLookup {
+            suggestions: Default::default(),
             source: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             generation: app.catalog.generation,
             kind: CollectionKind::Character,

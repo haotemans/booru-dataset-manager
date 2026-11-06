@@ -251,15 +251,9 @@ impl BdmApp {
         ui.label(format!("来源 Tag · {}", self.prefs.download_source.label()));
         ui.add(
             egui::Label::new(
-                RichText::new(if self.catalog.anonymous {
-                    "公开查询 · 不使用账号"
-                } else if self.danbooru.saved_username.is_some() {
-                    "使用已保存的 Danbooru 账号"
-                } else {
-                    "公开查询 · 未配置账号"
-                })
-                .color(MUTED)
-                .size(12.0),
+                RichText::new(self.tag_lookup_account_label())
+                    .color(MUTED)
+                    .size(12.0),
             )
             .wrap(),
         );
@@ -281,6 +275,7 @@ impl BdmApp {
             .inner
             .changed();
         if changed {
+            self.catalog.suggestions.clear();
             self.catalog.found = None;
             self.catalog.lookup_error = None;
             self.form_error.clear();
@@ -360,7 +355,15 @@ impl BdmApp {
                 == Some(bdm_domain::sources::SourceProvider::Gelbooru)
                 || self.catalog.lookup_error == Some(bdm_ports::CatalogError::GelbooruCredentials);
             if from_gelbooru {
-                if ui.button("打开 Gelbooru 来源设置").clicked() {
+                if matches!(
+                    self.catalog.lookup_error,
+                    Some(
+                        bdm_ports::CatalogError::GelbooruCredentials
+                            | bdm_ports::CatalogError::Authentication
+                            | bdm_ports::CatalogError::Credentials
+                    )
+                ) && ui.button("打开 Gelbooru 来源设置").clicked()
+                {
                     self.navigate(Page::Settings);
                     return true;
                 }
@@ -406,6 +409,27 @@ impl BdmApp {
             {
                 ui.add_space(8.0);
                 ui.hyperlink_to("在浏览器中检查 Danbooru", "https://danbooru.donmai.us/");
+            }
+        }
+        if !self.catalog.suggestions.is_empty() {
+            ui.add_space(10.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new("相近标签 · 请确认是同一画师／角色后选择")
+                        .size(13.0)
+                        .color(MUTED),
+                )
+                .wrap(),
+            );
+            for candidate in self.catalog.suggestions.clone() {
+                if ui
+                    .button(format!("{} · {} 张", candidate.name, candidate.post_count))
+                    .clicked()
+                {
+                    if let Err(error) = self.select_tag_suggestion(&candidate) {
+                        self.form_error = error;
+                    }
+                }
             }
         }
         if self.catalog.edit_credentials {
