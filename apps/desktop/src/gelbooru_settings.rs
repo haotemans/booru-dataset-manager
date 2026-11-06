@@ -182,7 +182,7 @@ impl BdmApp {
     }
     pub fn gelbooru_settings_card(&mut self, ui: &mut egui::Ui) {
         card().show(ui,|ui| {
-            ui.set_width(ui.available_width());section(ui,"图片来源与 Gelbooru 备用","download");ui.add_space(12.0);
+            ui.set_width(ui.available_width());setting_header(ui,"download","图片来源与 Gelbooru 备用");ui.add_space(12.0);
             let before=self.prefs.download_source;
             egui::ComboBox::from_id_salt("download_source").width(300.0).selected_text(before.label()).show_ui(ui,|ui| {
                 for mode in [DownloadSource::Automatic,DownloadSource::Danbooru,DownloadSource::Gelbooru] {
