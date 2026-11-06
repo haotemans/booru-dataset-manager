@@ -294,7 +294,11 @@ impl BdmApp {
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
         self.gelbooru_settings_card(ui);
         ui.add_space(16.0);
-        self.danbooru_settings_card(ui);
+        egui::CollapsingHeader::new("Danbooru 来源设置")
+            .default_open(
+                self.prefs.download_source == bdm_domain::sources::DownloadSource::Danbooru,
+            )
+            .show(ui, |ui| self.danbooru_settings_card(ui));
         ui.add_space(16.0);
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
