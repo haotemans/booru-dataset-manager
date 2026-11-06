@@ -671,7 +671,7 @@ impl BdmApp {
                     ui.label("相似度门槛");
                     ui.add(
                         egui::DragValue::new(&mut self.prefs.review_similarity)
-                            .range(0.85..=0.995)
+                            .range(0.85..=1.0)
                             .speed(0.001)
                             .fixed_decimals(3),
                     );

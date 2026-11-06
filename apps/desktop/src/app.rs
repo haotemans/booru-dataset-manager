@@ -1145,7 +1145,7 @@ mod tests {
         assert!(!saved.auto_load_review_original);
         assert!(saved.similar_image_review);
         assert_eq!(saved.review_similarity, 0.95);
-        app.prefs.review_similarity = 0.92;
+        app.prefs.review_similarity = 0.999;
         app.prefs.similar_image_review = false;
         app.prefs.confirm_image_edits = false;
         app.prefs.auto_load_review_original = true;
@@ -1154,7 +1154,7 @@ mod tests {
         let restarted = BdmApp::from_preferences(saved, false, None);
         assert!(!restarted.prefs.confirm_image_edits);
         assert!(restarted.prefs.auto_load_review_original);
-        assert_eq!(restarted.prefs.review_similarity, 0.92);
+        assert_eq!(restarted.prefs.review_similarity, 0.999);
         assert!(!restarted.prefs.similar_image_review);
         assert_eq!(
             restarted.prefs.download_media,

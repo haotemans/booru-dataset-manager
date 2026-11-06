@@ -146,7 +146,7 @@ impl Preferences {
         if !self.review_similarity.is_finite() {
             self.review_similarity = 0.95;
         }
-        self.review_similarity = self.review_similarity.clamp(0.85, 0.995);
+        self.review_similarity = self.review_similarity.clamp(0.85, 1.0);
         if !bdm_domain::ingest::valid_minimum_short_side(self.minimum_short_side) {
             self.minimum_short_side = bdm_domain::ingest::default_minimum_short_side();
         }

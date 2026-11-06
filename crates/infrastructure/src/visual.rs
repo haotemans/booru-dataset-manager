@@ -449,7 +449,7 @@ pub fn run(
             let threshold = job
                 .review_similarity
                 .filter(|value| value.is_finite())
-                .map(|value| value.clamp(0.85, 0.995));
+                .map(|value| value.clamp(0.85, 1.0));
             let features = candidate_features(repo, id, &keys, threshold.zip(vector.as_deref()))?;
             for (other, other_hash, other_vector) in features {
                 if job.kind != "dedup-auto" && !scope.contains(&other) {
@@ -648,7 +648,7 @@ mod tests {
         let a_hash = phash(&first.path).unwrap();
         let b_hash = phash(&second.path).unwrap();
         assert!((a_hash ^ b_hash).count_ones() > 2);
-        for (media, cosine) in [(&first, 1.0_f32), (&second, 0.96_f32)] {
+        for (media, cosine) in [(&first, 1.0_f32), (&second, 0.998_f32)] {
             let mut vector = vec![0.0; 384];
             vector[0] = cosine;
             vector[1] = (1.0 - cosine * cosine).sqrt();
@@ -665,17 +665,22 @@ mod tests {
                 )
                 .unwrap();
         }
-        // Separate automatic batches still compare against the complete cached library.
-        let mut strict = f.repo.new_workflow("dedup-auto", vec![second.id]).unwrap();
-        run(
-            &mut f.repo,
-            &mut strict,
-            f.directory.path(),
-            &cancel,
-            |_| {},
-        )
-        .unwrap();
-        assert!(f.repo.list_candidates().unwrap().is_empty());
+        // Values above 0.995 must remain strict in the real analysis path.
+        // Separate automatic batches still compare against the cached library.
+        for threshold in [0.999, 1.0] {
+            let mut strict = f.repo.new_workflow("dedup-auto", vec![second.id]).unwrap();
+            strict.review_similarity = Some(threshold);
+            run(
+                &mut f.repo,
+                &mut strict,
+                f.directory.path(),
+                &cancel,
+                |_| {},
+            )
+            .unwrap();
+            assert!(f.repo.list_candidates().unwrap().is_empty());
+            assert_eq!(strict.dedup_removed, 0);
+        }
         f.repo
             .connection
             .execute("DELETE FROM visual_buckets", [])
