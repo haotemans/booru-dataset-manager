@@ -609,23 +609,24 @@ mod tests {
         app.navigate(Page::Artist);
         app.begin_add_collection();
         app.catalog.kind = Some(CollectionKind::Query);
-        app.input_tag = " Official_Art  zenless_zone_zero ".into();
+        app.input_tag = " Reverse:1999  Official_Art ".into();
         let id = app.save_download_query().unwrap();
         assert_eq!(app.prefs.page, Page::Artist);
         assert_eq!(app.selected, BTreeSet::from([id]));
         assert!(app.library.artists.is_empty());
         assert!(app.library.characters.is_empty());
         assert!(app.catalog.pending.is_none());
-        assert_eq!(app.library.queries[0].tag, "official_art zenless_zone_zero");
+        assert_eq!(app.library.queries[0].tag, "reverse:1999 official_art");
         assert_eq!(app.library.queries[0].api_count, None);
         assert_eq!(app.library.collections(Page::Artist)[0].id, id);
         app.navigate(Page::Downloads);
         app.begin_add_collection();
-        app.input_tag = "official_art zenless_zone_zero".into();
+        app.input_tag = "reverse:1999 official_art".into();
         assert_eq!(app.save_download_query().unwrap(), id);
         assert_eq!(app.library.queries.len(), 1);
         app.open_catalog(&path);
         assert_eq!(app.library.queries[0].id, id);
+        assert_eq!(app.library.queries[0].tag, "reverse:1999 official_art");
         let scope = app
             .collection_deletion_scope(Page::Artist, &BTreeSet::from([id]))
             .unwrap();

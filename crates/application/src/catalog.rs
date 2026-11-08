@@ -8,9 +8,8 @@ pub fn normalize_tag(input: &str) -> Result<String, CatalogError> {
     let tag = input.trim().to_lowercase();
     if tag.is_empty()
         || tag.len() > 512
-        || tag.chars().any(|c| {
-            c.is_whitespace() || c.is_control() || matches!(c, '*' | '?' | '/' | '\\' | ':' | '#')
-        })
+        || tag.chars().any(|c| c.is_whitespace() || c.is_control())
+        || bdm_domain::catalog::normalize_download_query(&tag).as_deref() != Some(tag.as_str())
     {
         return Err(CatalogError::InvalidTag);
     }
@@ -100,9 +99,16 @@ mod tests {
             "x#y",
             "x\0y",
             "x\n",
+            "rating:g",
+            "sort:score",
         ] {
             assert_eq!(normalize_tag(input), Err(CatalogError::InvalidTag));
         }
+        assert_eq!(
+            normalize_tag(" Regulus_(Reverse:1999) "),
+            Ok("regulus_(reverse:1999)".into())
+        );
+        assert_eq!(normalize_tag("reverse:1999"), Ok("reverse:1999".into()));
     }
     #[test]
     fn source_identity_and_category_are_required_before_creating_records() {
