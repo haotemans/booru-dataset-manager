@@ -302,7 +302,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
     # is used because GitHub's scheduled run is configured in UTC.
     day = getattr(args, 'collection_day', None) or datetime.now(
         timezone(timedelta(hours=8))).date().isoformat()
-    if not re.fullmatch(r'\\d{4}-\\d{2}-\\d{2}', day):
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
         raise ValueError('collection_day must be YYYY-MM-DD')
     datetime.strptime(day, '%Y-%m-%d')
     state['targets'] = {'image': args.target_images, 'gif': args.target_gifs}
