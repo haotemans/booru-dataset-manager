@@ -55,8 +55,10 @@ def inspect_dataset(dataset_id, token):
     if str(visibility).lower() not in ("private", "1"):
         raise ValueError("Expected a private ModelScope dataset; refusing public media destination")
     files = list(api.list_repo_files(dataset_id, "dataset"))
-    return {"private_verified": True, "files_count": len(files),
-            "files_preview": [str(f)[:200] for f in files[:15]]}
+    paths = [f.get("path", "") if isinstance(f, dict) else getattr(f, "path", str(f))
+             for f in files]
+    return {"private_verified": True, "files_count": len(paths),
+            "files_preview": paths[:15]}
 
 
 def run(artists, max_posts=20, pause=1.1):
