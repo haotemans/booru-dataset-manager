@@ -83,6 +83,42 @@ class CollectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mod.media_info(gif_bytes(), "image")
 
+
+    def test_perceptual_index_matches_exact_scan(self):
+        first = {"id": 101, "kind": "image", **mod.media_info(image_bytes(), "image")}
+        second = {"id": 102, "kind": "image", **mod.media_info(image_bytes(seed=60), "image")}
+        index = mod.PerceptualIndex([first, second])
+        for sample in (first, second):
+            candidate = {"kind": "image", **sample}
+            self.assertEqual(index.match(candidate),
+                             mod.near_duplicates([first, second], candidate))
+
+    def test_daily_quota_resets_without_resetting_all_time_index(self):
+        payload = image_bytes()
+        post = dict(id=2000, rating="g", tag_string="pixel_art solo",
+                    tag_string_general="pixel_art solo", score=5, fav_count=5,
+                    file_ext="png", md5=hashlib.md5(payload).hexdigest(),
+                    file_url="https://cdn.donmai.us/image.png",
+                    image_width=144, image_height=144,
+                    file_size=len(payload), is_deleted=False)
+        with tempfile.TemporaryDirectory() as temp:
+            opts = Namespace(root=temp, state_file=None, run_id="day-a",
+                collection_day="2026-11-12", target_images=1, target_gifs=1,
+                images_per_run=1, gifs_per_run=0, max_pages=1,
+                max_batch_mib=1, min_short=128, min_score=4, delay=0)
+            first = mod.run(opts, FakeFetcher(post, payload))
+            self.assertEqual(first["daily_images"], 1)
+            self.assertEqual(first["remaining_daily_images"], 0)
+            opts.run_id = "day-b"
+            opts.collection_day = "2026-11-13"
+            second = mod.run(opts, FakeFetcher(post, payload))
+            self.assertEqual(second["daily_images"], 0)
+            self.assertEqual(second["remaining_daily_images"], 1)
+            self.assertEqual(second["total_images"], 1)
+            persisted = mod.load_state(Path(temp) / "progress.json")
+            self.assertEqual(persisted["daily"]["2026-11-12"]["image"], 1)
+            self.assertEqual(persisted["daily"]["2026-11-13"]["image"], 0)
+
     def test_duplicate_similarity(self):
         info = mod.media_info(image_bytes(), "image")
         self.assertEqual(mod.near_duplicates([{"id": 10, "kind": "image", **info}],
