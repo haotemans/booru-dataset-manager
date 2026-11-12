@@ -1,0 +1,31 @@
+name: Fetch Danbooru pixel-art test dataset
+
+on:
+  push:
+    branches: [samples/danbooru-download-20261112]
+    paths:
+      - .github/workflows/danbooru-fetch-sample.yml
+      - scripts/danbooru_sample_download.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Download public general-rated images and GIFs
+        run: python3 scripts/danbooru_sample_download.py
+      - name: Upload image+GIF dataset and verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: danbooru-pixel-art-sample
+          path: data/danbooru-sample/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
