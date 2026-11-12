@@ -1,10 +1,6 @@
 name: Artist dataset preflight
 
 on:
-  push:
-    branches: [feat/artist-modelscope-preflight-20261112]
-    paths:
-      - .github/workflows/artist-dataset-preflight.yml
   pull_request:
     paths:
       - .github/workflows/artist-dataset-preflight.yml
@@ -28,7 +24,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_artist_dataset_preflight.py -v
 
   inspect:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     needs: unit-tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
