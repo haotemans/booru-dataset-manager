@@ -1,0 +1,96 @@
+name: Curate Danbooru pixel-art dataset
+
+on:
+  push:
+    branches: [samples/danbooru-download-20261112]
+    paths:
+      - scripts/pixel_art_collect.py
+      - scripts/pixel_art_publish.py
+      - tests/test_pixel_art_collect.py
+      - .github/workflows/pixel-art-collector.yml
+  workflow_dispatch:
+  schedule:
+    - cron: "25 3 * * *"
+
+concurrency:
+  group: pixel-art-collector
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    if: github.event_name != 'schedule' || vars.MODELSCOPE_DATASET_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MODELSCOPE_DATASET_ID: ${{ vars.MODELSCOPE_DATASET_ID }}
+      MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check persistent destination before scheduled runs
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          if [[ -z "$MODELSCOPE_DATASET_ID" || -z "$MODELSCOPE_TOKEN" ]]; then
+            echo 'Configure private ModelScope dataset variable and token before scheduling.' >&2
+            exit 1
+          fi
+      - name: Install image validator
+        run: python -m pip install 'Pillow>=10,<13'
+      - name: Test sampler and checkpoint handling
+        run: python -m unittest discover -s tests -p test_pixel_art_collect.py -v
+      - name: Collect, inspect, and deduplicate public general-rated images
+        run: |
+          python scripts/pixel_art_collect.py \
+            --root data/pixelloop-curated \
+            --state-file datasets/pixelloop/progress.json \
+            --images-per-run 80 \
+            --gifs-per-run 8 \
+            --target-images 10000 \
+            --target-gifs 1000 \
+            --max-pages 20 \
+            --max-batch-mib 300
+      - name: Upload temporary seven-day diagnostic dataset
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-art-curation-${{ github.run_id }}
+          path: |
+            data/pixelloop-curated/archives/
+            data/pixelloop-curated/report.json
+            datasets/pixelloop/progress.json
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+      - name: Publish shard to private ModelScope and verify remote readback
+        id: publish
+        shell: bash
+        run: |
+          if [[ -z "$MODELSCOPE_DATASET_ID" || -z "$MODELSCOPE_TOKEN" ]]; then
+            echo 'Durable storage is not configured; preview artifact only, no progress checkpoint.'
+            exit 0
+          fi
+          archive="data/pixelloop-curated/archives/pixelloop-${GITHUB_RUN_ID}.tar"
+          if [[ ! -f "$archive" ]]; then
+            echo 'No new accepted media in this run.'
+            exit 0
+          fi
+          python -m pip install 'modelscope-hub>=0.5,<1'
+          python scripts/pixel_art_publish.py --archive "$archive" --state datasets/pixelloop/progress.json
+          echo 'uploaded=true' >> "$GITHUB_OUTPUT"
+      - name: Commit index only after verified durable storage
+        if: steps.publish.outputs.uploaded == 'true'
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add datasets/pixelloop/progress.json
+          git commit -m 'data: checkpoint verified pixel-art progress [skip ci]'
+          git push origin HEAD:"${GITHUB_REF_NAME}"
