@@ -16,7 +16,7 @@ import random
 import re
 import tarfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -54,7 +54,7 @@ def atomic_json(path: Path, value: dict) -> None:
 
 def new_state() -> dict:
     return {'version': 1, 'targets': {'image': 10000, 'gif': 1000},
-            'cursor': {'image': None, 'gif': None}, 'entries': [],
+            'cursor': {'image': None, 'gif': None}, 'entries': [], 'daily': {},
             'rejections': {}, 'last_run': None}
 
 
@@ -69,6 +69,9 @@ def load_state(path: Path) -> dict:
         raise ValueError('Duplicate post IDs in progress index')
     if any(e.get('kind') not in ('image', 'gif') for e in data['entries']):
         raise ValueError('Unexpected kind in progress index')
+    if not isinstance(data.get('daily', {}), dict):
+        raise ValueError('Invalid daily counters')
+    data.setdefault('daily', {})
     return data
 
 
@@ -230,6 +233,41 @@ def near_duplicates(existing: list[dict], candidate: dict) -> str | None:
     return None
 
 
+
+class PerceptualIndex:
+    """Exact-recall candidate index for a <=2-bit dHash threshold.
+
+    Splitting the 64-bit hash into three disjoint pieces guarantees at
+    least one exact-matching piece whenever at most two bits differ.
+    Candidate verification still applies aspect, color and GIF motion gates.
+    """
+
+    def __init__(self, entries: list[dict]):
+        self.buckets = collections.defaultdict(list)
+        for entry in entries:
+            self.add(entry)
+
+    @staticmethod
+    def keys(entry: dict):
+        value = int(entry['dhash'], 16)
+        kind = entry['kind']
+        mask = (1 << 22) - 1
+        return ((kind, 0, value & mask),
+                (kind, 1, (value >> 22) & mask),
+                (kind, 2, value >> 44))
+
+    def add(self, entry: dict) -> None:
+        for key in self.keys(entry):
+            self.buckets[key].append(entry)
+
+    def match(self, candidate: dict) -> str | None:
+        candidates = {}
+        for key in self.keys(candidate):
+            for entry in self.buckets.get(key, []):
+                candidates[entry['id']] = entry
+        return near_duplicates(list(candidates.values()), candidate)
+
+
 def preflight(post: dict, kind: str, min_score: int = 4) -> str | None:
     tags = set(post.get('tag_string', '').split())
     general = set(post.get('tag_string_general', '').split())
@@ -260,9 +298,25 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
     root = Path(args.root)
     state_path = Path(args.state_file) if args.state_file else root / 'progress.json'
     state = load_state(state_path)
+    # Daily quota is distinct from the all-time dedup index. Beijing date
+    # is used because GitHub's scheduled run is configured in UTC.
+    day = getattr(args, 'collection_day', None) or datetime.now(
+        timezone(timedelta(hours=8))).date().isoformat()
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+        raise ValueError('collection_day must be YYYY-MM-DD')
+    datetime.strptime(day, '%Y-%m-%d')
     state['targets'] = {'image': args.target_images, 'gif': args.target_gifs}
+    state['quota_scope'] = 'Asia/Shanghai calendar day'
+    daily = state.setdefault('daily', {})
+    day_counts = daily.setdefault(day, {'image': 0, 'gif': 0})
+    # Recover counts from accepted entries if the daily summary was lost.
+    baseline = collections.Counter(e['kind'] for e in state['entries']
+                                   if e.get('collection_day') == day)
+    for kind in ('image', 'gif'):
+        day_counts[kind] = max(int(day_counts.get(kind, 0)), baseline[kind])
     indexed = {str(e['id']) for e in state['entries']}
     by_md5 = {e['md5']: e['id'] for e in state['entries']}
+    perceptual_index = PerceptualIndex(state['entries'])
     stats = collections.Counter()
     reject_examples = []
     run_id = args.run_id or (os.environ.get('GITHUB_RUN_ID') or datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S'))
@@ -278,10 +332,17 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
     byte_budget = int(args.max_batch_mib * 1024 * 1024)
     current_bytes = 0
     for kind in ('image', 'gif'):
-        quota = max(0, min(budgets[kind], state['targets'][kind] - sum(e['kind'] == kind for e in state['entries'])))
+        # Reserve at least 30% of the per-shard capacity for GIFs when
+        # a GIF quota remains; static media cannot exhaust the full budget.
+        remaining_gifs = max(0, state['targets']['gif'] - day_counts['gif'])
+        kind_budget = (int(byte_budget * 0.70)
+                       if kind == 'image' and budgets['gif'] > 0 and remaining_gifs > 0
+                       else byte_budget)
+        quota = max(0, min(budgets[kind], state['targets'][kind] - day_counts[kind]))
+        budget_reached = False
         scanned = 0
         for page_num in range(args.max_pages):
-            if quota <= 0 or current_bytes >= byte_budget:
+            if quota <= 0 or current_bytes >= kind_budget:
                 break
             terms = 'pixel_art rating:g' + (' filetype:gif' if kind == 'gif' else '')
             query = {'tags': terms, 'limit': 100}
@@ -315,16 +376,17 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                     stats['exact_duplicate'] += 1
                     continue
                 expected_size = int(post.get('file_size') or 0)
-                if expected_size and expected_size + current_bytes > byte_budget:
+                if expected_size and expected_size + current_bytes > kind_budget:
                     state['cursor'][kind] = previous_cursor
                     stats['batch_byte_budget_reached'] += 1
+                    budget_reached = True
                     break
                 try:
                     blob = fetcher.get(md5_url(post), MAX_GIF if kind == 'gif' else MAX_IMAGE)
                     if hashlib.md5(blob).hexdigest() != post['md5']:
                         raise ValueError('checksum_mismatch')
                     info = media_info(blob, kind, min_short=args.min_short)
-                    match = near_duplicates(state['entries'], {'kind': kind, **info})
+                    match = perceptual_index.match({'kind': kind, **info})
                     if match:
                         stats['near_duplicate'] += 1
                         continue
@@ -333,9 +395,10 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                     if len(reject_examples) < 80:
                         reject_examples.append({'id': pid, 'kind': kind, 'reason': str(exc)[:120]})
                     continue
-                if current_bytes + len(blob) > byte_budget:
+                if current_bytes + len(blob) > kind_budget:
                     state['cursor'][kind] = previous_cursor
                     stats['batch_byte_budget_reached'] += 1
+                    budget_reached = True
                     break
                 ext = 'gif' if kind == 'gif' else str(post['file_ext']).lower()
                 stem = str(pid)
@@ -355,12 +418,14 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                     'motion_hashes': info.get('motion_hashes'),
                     'training_fps': 8 if kind == 'gif' else None,
                     'max_training_clip_seconds': 5 if kind == 'gif' else None,
-                    'batch': run_id, 'file': f'{kind}/{stem}.{ext}',
+                    'batch': run_id, 'collection_day': day, 'file': f'{kind}/{stem}.{ext}',
                     'source_post': f'{BASE}/posts/{pid}',
                     'rights_verified': False, 'caption_verified': False,
                 }
                 state['entries'].append(entry)
+                perceptual_index.add(entry)
                 new_entries.append(entry)
+                day_counts[kind] += 1
                 indexed.add(str(pid))
                 by_md5[post['md5']] = pid
                 quota -= 1
@@ -368,7 +433,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                 print(f'accepted {kind} #{pid} {info["width"]}x{info["height"]} {len(blob)} bytes', flush=True)
                 if quota <= 0:
                     break
-            if quota <= 0 or current_bytes >= byte_budget or stats['batch_byte_budget_reached']:
+            if quota <= 0 or current_bytes >= kind_budget or budget_reached:
                 break
             # Avoid scanning unbounded historical pages in one run.
         print(f'{kind}: accepted {sum(e["kind"] == kind for e in new_entries)}, scanned {scanned}', flush=True)
@@ -396,6 +461,10 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
               'total_images': total['image'], 'total_gifs': total['gif'],
               'target_images': args.target_images, 'target_gifs': args.target_gifs,
               'cursor': state['cursor'], 'new_bytes': current_bytes,
+              'collection_day': day, 'daily_images': day_counts['image'],
+              'daily_gifs': day_counts['gif'],
+              'remaining_daily_images': max(0, args.target_images - day_counts['image']),
+              'remaining_daily_gifs': max(0, args.target_gifs - day_counts['gif']),
               'rejection_counts': dict(stats), 'rights_review_required': True}
     atomic_json(root / 'report.json', report)
     print('REPORT ' + json.dumps(report, ensure_ascii=False), flush=True)
@@ -407,8 +476,8 @@ def main() -> None:
     parser.add_argument('--root', default='data/pixelloop-curated')
     parser.add_argument('--state-file')
     parser.add_argument('--run-id')
-    parser.add_argument('--target-images', type=int, default=10000)
-    parser.add_argument('--target-gifs', type=int, default=1000)
+    parser.add_argument('--target-images', type=int, default=10000, help='accepted images per Beijing day')
+    parser.add_argument('--target-gifs', type=int, default=1000, help='accepted GIFs per Beijing day')
     parser.add_argument('--images-per-run', type=int, default=80)
     parser.add_argument('--gifs-per-run', type=int, default=8)
     parser.add_argument('--max-pages', type=int, default=15)
@@ -416,6 +485,7 @@ def main() -> None:
     parser.add_argument('--min-short', type=int, default=128)
     parser.add_argument('--min-score', type=int, default=4)
     parser.add_argument('--delay', type=float, default=1.05)
+    parser.add_argument('--collection-day', help='Beijing YYYY-MM-DD, for deterministic tests')
     args = parser.parse_args()
     if min(args.target_images, args.target_gifs, args.images_per_run, args.gifs_per_run, args.max_pages, args.max_batch_mib) < 0:
         parser.error('Targets and budgets cannot be negative')
