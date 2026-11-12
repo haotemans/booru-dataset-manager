@@ -1,0 +1,26 @@
+name: Verify private pixelart ModelScope storage
+on:
+  push:
+    branches:
+      - verify/pixelart-modelscope-20261112
+    paths:
+      - scripts/verify_modelscope.py
+      - .github/workflows/verify-pixelart-modelscope.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      MODELSCOPE_DATASET_ID: ${{ vars.MODELSCOPE_DATASET_ID }}
+      MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install 'modelscope-hub>=0.5,<1'
+      - name: Verify private dataset and upload/readback
+        run: python scripts/verify_modelscope.py
