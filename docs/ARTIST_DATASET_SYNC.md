@@ -5,11 +5,18 @@ This is a separate workflow from the existing Pixel Art pipeline. It currently
 
 ## Destination and secrets
 
-Target: `feiyun12/artist_datasets` (shown in GitHub as
-`MODELSCOPE_DATASET_ID2`). The workflow reads that **repository secret**
-as `MODELSCOPE_DATASET_ID`, and reads `MODELSCOPE_TOKEN` as a secret.
+Target: `feiyun12/artist_datasets`. The workflow reads the optional
+`MODELSCOPE_DATASET_ID2` repository secret and falls back to this explicitly
+confirmed dataset ID when the secret is unavailable. `MODELSCOPE_TOKEN`
+remains a mandatory GitHub repository secret.
 Secrets must be configured in `haotemans/booru-dataset-manager`, not
 another GitHub repository. The actual token value must never be committed.
+
+Read-only integration verification on 2026-11-12 confirmed the configured token
+could access the private dataset, whose existing files were only `README.md`
+and `.gitattributes`. A pilot inspection of 180 Danbooru post records returned
+151 metadata candidates; neither artwork creation dates nor aesthetic quality,
+rights or visual descriptions were verified. See the diagnostic workflow artifact.
 
 The ModelScope destination must be **private** for future third-party
 media processing. Read-only preflight rejects a non-private destination.
