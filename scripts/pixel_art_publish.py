@@ -33,8 +33,12 @@ def publish(archive: Path, state: Path, repo: str, token: str, revision: str) ->
 
     from modelscope_hub import HubApi
     api = HubApi(token=token)
-    if not api.repo_exists(repo, repo_type="dataset"):
-        raise ValueError("The specified ModelScope dataset does not exist")
+    # Reuse the verified ModelScope API to resolve the dataset and enforce privacy.
+    info = api.get_repo(repo, repo_type="dataset")
+    visibility = getattr(info, "visibility", None)
+    private = getattr(info, "private", None)
+    if not (private is True or visibility in (1, "1", "private")):
+        raise ValueError("Refusing to publish third-party media to a non-private dataset")
     destination = "pixel-art/shards/" + archive.name
     uploaded = api.upload_file(
         repo, "dataset", str(archive), destination,
