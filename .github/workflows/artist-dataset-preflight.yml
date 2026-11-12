@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      MODELSCOPE_DATASET_ID: ${{ secrets.MODELSCOPE_DATASET_ID2 }}
+      MODELSCOPE_DATASET_ID: ${{ secrets.MODELSCOPE_DATASET_ID2 || 'feiyun12/artist_datasets' }}
       MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
         run: |
           missing=0
           if [[ -z "$MODELSCOPE_DATASET_ID" ]]; then
-            echo "::error::MODELSCOPE_DATASET_ID2 is unavailable in this repository/branch context" >&2
+            echo "::error::MODELSCOPE_DATASET_ID2 and fallback repo ID are unavailable" >&2
             missing=1
           fi
           if [[ -z "$MODELSCOPE_TOKEN" ]]; then
