@@ -2,7 +2,7 @@ name: Curate Danbooru pixel-art dataset
 
 on:
   push:
-    branches: [fix/pixelart-persistent-upload-20261112]
+    branches: [main]
     paths:
       - scripts/pixel_art_collect.py
       - scripts/pixel_art_publish.py
@@ -51,8 +51,8 @@ jobs:
           python scripts/pixel_art_collect.py \
             --root data/pixelloop-curated \
             --state-file datasets/pixelloop/progress.json \
-            --images-per-run ${{ github.event_name == 'push' && '4' || '80' }} \
-            --gifs-per-run ${{ github.event_name == 'push' && '1' || '8' }} \
+            --images-per-run 80 \
+            --gifs-per-run 8 \
             --target-images 10000 \
             --target-gifs 1000 \
             --max-pages 20 \
