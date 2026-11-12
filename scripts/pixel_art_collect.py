@@ -332,10 +332,16 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
     byte_budget = int(args.max_batch_mib * 1024 * 1024)
     current_bytes = 0
     for kind in ('image', 'gif'):
+        # Reserve at least 30% of the per-shard capacity for GIFs when
+        # a GIF quota remains; static media cannot exhaust the full budget.
+        remaining_gifs = max(0, state['targets']['gif'] - day_counts['gif'])
+        kind_budget = (int(byte_budget * 0.70)
+                       if kind == 'image' and budgets['gif'] > 0 and remaining_gifs > 0
+                       else byte_budget)
         quota = max(0, min(budgets[kind], state['targets'][kind] - day_counts[kind]))
         scanned = 0
         for page_num in range(args.max_pages):
-            if quota <= 0 or current_bytes >= byte_budget:
+            if quota <= 0 or current_bytes >= kind_budget:
                 break
             terms = 'pixel_art rating:g' + (' filetype:gif' if kind == 'gif' else '')
             query = {'tags': terms, 'limit': 100}
@@ -369,7 +375,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                     stats['exact_duplicate'] += 1
                     continue
                 expected_size = int(post.get('file_size') or 0)
-                if expected_size and expected_size + current_bytes > byte_budget:
+                if expected_size and expected_size + current_bytes > kind_budget:
                     state['cursor'][kind] = previous_cursor
                     stats['batch_byte_budget_reached'] += 1
                     break
@@ -387,7 +393,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                     if len(reject_examples) < 80:
                         reject_examples.append({'id': pid, 'kind': kind, 'reason': str(exc)[:120]})
                     continue
-                if current_bytes + len(blob) > byte_budget:
+                if current_bytes + len(blob) > kind_budget:
                     state['cursor'][kind] = previous_cursor
                     stats['batch_byte_budget_reached'] += 1
                     break
@@ -424,7 +430,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                 print(f'accepted {kind} #{pid} {info["width"]}x{info["height"]} {len(blob)} bytes', flush=True)
                 if quota <= 0:
                     break
-            if quota <= 0 or current_bytes >= byte_budget or stats['batch_byte_budget_reached']:
+            if quota <= 0 or current_bytes >= kind_budget or stats['batch_byte_budget_reached']:
                 break
             # Avoid scanning unbounded historical pages in one run.
         print(f'{kind}: accepted {sum(e["kind"] == kind for e in new_entries)}, scanned {scanned}', flush=True)
