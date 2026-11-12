@@ -63,6 +63,7 @@ class CollectorTests(unittest.TestCase):
                          "not_general_or_deleted")
         self.assertEqual(mod.preflight({**p, "score": 0}, "image"),
                          "low_community_score")
+        self.assertEqual(mod.preflight({**p, "tag_string": "pixel_art color_guide"}, "image"), "excluded_tag")
         self.assertEqual(mod.preflight({**p, "tag_string": "pixel_art screenshot"}, "image"),
                          "excluded_tag")
 
@@ -73,6 +74,10 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(gif["frames"], 8)
         self.assertEqual(gif["duration_ms"], 800)
         self.assertGreaterEqual(gif["unique_sampled_frames"], 4)
+        self.assertEqual(len(gif["motion_hashes"]), 5)
+        self.assertEqual(mod.near_duplicates([{"id": 7, "kind": "gif", **gif}], {"kind": "gif", **gif}), "7")
+        different = {"kind": "gif", **gif, "motion_hashes": ["ffffffffffffffff"] + gif["motion_hashes"][1:]}
+        self.assertIsNone(mod.near_duplicates([{"id": 7, "kind": "gif", **gif}], different))
         with self.assertRaises(ValueError):
             mod.media_info(image_bytes(size=60), "image")
         with self.assertRaises(ValueError):

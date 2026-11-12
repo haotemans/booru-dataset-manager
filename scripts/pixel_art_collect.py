@@ -31,6 +31,8 @@ MAX_GIF = 30 * 1024 * 1024
 FORBIDDEN_TAGS = {
     'screenshot', 'screencap', 'manga', 'comic', 'low_quality',
     'jpeg_artifacts', 'watermark', 'text_focus', 'gore',
+    'color_guide', 'photo_inset', 'reference_sheet', 'character_sheet',
+    'sprite_sheet', 'collage', 'comparison', 'infographic',
 }
 TAG_TEXT = {
     '1girl': 'one girl', '2girls': 'two girls', '1boy': 'one boy',
@@ -174,12 +176,17 @@ def media_info(payload: bytes, kind: str, min_short: int = 128) -> dict:
             raise ValueError('bad_frame_count')
         duration = 0
         unique = set()
+        keyframes = {0, frames // 4, frames // 2, 3 * frames // 4, frames - 1}
+        motion_hashes = []
         for i in range(frames):
             img.seek(i)
             duration += max(20, int(img.info.get('duration') or 100))
             if i % max(1, frames // 24) == 0:
                 # Coarse fingerprint for mostly static animations.
                 unique.add(hashlib.sha1(img.convert('RGB').resize((12, 12), Image.Resampling.BOX).tobytes()).digest())
+            if i in keyframes:
+                sample_hash, _ = dhash_and_thumbnail(img)
+                motion_hashes.append(sample_hash)
         if duration < 600 or duration > 60000 or len(unique) < 4:
             raise ValueError('insufficient_motion_or_duration')
         img.seek(frames // 2)
@@ -187,6 +194,7 @@ def media_info(payload: bytes, kind: str, min_short: int = 128) -> dict:
         return {'width': width, 'height': height, 'dhash': dh,
                 'thumb': thumb, 'frames': frames, 'duration_ms': duration,
                 'unique_sampled_frames': len(unique),
+                'motion_hashes': motion_hashes,
                 'training_fps': 8, 'max_training_clip_seconds': 5}
 
 
@@ -203,6 +211,15 @@ def near_duplicates(existing: list[dict], candidate: dict) -> str | None:
             continue
         if (target_hash ^ int(entry['dhash'], 16)).bit_count() > 2:
             continue
+        if candidate['kind'] == 'gif':
+            keys_a = candidate.get('motion_hashes') or []
+            keys_b = entry.get('motion_hashes') or []
+            if not keys_a or len(keys_a) != len(keys_b):
+                continue
+            if abs(candidate['duration_ms'] - entry.get('duration_ms', 0)) > max(500, candidate['duration_ms'] * 0.15):
+                continue
+            if any((int(a, 16) ^ int(b, 16)).bit_count() > 2 for a, b in zip(keys_a, keys_b)):
+                continue
         base_thumb = bytes.fromhex(entry['thumb'])
         if len(base_thumb) != len(target_thumb):
             continue
@@ -335,6 +352,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                     'score': int(post.get('score') or 0),
                     'fav_count': int(post.get('fav_count') or 0),
                     'frames': info['frames'], 'duration_ms': info['duration_ms'],
+                    'motion_hashes': info.get('motion_hashes'),
                     'training_fps': 8 if kind == 'gif' else None,
                     'max_training_clip_seconds': 5 if kind == 'gif' else None,
                     'batch': run_id, 'file': f'{kind}/{stem}.{ext}',
