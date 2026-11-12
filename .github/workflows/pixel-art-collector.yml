@@ -2,7 +2,7 @@ name: Curate Danbooru pixel-art dataset
 
 on:
   push:
-    branches: [samples/danbooru-download-20261112]
+    branches: [main]
     paths:
       - scripts/pixel_art_collect.py
       - scripts/pixel_art_publish.py
