@@ -9,8 +9,10 @@ on:
       - tests/test_pixel_art_collect.py
       - .github/workflows/pixel-art-collector.yml
   workflow_dispatch:
+  # Up to 24 scheduled batches/day. Each batch can accept up to 500/50.
+  # These are capacity ceilings, not a guarantee of eligible source material.
   schedule:
-    - cron: "25 3 * * *"
+    - cron: "17 * * * *"
 
 concurrency:
   group: pixel-art-collector
@@ -23,7 +25,7 @@ jobs:
   collect:
     if: github.event_name != 'schedule' || vars.MODELSCOPE_DATASET_ID != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 100
     env:
       MODELSCOPE_DATASET_ID: ${{ vars.MODELSCOPE_DATASET_ID }}
       MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
@@ -51,23 +53,23 @@ jobs:
           python scripts/pixel_art_collect.py \
             --root data/pixelloop-curated \
             --state-file datasets/pixelloop/progress.json \
-            --images-per-run 80 \
-            --gifs-per-run 8 \
+            --images-per-run 500 \
+            --gifs-per-run 50 \
             --target-images 10000 \
             --target-gifs 1000 \
-            --max-pages 20 \
-            --max-batch-mib 300
-      - name: Upload temporary seven-day diagnostic dataset
+            --max-pages 30 \
+            --max-batch-mib 768
+      # Keep lightweight diagnostics in Actions; the original-media tar is
+      # persisted only in private ModelScope, avoiding double bulk storage.
+      - name: Upload temporary diagnostic report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pixel-art-curation-${{ github.run_id }}
+          name: pixel-art-curation-report-${{ github.run_id }}
           path: |
-            data/pixelloop-curated/archives/
             data/pixelloop-curated/report.json
             datasets/pixelloop/progress.json
           if-no-files-found: warn
-          compression-level: 0
           retention-days: 7
       - name: Publish shard to private ModelScope and verify remote readback
         id: publish
