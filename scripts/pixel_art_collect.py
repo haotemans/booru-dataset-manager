@@ -339,6 +339,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                        if kind == 'image' and budgets['gif'] > 0 and remaining_gifs > 0
                        else byte_budget)
         quota = max(0, min(budgets[kind], state['targets'][kind] - day_counts[kind]))
+        budget_reached = False
         scanned = 0
         for page_num in range(args.max_pages):
             if quota <= 0 or current_bytes >= kind_budget:
@@ -378,6 +379,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                 if expected_size and expected_size + current_bytes > kind_budget:
                     state['cursor'][kind] = previous_cursor
                     stats['batch_byte_budget_reached'] += 1
+                    budget_reached = True
                     break
                 try:
                     blob = fetcher.get(md5_url(post), MAX_GIF if kind == 'gif' else MAX_IMAGE)
@@ -396,6 +398,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                 if current_bytes + len(blob) > kind_budget:
                     state['cursor'][kind] = previous_cursor
                     stats['batch_byte_budget_reached'] += 1
+                    budget_reached = True
                     break
                 ext = 'gif' if kind == 'gif' else str(post['file_ext']).lower()
                 stem = str(pid)
@@ -430,7 +433,7 @@ def run(args: argparse.Namespace, fetcher: Fetcher | None = None) -> dict:
                 print(f'accepted {kind} #{pid} {info["width"]}x{info["height"]} {len(blob)} bytes', flush=True)
                 if quota <= 0:
                     break
-            if quota <= 0 or current_bytes >= kind_budget or stats['batch_byte_budget_reached']:
+            if quota <= 0 or current_bytes >= kind_budget or budget_reached:
                 break
             # Avoid scanning unbounded historical pages in one run.
         print(f'{kind}: accepted {sum(e["kind"] == kind for e in new_entries)}, scanned {scanned}', flush=True)
