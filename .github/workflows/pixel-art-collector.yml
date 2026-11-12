@@ -8,6 +8,11 @@ on:
       - scripts/pixel_art_publish.py
       - tests/test_pixel_art_collect.py
       - .github/workflows/pixel-art-collector.yml
+  pull_request:
+    paths:
+      - scripts/pixel_art_collect.py
+      - tests/test_pixel_art_collect.py
+      - .github/workflows/pixel-art-collector.yml
   workflow_dispatch:
   # Up to 24 scheduled batches/day. Each batch can accept up to 500/50.
   # These are capacity ceilings, not a guarantee of eligible source material.
@@ -22,8 +27,21 @@ permissions:
   contents: write
 
 jobs:
+  unit-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install 'Pillow>=10,<13'
+      - run: python -m unittest discover -s tests -p test_pixel_art_collect.py -v
   collect:
-    if: github.event_name != 'schedule' || vars.MODELSCOPE_DATASET_ID != ''
+    if: github.event_name != 'pull_request' && (github.event_name != 'schedule' || vars.MODELSCOPE_DATASET_ID != '')
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
