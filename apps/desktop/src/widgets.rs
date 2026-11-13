@@ -48,7 +48,7 @@ fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool)
         6.0,
         if selected { SOFT } else { visuals.weak_bg_fill },
         Stroke::new(
-            1.0,
+            1.0_f32,
             if selected {
                 ACCENT
             } else {
@@ -74,7 +74,7 @@ fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool)
     }
     if response.has_focus() {
         ui.painter()
-            .rect_stroke(rect.expand(2.0), 7.0, Stroke::new(1.0, ACCENT));
+            .rect_stroke(rect.expand(2.0), 7.0, Stroke::new(1.0_f32, ACCENT));
     }
     response.on_hover_text(name)
 }
@@ -124,7 +124,7 @@ pub fn choice_card(
             PANEL
         },
         Stroke::new(
-            1.0,
+            1.0_f32,
             if selected || response.has_focus() {
                 ACCENT
             } else {
@@ -366,7 +366,11 @@ pub fn icon(ui: &Ui, rect: Rect, kind: &str, color: Color32) {
     };
     match kind {
         "info" => {
-            p.circle_stroke(at(0.5, 0.5), rect.width() * 0.4, Stroke::new(1.4, color));
+            p.circle_stroke(
+                at(0.5, 0.5),
+                rect.width() * 0.4,
+                Stroke::new(1.4_f32, color),
+            );
             p.circle_filled(at(0.5, 0.3), rect.width() * 0.045, color);
             line((0.5, 0.46), (0.5, 0.74));
         }
@@ -384,7 +388,7 @@ pub fn icon(ui: &Ui, rect: Rect, kind: &str, color: Color32) {
                     at(0.88, 0.26),
                     at(0.48, 0.7),
                 ],
-                Stroke::new(1.5, color),
+                Stroke::new(1.5_f32, color),
             ));
             line((0.35, 0.58), (0.16, 0.85));
             line((0.16, 0.85), (0.48, 0.7));
