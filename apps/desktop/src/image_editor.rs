@@ -1208,7 +1208,7 @@ mod tests {
     }
     #[test]
     fn clicking_the_selected_ratio_cancels_without_writing_the_image() {
-        fn frame(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) {
+        fn frame(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) -> bool {
             fn has_resolution(shape: &egui::Shape) -> bool {
                 match shape {
                     egui::Shape::Text(text) => text.galley.text() == "1024档",
@@ -1224,13 +1224,10 @@ mod tests {
                 },
                 |ctx| app.shell(ctx),
             );
-            assert!(
-                output
-                    .shapes
-                    .iter()
-                    .any(|shape| has_resolution(&shape.shape)),
-                "training resolution must remain visible before selection and after cancellation"
-            );
+            output
+                .shapes
+                .iter()
+                .any(|shape| has_resolution(&shape.shape))
         }
         fn click_ratio(ctx: &egui::Context, app: &mut BdmApp, ratio: usize) {
             let pos = app
@@ -1254,7 +1251,10 @@ mod tests {
                     }],
                 );
             }
-            frame(ctx, app, vec![]);
+            assert!(
+                frame(ctx, app, vec![]),
+                "training resolution must remain visible after ratio selection or cancellation"
+            );
         }
         let (_directory, mut app, media) = imported_app();
         app.image_editor.visible = false;
@@ -1265,6 +1265,10 @@ mod tests {
         for _ in 0..3 {
             frame(&ctx, &mut app, vec![]);
         }
+        assert!(
+            frame(&ctx, &mut app, vec![]),
+            "training resolution must be visible before selecting a ratio"
+        );
         for ratio in [6, 0, crop::RATIOS.len() - 1] {
             click_ratio(&ctx, &mut app, ratio);
             assert!(app.image_editor.visible && app.image_editor.cropping);
