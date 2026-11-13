@@ -1203,7 +1203,9 @@ mod tests {
         fn frame(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) -> bool {
             fn has_resolution(shape: &egui::Shape) -> bool {
                 match shape {
-                    egui::Shape::Text(text) => text.galley.text().starts_with("自动 ≈"),
+                    egui::Shape::Text(text) => {
+                        text.galley.text().starts_with("自动 ≈") || text.galley.text() == "自动档位"
+                    }
                     egui::Shape::Vec(shapes) => shapes.iter().any(has_resolution),
                     _ => false,
                 }
