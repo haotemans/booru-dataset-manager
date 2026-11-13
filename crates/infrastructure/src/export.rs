@@ -78,7 +78,7 @@ pub fn run(
             };
             let base = format!("media_{id}");
             let directory = destination.join(&base);
-            let image_name = format!("{base}.{}", media.post.file_ext);
+            let image_name = format!("{base}.{}", media.current_extension());
             let original = storage(fs::read(&media.path))?;
             if format!("{:x}", Sha256::digest(&original)) != media.sha256 {
                 return Err(IngestError::Integrity);
@@ -107,11 +107,13 @@ pub fn run(
                         else {
                             continue;
                         };
-                        let bytes = training_variant(&image, &plan, &media.post.file_ext)?;
+                        let bytes = training_variant(&image, &plan)?;
+                        let variant_name = format!("{base}.png");
                         let variant_root = destination.join(resolution.to_string());
                         storage(fs::create_dir_all(&variant_root))?;
                         let mut variant = manifest.clone();
                         variant["source_sha256"] = media.sha256.clone().into();
+                        variant["image"] = variant_name.clone().into();
                         variant["sha256"] = format!("{:x}", Sha256::digest(&bytes)).into();
                         variant["current_dimensions"] = serde_json::json!(plan.output);
                         variant["training"] = serde_json::json!(plan);
@@ -119,7 +121,7 @@ pub fn run(
                         write_flat_pair(
                             &variant_root,
                             &base,
-                            &image_name,
+                            &variant_name,
                             &bytes,
                             &content,
                             &variant,
@@ -290,7 +292,6 @@ fn is_image_path(path: &Path) -> bool {
 fn training_variant(
     image: &image::DynamicImage,
     plan: &bdm_domain::training::TrainingCrop,
-    extension: &str,
 ) -> Result<Vec<u8>, IngestError> {
     let resized = if [image.width(), image.height()] == plan.resized {
         image.clone()
@@ -308,15 +309,7 @@ fn training_variant(
         plan.output[1],
     );
     let mut bytes = std::io::Cursor::new(Vec::new());
-    let format = image::ImageFormat::from_extension(extension).ok_or(IngestError::InvalidMedia)?;
-    if format == image::ImageFormat::Jpeg {
-        storage(
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 95)
-                .encode_image(&output),
-        )?;
-    } else {
-        storage(output.write_to(&mut bytes, format))?;
-    }
+    storage(output.write_to(&mut bytes, image::ImageFormat::Png))?;
     Ok(bytes.into_inner())
 }
 
@@ -352,19 +345,6 @@ fn write_flat_pair(
     storage(fs::create_dir_all(&manifest_dir))?;
     let manifest_path = manifest_dir.join(format!("{base}.json"));
 
-    // Never overwrite an existing image with different bytes.
-    if image_path.exists() {
-        let old_image = storage(fs::read(&image_path))?;
-        if format!("{:x}", Sha256::digest(old_image)) != expected_image_sha {
-            return Err(IngestError::Integrity);
-        }
-    } else {
-        let mut temp = storage(tempfile::NamedTempFile::new_in(root))?;
-        storage(temp.write_all(image_bytes))?;
-        storage(temp.as_file().sync_all())?;
-        storage(temp.persist_noclobber(&image_path))?;
-    }
-
     let prior_manifest = if manifest_path.is_file() {
         Some(storage(serde_json::from_slice::<serde_json::Value>(
             &storage(fs::read(&manifest_path))?,
@@ -372,23 +352,86 @@ fn write_flat_pair(
     } else {
         None
     };
-    if text_path.exists() {
+    let mut replaced = None;
+    if let Some(previous) = &prior_manifest {
+        let old_name = previous["image"].as_str().ok_or(IngestError::Integrity)?;
+        if old_name != image_name {
+            if image_name != format!("{base}.png")
+                || !["jpg", "jpeg", "webp"]
+                    .into_iter()
+                    .any(|ext| old_name == format!("{base}.{ext}"))
+                || previous["media_id"] != manifest["media_id"]
+                || previous["source"] != manifest["source"]
+            {
+                return Err(IngestError::Integrity);
+            }
+            let old_sha = previous["sha256"].as_str().ok_or(IngestError::Integrity)?;
+            if old_sha.len() != 64 || !old_sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(IngestError::Integrity);
+            }
+            // The backup suffix is deliberately not an image extension: recursive
+            // trainers must not pick up the superseded lossy training image.
+            let backup_dir = manifest_dir.join("replaced-images");
+            let backup = backup_dir.join(format!("{old_sha}-{old_name}.bak"));
+            let old_path = root.join(old_name);
+            let evidence = if old_path.is_file() {
+                &old_path
+            } else {
+                &backup
+            };
+            if format!("{:x}", Sha256::digest(storage(fs::read(evidence))?)) != old_sha {
+                return Err(IngestError::Integrity);
+            }
+            replaced = Some((old_path, backup_dir, backup, old_sha.to_owned()));
+        }
+    }
+    if image_path.exists()
+        && format!("{:x}", Sha256::digest(storage(fs::read(&image_path))?)) != expected_image_sha
+    {
+        return Err(IngestError::Integrity);
+    }
+    let update_text = if text_path.exists() {
         let old_text = storage(fs::read_to_string(&text_path))?;
         if old_text != content {
             let old_sha = format!("{:x}", Sha256::digest(old_text.as_bytes()));
             let trusted = prior_manifest.as_ref().is_some_and(|previous| {
                 previous["text_sha256"].as_str() == Some(old_sha.as_str())
                     && previous["text_kind"].as_str() == Some(mode)
-                    && previous["image"].as_str() == Some(image_name)
-                    && previous["sha256"].as_str() == Some(expected_image_sha)
+                    && (replaced.is_some()
+                        || (previous["image"].as_str() == Some(image_name)
+                            && previous["sha256"].as_str() == Some(expected_image_sha)))
             });
             if !trusted {
                 return Err(IngestError::Integrity);
             }
-            atomic_write(&text_path, content.as_bytes())?;
+            true
+        } else {
+            false
         }
     } else {
+        true
+    };
+    if !image_path.exists() {
+        let mut temp = storage(tempfile::NamedTempFile::new_in(root))?;
+        storage(temp.write_all(image_bytes))?;
+        storage(temp.as_file().sync_all())?;
+        storage(temp.persist_noclobber(&image_path))?;
+    }
+    if update_text {
         atomic_write(&text_path, content.as_bytes())?;
+    }
+    if let Some((old_path, backup_dir, backup, old_sha)) = replaced {
+        storage(fs::create_dir_all(backup_dir))?;
+        if backup.exists() {
+            if format!("{:x}", Sha256::digest(storage(fs::read(&backup))?)) != old_sha {
+                return Err(IngestError::Integrity);
+            }
+            if old_path.is_file() {
+                storage(fs::remove_file(old_path))?;
+            }
+        } else if old_path.is_file() {
+            storage(fs::rename(old_path, backup))?;
+        }
     }
     let manifest_bytes = storage(serde_json::to_vec(manifest))?;
     if prior_manifest.as_ref() != Some(manifest) {

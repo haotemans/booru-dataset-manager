@@ -30,6 +30,33 @@ use eframe::egui;
 
 fn main() -> eframe::Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    if let Some(index) = args.iter().position(|arg| arg == "--repair-crops-png") {
+        let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let backup =
+                std::path::PathBuf::from(args.get(index + 1).ok_or("missing backup directory")?);
+            let catalog = args
+                .iter()
+                .position(|arg| arg == "--catalog")
+                .and_then(|index| args.get(index + 1))
+                .ok_or("missing --catalog")?;
+            if !backup.is_absolute() || !std::path::Path::new(catalog).is_absolute() {
+                return Err("absolute paths required".into());
+            }
+            let apply = args.iter().any(|arg| arg == "--apply");
+            let mut repo =
+                bdm_infrastructure::catalog::SqliteCatalog::open(std::path::Path::new(catalog))?;
+            let report = repo.repair_jpeg_crops_as_png(&backup, apply)?;
+            std::fs::write(
+                backup.join(if apply { "applied.json" } else { "audit.json" }),
+                serde_json::to_vec_pretty(&report)?,
+            )?;
+            Ok(())
+        })();
+        if let Err(error) = &outcome {
+            eprintln!("PNG remediation failed: {error}");
+        }
+        std::process::exit(if outcome.is_ok() { 0 } else { 1 });
+    }
     let capture_path = args
         .iter()
         .position(|arg| arg == "--capture")

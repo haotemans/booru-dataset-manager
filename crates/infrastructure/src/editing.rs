@@ -3,7 +3,7 @@ use bdm_domain::{
     editing::{CropRect, EditRecord, MaskRegion},
     ingest::StoredMedia,
 };
-use bdm_ports::{IngestError, MediaProvider};
+use bdm_ports::{IngestError, IngestRepository, MediaProvider};
 use image::{GenericImageView, ImageFormat};
 use rusqlite::params;
 use sha2::{Digest, Sha256};
@@ -416,7 +416,7 @@ mod tests {
             .exists());
     }
     #[test]
-    fn edited_jpeg_webp_and_png_retain_source_format_and_pixel_dimensions() {
+    fn edited_jpeg_webp_and_png_save_lossless_png_with_matching_paths_and_exports() {
         for (extension, format) in [
             ("jpg", ImageFormat::Jpeg),
             ("webp", ImageFormat::WebP),
@@ -445,12 +445,24 @@ mod tests {
                 )
                 .unwrap();
             let media = f.repo.list_media().unwrap().remove(0);
+            let original_bytes = fs::read(&media.path).unwrap();
             let preview = synthetic(&media);
             let edited = f.repo.commit_repair(media.id, &preview).unwrap();
             assert_eq!(
                 image::guess_format(&fs::read(&edited.path).unwrap()).unwrap(),
-                format
+                ImageFormat::Png
             );
+            assert_eq!(edited.current_extension(), "png");
+            assert_eq!(edited.post, media.post);
+            assert_eq!(
+                image::open(&edited.path).unwrap().to_rgba8(),
+                image::open(&preview.image).unwrap().to_rgba8()
+            );
+            let restored = f.repo.restore_last_edit(media.id).unwrap();
+            assert_eq!(restored.path, media.path);
+            assert_eq!(fs::read(&restored.path).unwrap(), original_bytes);
+            let preview = synthetic(&restored);
+            let edited = f.repo.commit_repair(media.id, &preview).unwrap();
             assert_eq!(image::open(&edited.path).unwrap().dimensions(), (800, 800));
             let cropped = crop_preview(
                 &edited,
@@ -466,10 +478,184 @@ mod tests {
             let edited = f.repo.commit_repair(media.id, &cropped).unwrap();
             assert_eq!(
                 image::guess_format(&fs::read(&edited.path).unwrap()).unwrap(),
-                format
+                ImageFormat::Png
             );
             assert_eq!(image::open(&edited.path).unwrap().dimensions(), (600, 400));
+            assert_eq!(
+                image::open(&edited.path).unwrap().to_rgba8(),
+                image::open(&cropped.image).unwrap().to_rgba8()
+            );
+            f.repo.set_media_keep(edited.id, true).unwrap();
+            f.repo
+                .write_artifact(&edited, "caption", "A test image.", "test", "complete")
+                .unwrap();
+            let mut job = f.repo.new_workflow("export", vec![edited.id]).unwrap();
+            job.mode = "caption".into();
+            job.export_layout = "flat".into();
+            let output = f.directory.path().join("png-export");
+            crate::export::run(
+                &mut f.repo,
+                &mut job,
+                &output,
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read(output.join(format!("media_{}.png", edited.id))).unwrap(),
+                fs::read(&edited.path).unwrap()
+            );
+            assert!(!output.join(format!("media_{}.jpg", edited.id)).exists());
+            let downloaded = f
+                .repo
+                .redownload_original(edited.id, &f.provider, &AtomicBool::new(false))
+                .unwrap();
+            assert_eq!(downloaded.path, media.path);
+            assert_eq!(fs::read(downloaded.path).unwrap(), original_bytes);
         }
+    }
+
+    #[test]
+    fn legacy_jpeg_crop_rebuild_uses_verified_original_and_safely_migrates_flat_export() {
+        let mut f = crate::workflow_tests::fixture();
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::load_from_memory(&f.provider.bytes)
+            .unwrap()
+            .write_to(&mut bytes, ImageFormat::Jpeg)
+            .unwrap();
+        f.provider.bytes = bytes.into_inner();
+        f.post.file_ext = "jpg".into();
+        f.post.file_size = f.provider.bytes.len() as u64;
+        f.post.md5 = format!("{:x}", md5::Md5::digest(&f.provider.bytes));
+        let cancel = AtomicBool::new(false);
+        f.repo
+            .import(
+                &f.post,
+                &f.directory.path().join("library"),
+                f.collection,
+                800,
+                &cancel,
+                &f.provider,
+            )
+            .unwrap();
+        let original = f.repo.list_media().unwrap().remove(0);
+        let crop = CropRect {
+            x: 16,
+            y: 16,
+            width: 768,
+            height: 768,
+        };
+        let preview = training_crop_preview(&original, crop, 2048, &cancel).unwrap();
+        let mut legacy = f.repo.commit_repair(original.id, &preview).unwrap();
+        let png_path = legacy.path.clone();
+        let mut lossy = std::io::Cursor::new(Vec::new());
+        image::open(&png_path)
+            .unwrap()
+            .write_to(&mut lossy, ImageFormat::Jpeg)
+            .unwrap();
+        fs::write(&original.path, lossy.get_ref()).unwrap();
+        fs::remove_file(&png_path).unwrap();
+        legacy.path = original.path.clone();
+        legacy.sha256 = hash(&legacy.path).unwrap();
+        legacy.edit.as_mut().unwrap().output_sha256 = legacy.sha256.clone();
+        f.repo
+            .connection
+            .execute(
+                "UPDATE media SET metadata=?2 WHERE id=?1",
+                params![legacy.id, serde_json::to_string(&legacy).unwrap()],
+            )
+            .unwrap();
+        f.repo.set_media_keep(legacy.id, true).unwrap();
+        f.repo
+            .write_artifact(&legacy, "caption", "A test crop.", "test", "complete")
+            .unwrap();
+        let export = f.directory.path().join("export");
+        let mut job = f.repo.new_workflow("export", vec![legacy.id]).unwrap();
+        job.mode = "caption".into();
+        job.export_layout = "flat".into();
+        crate::export::run(&mut f.repo, &mut job, &export, &cancel, |_| {}).unwrap();
+        let backup = f.directory.path().join("repair-backup");
+        assert_eq!(
+            f.repo.repair_jpeg_crops_as_png(&backup, false).unwrap()[0].state,
+            "ready"
+        );
+        assert_eq!(hash(&legacy.path).unwrap(), legacy.sha256);
+        assert_eq!(
+            f.repo.repair_jpeg_crops_as_png(&backup, true).unwrap()[0].state,
+            "rebuilt"
+        );
+        let rebuilt = f.repo.list_media().unwrap().remove(0);
+        assert_eq!(rebuilt.current_extension(), "png");
+        assert!(rebuilt.keep);
+        assert_eq!(rebuilt.post, original.post);
+        assert_eq!(
+            image::open(&rebuilt.path).unwrap().to_rgba8(),
+            image::open(&preview.image).unwrap().to_rgba8()
+        );
+        assert_eq!(
+            fs::read(backup.join(format!("media_{}/before.jpg", legacy.id))).unwrap(),
+            lossy.into_inner()
+        );
+        assert!(backup.join("catalog-before.sqlite3").is_file());
+        job.cursor = 0;
+        crate::export::run(&mut f.repo, &mut job, &export, &cancel, |_| {}).unwrap();
+        assert!(!export.join(format!("media_{}.jpg", legacy.id)).exists());
+        assert_eq!(
+            fs::read(export.join(format!("media_{}.png", legacy.id))).unwrap(),
+            fs::read(&rebuilt.path).unwrap()
+        );
+        assert_eq!(
+            fs::read_dir(export.join(".bdm-manifests/replaced-images"))
+                .unwrap()
+                .count(),
+            1
+        );
+        assert!(f
+            .repo
+            .repair_jpeg_crops_as_png(&backup, false)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn png_path_transition_recovers_after_catalog_failure_without_touching_source_jpeg() {
+        let mut f = crate::workflow_tests::fixture();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::load_from_memory(&f.provider.bytes)
+            .unwrap()
+            .write_to(&mut encoded, ImageFormat::Jpeg)
+            .unwrap();
+        f.provider.bytes = encoded.into_inner();
+        f.post.file_ext = "jpg".into();
+        f.post.md5 = format!("{:x}", md5::Md5::digest(&f.provider.bytes));
+        f.post.file_size = f.provider.bytes.len() as u64;
+        f.repo
+            .import(
+                &f.post,
+                &f.directory.path().join("library"),
+                f.collection,
+                800,
+                &AtomicBool::new(false),
+                &f.provider,
+            )
+            .unwrap();
+        let media = f.repo.list_media().unwrap().remove(0);
+        let preview = synthetic(&media);
+        f.repo.connection.execute_batch("CREATE TRIGGER fail_png BEFORE UPDATE OF metadata ON media BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;").unwrap();
+        assert!(f.repo.commit_repair(media.id, &preview).is_err());
+        assert_eq!(hash(&media.path).unwrap(), media.sha256);
+        f.repo
+            .connection
+            .execute_batch("DROP TRIGGER fail_png;")
+            .unwrap();
+        f.repo.recover_repairs().unwrap();
+        let edited = f.repo.list_media().unwrap().remove(0);
+        assert_eq!(edited.current_extension(), "png");
+        assert_eq!(
+            image::open(&edited.path).unwrap().to_rgba8(),
+            image::open(&preview.image).unwrap().to_rgba8()
+        );
+        assert_eq!(hash(&media.path).unwrap(), media.sha256);
     }
 
     #[test]
@@ -900,7 +1086,7 @@ fn preserve_source(
     }
     let path = directory.join(format!(
         ".original-preserved-{sha256}.{}",
-        media.post.file_ext
+        media.current_extension()
     ));
     if path.is_file() {
         if hash(&path)? != sha256 {
@@ -919,7 +1105,178 @@ fn preserve_source(
     })
 }
 
+fn validate_png_destination(media: &StoredMedia, parent: &StoredMedia) -> Result<(), IngestError> {
+    if media.path == parent.path || !media.path.exists() || hash(&media.path)? == media.sha256 {
+        return Ok(());
+    }
+    let receipt = media
+        .path
+        .parent()
+        .ok_or(IngestError::Storage)?
+        .join(".png-output.json");
+    if receipt.is_file() {
+        let owned: serde_json::Value =
+            storage(serde_json::from_slice(&storage(fs::read(receipt))?))?;
+        if owned["media_id"] == media.id
+            && owned["path"] == serde_json::json!(media.path)
+            && owned["sha256"].as_str() == Some(hash(&media.path)?.as_str())
+        {
+            return Ok(());
+        }
+    }
+    Err(IngestError::StorageDetails(
+        "同名 PNG 已存在且不属于已确认的编辑结果，已保留文件并停止保存。".into(),
+    ))
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct CropPngRepair {
+    pub media_id: i64,
+    pub state: String,
+    pub reason: String,
+}
+
+fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError> {
+    let edit = media.edit.as_ref().ok_or(IngestError::InvalidMedia)?;
+    let crop = edit.crop.ok_or(IngestError::InvalidMedia)?;
+    let directory = media.path.parent().ok_or(IngestError::Storage)?;
+    let archive = edit
+        .source_archive
+        .as_ref()
+        .ok_or_else(|| IngestError::StorageDetails("缺少原始输入存档，未自动修改。".into()))?;
+    let parent: StoredMedia = storage(serde_json::from_slice(&storage(fs::read(
+        directory.join(".edit-parent.json"),
+    ))?)?)?;
+    if !archive.downloaded_original
+        || archive.path.parent() != Some(directory)
+        || parent.id != media.id
+        || parent.post != media.post
+        || parent.edit.is_some()
+        || parent.path != media.path
+        || parent.sha256 != edit.parent_sha256
+        || hash(&directory.join(".edit-source"))? != parent.sha256
+        || archive.sha256 != parent.sha256
+        || hash(&archive.path)? != parent.sha256
+        || format!("{:x}", md5::Md5::digest(storage(fs::read(&archive.path))?)) != media.post.md5
+        || hash(&media.path)? != media.sha256
+        || !crop.valid(parent.dimensions())
+    {
+        return Err(IngestError::Integrity);
+    }
+    let expected = if let Some(plan) = &edit.training {
+        let verified = bdm_domain::training::plan(crop.width, crop.height, plan.resolution)
+            .map_err(|_| IngestError::Integrity)?;
+        if &verified != plan {
+            return Err(IngestError::Integrity);
+        }
+        (plan.output[0], plan.output[1])
+    } else {
+        (crop.width, crop.height)
+    };
+    if expected != media.dimensions() || media.path.with_extension("png").exists() {
+        return Err(IngestError::Integrity);
+    }
+    Ok(parent)
+}
+
 impl SqliteCatalog {
+    /// Offline, explicitly invoked remediation. Rebuild only a provable direct
+    /// crop of the downloaded original, preserving its selection and dimensions.
+    pub fn repair_jpeg_crops_as_png(
+        &mut self,
+        backup: &Path,
+        apply: bool,
+    ) -> Result<Vec<CropPngRepair>, IngestError> {
+        storage(fs::create_dir_all(backup))?;
+        if apply && !backup.join("catalog-before.sqlite3").exists() {
+            storage(self.connection.backup(
+                rusqlite::DatabaseName::Main,
+                backup.join("catalog-before.sqlite3"),
+                None,
+            ))?;
+        }
+        let mut report = Vec::new();
+        for media in self.list_media()? {
+            if !matches!(media.current_extension(), "jpg" | "jpeg")
+                || !media
+                    .edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.operation == "crop")
+            {
+                continue;
+            }
+            let result = (|| -> Result<(), IngestError> {
+                let mut source = verified_crop_parent(&media)?;
+                if !apply {
+                    return Ok(());
+                }
+                let edit = media.edit.as_ref().ok_or(IngestError::InvalidMedia)?;
+                source.path = edit
+                    .source_archive
+                    .as_ref()
+                    .ok_or(IngestError::Integrity)?
+                    .path
+                    .clone();
+                let crop = edit.crop.ok_or(IngestError::Integrity)?;
+                let cancel = AtomicBool::new(false);
+                let mut preview = if let Some(plan) = &edit.training {
+                    training_crop_preview(&source, crop, plan.resolution, &cancel)?
+                } else {
+                    crop_preview(&source, crop, &cancel)?
+                };
+                preview.model = "local-crop-png-rebuilt-v2".into();
+                let saved = backup.join(format!("media_{}", media.id));
+                storage(fs::create_dir_all(&saved))?;
+                let previous = saved.join("before.jpg");
+                if previous.exists() {
+                    if hash(&previous)? != media.sha256 {
+                        return Err(IngestError::Integrity);
+                    }
+                } else {
+                    storage(fs::copy(&media.path, &previous))?;
+                }
+                staged(
+                    &saved.join("metadata-before.json"),
+                    &storage(serde_json::to_vec(&media))?,
+                )?;
+                let directory = media.path.parent().ok_or(IngestError::Storage)?;
+                storage(fs::copy(
+                    directory.join(".edit-parent.json"),
+                    saved.join("parent-before.json"),
+                ))?;
+                let restored = self.restore_last_edit(media.id)?;
+                if restored.sha256 != preview.parent_sha256 {
+                    return Err(IngestError::Integrity);
+                }
+                let rebuilt = self.commit_repair(media.id, &preview)?;
+                if rebuilt.dimensions() != media.dimensions()
+                    || storage(image::open(&rebuilt.path))?.to_rgba8()
+                        != storage(image::open(&preview.image))?.to_rgba8()
+                {
+                    return Err(IngestError::Integrity);
+                }
+                Ok(())
+            })();
+            report.push(CropPngRepair {
+                media_id: media.id,
+                state: if result.is_ok() {
+                    if apply {
+                        "rebuilt"
+                    } else {
+                        "ready"
+                    }
+                } else {
+                    "unchanged"
+                }
+                .into(),
+                reason: result
+                    .err()
+                    .map_or_else(String::new, |error| error.to_string()),
+            });
+        }
+        Ok(report)
+    }
+
     pub fn redownload_original(
         &mut self,
         id: i64,
@@ -1004,7 +1361,8 @@ impl SqliteCatalog {
         }
         let replacement = storage(tempfile::NamedTempFile::new_in(directory))?;
         storage(fs::copy(&staged_image, replacement.path()))?;
-        storage(replacement.persist(&media.path).map_err(|e| e.error))?;
+        let restored_path = media.path.with_extension(&media.post.file_ext);
+        storage(replacement.persist(&restored_path).map_err(|e| e.error))?;
         let replacement_thumbnail = storage(tempfile::NamedTempFile::new_in(directory))?;
         storage(fs::copy(&staged_thumbnail, replacement_thumbnail.path()))?;
         storage(
@@ -1015,6 +1373,7 @@ impl SqliteCatalog {
 
         // Keep review/collection changes made during the transfer, while restoring source dimensions.
         let mut updated = current;
+        updated.path = restored_path;
         updated.edit = None;
         updated.sha256 = format!("{:x}", Sha256::digest(&stored_bytes));
         updated.source_sha256 = source_sha256;
@@ -1101,21 +1460,8 @@ impl SqliteCatalog {
                 return Err(IngestError::Integrity);
             }
         }
-        let format = match media.post.file_ext.as_str() {
-            "jpg" | "jpeg" => ImageFormat::Jpeg,
-            "png" => ImageFormat::Png,
-            "webp" => ImageFormat::WebP,
-            _ => return Err(IngestError::InvalidMedia),
-        };
         let mut bytes = std::io::Cursor::new(Vec::new());
-        if preview.training.is_some() && format == ImageFormat::Jpeg {
-            storage(
-                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 95)
-                    .encode_image(&image.to_rgb8()),
-            )?;
-        } else {
-            storage(image.write_to(&mut bytes, format))?;
-        }
+        storage(image.write_to(&mut bytes, ImageFormat::Png))?;
         let bytes = bytes.into_inner();
         storage(image::load_from_memory(&bytes))?;
         let pending = directory.join(".repair-output");
@@ -1143,6 +1489,7 @@ impl SqliteCatalog {
             .as_ref()
             .map_or_else(|| media.sha256.clone(), |e| e.source_sha256.clone());
         let source_archive = preserve_source(&media, &directory)?;
+        media.path = media.path.with_extension("png");
         media.sha256 = format!("{:x}", Sha256::digest(&bytes));
         let training = preview.training.clone().or_else(|| {
             if preview.crop.is_none() {
@@ -1177,6 +1524,7 @@ impl SqliteCatalog {
             training,
             source_archive: Some(source_archive),
         });
+        validate_png_destination(&media, &parent)?;
         let journal = Journal {
             media,
             image: pending,
@@ -1221,6 +1569,13 @@ impl SqliteCatalog {
         let media = &journal.media;
         let directory = media.path.parent().ok_or(IngestError::Storage)?;
         let record = media.edit.as_ref().ok_or(IngestError::InvalidMedia)?;
+        let input = journal.parent.as_ref().map_or(media, |parent| parent);
+        if input.id != media.id
+            || input.path.parent() != Some(directory)
+            || (input.path != media.path && input.path.with_extension("png") != media.path)
+        {
+            return Err(IngestError::InvalidMedia);
+        }
         if journal.image != directory.join(".repair-output")
             || journal.thumbnail != directory.join(".repair-thumbnail")
             || if record.operation == "crop" {
@@ -1238,10 +1593,12 @@ impl SqliteCatalog {
         }
         if journal.image.is_file() {
             if hash(&journal.image)? != media.sha256
-                || hash(&media.path)? != record.parent_sha256 && hash(&media.path)? != media.sha256
+                || (hash(&input.path)? != record.parent_sha256
+                    && (input.path != media.path || hash(&input.path)? != media.sha256))
             {
                 return Err(IngestError::Integrity);
             }
+            validate_png_destination(media, input)?;
             let output = storage(image::load_from_memory(&storage(fs::read(&journal.image))?))?;
             if output.dimensions() != media.dimensions() {
                 return Err(IngestError::Integrity);
@@ -1278,6 +1635,14 @@ impl SqliteCatalog {
         }
         if hash(&media.path)? != media.sha256 {
             return Err(IngestError::Integrity);
+        }
+        if media.current_extension() == "png" {
+            staged(
+                &directory.join(".png-output.json"),
+                &storage(serde_json::to_vec(
+                    &serde_json::json!({"media_id":media.id,"path":media.path,"sha256":media.sha256}),
+                ))?,
+            )?;
         }
         let tx = storage(
             self.connection
@@ -1335,7 +1700,7 @@ impl SqliteCatalog {
         let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
         let mut media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
         let edit = media.edit.clone().ok_or(IngestError::InvalidMedia)?;
-        let directory = media.path.parent().ok_or(IngestError::Storage)?;
+        let directory = media.path.parent().ok_or(IngestError::Storage)?.to_owned();
         let source = directory.join(".edit-source");
         if !source.is_file() || hash(&source)? != edit.parent_sha256 {
             return Err(IngestError::Integrity);
@@ -1368,16 +1733,28 @@ impl SqliteCatalog {
         staged(&pending_thumbnail, thumb.get_ref())?;
         let pending_bytes = storage(fs::read(&pending))?;
         let pending_thumbnail_bytes = storage(fs::read(&pending_thumbnail))?;
+        let restored_path = parent
+            .as_ref()
+            .map_or_else(|| media.path.clone(), |parent| parent.path.clone());
+        if restored_path.parent() != Some(directory.as_path()) {
+            return Err(IngestError::InvalidMedia);
+        }
+        if restored_path != media.path
+            && restored_path.exists()
+            && hash(&restored_path)? != edit.parent_sha256
+        {
+            return Err(IngestError::Integrity);
+        }
         storage(
-            tempfile::NamedTempFile::new_in(directory).and_then(|mut file| {
+            tempfile::NamedTempFile::new_in(&directory).and_then(|mut file| {
                 file.write_all(&pending_bytes)?;
                 file.as_file().sync_all()?;
-                file.persist(&media.path).map_err(|e| e.error)?;
+                file.persist(&restored_path).map_err(|e| e.error)?;
                 Ok(())
             }),
         )?;
         storage(
-            tempfile::NamedTempFile::new_in(directory).and_then(|mut file| {
+            tempfile::NamedTempFile::new_in(&directory).and_then(|mut file| {
                 file.write_all(&pending_thumbnail_bytes)?;
                 file.as_file().sync_all()?;
                 file.persist(&media.thumbnail).map_err(|e| e.error)?;
@@ -1388,6 +1765,7 @@ impl SqliteCatalog {
         storage(fs::remove_file(&pending_thumbnail))?;
         storage(fs::remove_file(&source))?;
         media.sha256 = edit.parent_sha256;
+        media.path = restored_path;
         media.edit = parent.and_then(|parent| parent.edit);
         if parent_path.is_file() {
             storage(fs::remove_file(parent_path))?;
@@ -1435,7 +1813,10 @@ impl SqliteCatalog {
             if intent.is_file() {
                 let journal: Journal =
                     storage(serde_json::from_slice(&storage(fs::read(&intent))?))?;
-                if journal.media.id != media.id || journal.media.path != media.path {
+                if journal.media.id != media.id
+                    || (journal.media.path != media.path
+                        && journal.parent.as_ref().map(|parent| &parent.path) != Some(&media.path))
+                {
                     return Err(IngestError::Integrity);
                 }
                 self.finish_repair(&journal)?;

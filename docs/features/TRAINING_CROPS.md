@@ -12,7 +12,9 @@ The tier label never triggers resizing by itself.
 `BucketManager(no_upscale=True, reso_steps=32)` geometry, including integer
 rounding and centered edge trimming. Images are never enlarged. The selection
 and resulting image must have a short side of at least 576 and at least
-550,000 pixels. JPEG training output uses quality 95. Source selection, resized
+550,000 pixels. All confirmed crop/repair outputs and optional resolution
+variants are saved as lossless PNG with a matching `.png` filename; source
+post extensions and original bytes remain unchanged. Source selection, resized
 dimensions, trim offsets, final dimensions and the 2048 area ceiling are
 recorded with the edit. A nominal aspect label can differ slightly from the
 final rounded bucket ratio.
@@ -57,3 +59,15 @@ Provenance is under `.bdm-manifests`; manual config changes are preserved and
 reported as integrity conflicts. Cropping does not prove that existing text
 still describes the cropped content. Review captions before training; neither
 cropping nor exporting invokes an API or regenerates descriptions.
+
+## Historical JPEG remediation
+
+The explicit offline `--repair-crops-png <private-backup-dir> --catalog <absolute-db>`
+command audits legacy JPEG crop records. Adding `--apply` first backs up the
+SQLite catalog and each replaced JPEG. Only direct crops with a hash-verified
+downloaded original, matching parent snapshot/bytes and an unchanged saved crop
+geometry are rebuilt. The PNG is regenerated from that original, never from the
+already recompressed JPEG. Unverifiable history is reported and left untouched.
+Flat re-export migrates an owned JPEG/WebP pair to PNG only after hash, source
+and text checks; the old image is retained as a `.bak` under the export metadata
+directory so recursive trainers do not see duplicate image files.

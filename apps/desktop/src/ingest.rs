@@ -482,7 +482,7 @@ impl BdmApp {
                     "{}_{}.{}",
                     m.post.provider.key(),
                     m.post.id,
-                    m.post.file_ext
+                    m.current_extension()
                 )
             })
             .unwrap_or_else(|| format!("sample_{:03}.png", id + 1))

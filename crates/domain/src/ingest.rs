@@ -97,6 +97,15 @@ pub struct StoredMedia {
 }
 
 impl StoredMedia {
+    /// The working image format can differ from the immutable source post.
+    pub fn current_extension(&self) -> &str {
+        self.path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| matches!(*extension, "png" | "jpg" | "jpeg" | "webp"))
+            .unwrap_or(&self.post.file_ext)
+    }
+
     pub fn dimensions(&self) -> (u32, u32) {
         self.edit
             .as_ref()
