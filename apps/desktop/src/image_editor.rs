@@ -336,20 +336,28 @@ impl BdmApp {
             ))
         };
         let tier = automatic.as_ref().and_then(|plan| plan.as_ref().ok());
-        ui.label(tier.map_or_else(
+        let automatic_label = tier.map_or_else(
             || "自动档位".into(),
-            |plan| format!("自动 ≈{}", bdm_domain::training::nearest_tier(plan.output[0], plan.output[1])),
-        )).on_hover_text("按选区有效像素自动匹配，无需选择。保留可用分辨率，仅对齐 32；超过 2048 档才生成缩小的训练版，原图保留。默认导出不再缩小图片。");
+            |plan| {
+                format!(
+                    "自动 ≈{}",
+                    bdm_domain::training::nearest_tier(plan.output[0], plan.output[1])
+                )
+            },
+        );
+        icon_label(ui, "spark", &automatic_label, "自动匹配档位，保留选区细节并对齐 32；不放大。超过 2048 档才生成训练版，原图保留。默认导出不缩小。");
         let label = match &planned {
-            Some(Ok(plan)) if active => format!("裁剪 {}×{}", plan.output[0], plan.output[1]),
-            _ => "裁剪确认".into(),
+            Some(Ok(plan)) if active => format!("{}×{}", plan.output[0], plan.output[1]),
+            _ => "裁剪".into(),
         };
         let real =
             !self.demo && !self.is_capture() && !self.ingest_active() && !self.workflow_active();
-        let save = ui.add_enabled(
-            active && real && !busy && planned.as_ref().is_some_and(|plan| plan.is_ok()),
-            egui::Button::new(RichText::new(label)).selected(active),
-        );
+        let save = ui
+            .add_enabled_ui(
+                active && real && !busy && planned.as_ref().is_some_and(|plan| plan.is_ok()),
+                |ui| tool_button(ui, "crop", &label, active),
+            )
+            .inner;
         #[cfg(test)]
         {
             self.image_editor.crop_save_button = Some(save.rect);

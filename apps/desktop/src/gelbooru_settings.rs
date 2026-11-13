@@ -190,9 +190,9 @@ impl BdmApp {
                 }
             });
             if before!=self.prefs.download_source {self.cancel_tag_lookup();}
-            ui.add(egui::Label::new(RichText::new("自动模式在连接／服务异常经有限重试后切换备用源；认证失败、网站验证和限流不自动切换。每个任务分别保存两站进度。来源设置用于新任务，续传使用任务已保存的来源。").size(12.0).color(MUTED)).wrap());
+            icon_label(ui,"reset","故障自动切换","自动模式在连接或服务异常经有限重试后切换备用源；认证失败、网站验证、限流不自动切换。设置只影响新任务，续传沿用已保存的来源与进度。");
             ui.add_space(12.0);
-            ui.horizontal(|ui| {ui.label(RichText::new("Gelbooru").strong());ui.hyperlink_to("注册／获取 API 凭据 ↗","https://gelbooru.com/index.php?page=account&s=options");});
+            ui.horizontal(|ui| {ui.label(RichText::new("Gelbooru").strong());ui.hyperlink_to("获取凭据 ↗","https://gelbooru.com/index.php?page=account&s=options");});
             ui.columns(2,|columns| {
                 columns[0].label("User ID（数字账号 ID）");
                 let width=columns[0].available_width();columns[0].add_sized([width,36.0],egui::TextEdit::singleline(&mut self.gelbooru.user_id).hint_text("例如 123456").margin(vec2(10.0,9.0)));
@@ -216,7 +216,7 @@ impl BdmApp {
             });
             if let Some(error)=&self.gelbooru.error {ui.add(egui::Label::new(RichText::new(error).color(AMBER)).wrap());}
             if let Some(Err(error))=&self.gelbooru.verification {ui.add(egui::Label::new(RichText::new(format!("Gelbooru：{error}")).color(AMBER)).wrap());}
-            ui.add(egui::Label::new(RichText::new("凭据独立存入 Windows 凭据管理器；保存不会联网，也不会复用 Danbooru 或 AI API 密钥。").size(12.0).color(MUTED)).wrap());
+            icon_label(ui,"lock","凭据本地保存","凭据独立存入 Windows 凭据管理器；保存不联网，也不会复用 Danbooru 或 AI API 密钥。");
         });
     }
 }

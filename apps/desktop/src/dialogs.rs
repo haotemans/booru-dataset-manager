@@ -69,7 +69,7 @@ impl BdmApp {
                 .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
-                .frame(card().inner_margin(22.0))
+                .frame(card().inner_margin(24.0))
                 .default_width(if matches!(dialog, Dialog::Media(_)) {
                     690.0
                 } else if matches!(dialog, Dialog::CharacterRelations) {
@@ -164,14 +164,25 @@ impl BdmApp {
                 .margin(vec2(12.0, 10.0)),
         );
         ui.add_space(10.0);
-        ui.add(egui::Label::new(RichText::new(
-            "多个完整标签用空格分隔。合集会显示在画师页，点进去即可统一审核、裁剪、优化和导出；每张图片保留自己的真实画师信息。"
-        ).color(MUTED).size(13.0)).wrap());
-        ui.add_space(6.0);
-        ui.add(egui::Label::new(RichText::new(
-            "保存查询不会请求网络。下载时使用来源站点账号与权限，进度统一显示在总览；已有图片直接复用。暂不支持通配符、排除词和搜索操作符。"
-        ).color(MUTED).size(12.0)).wrap());
-        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            icon_label(
+                ui,
+                "tag",
+                "空格分隔",
+                "多个完整标签须同时满足；支持标签内的冒号，不支持搜索操作符、通配符或排除词。",
+            );
+            icon_label(
+                ui,
+                "artist",
+                "画师页合集",
+                "整批图片统一审核、裁剪、优化和导出；每张图片保留真实画师信息。",
+            );
+            hint(
+                ui,
+                "保存不联网；下载沿用来源账号与权限，已有图片直接复用，任务进度显示在总览。",
+            );
+        });
+        ui.add_space(20.0);
         let mut choice = None;
         ui.horizontal(|ui| {
             let enabled = !self.demo && !self.is_capture() && self.catalog.repository.is_some();
@@ -497,10 +508,10 @@ impl BdmApp {
         ui.group(|ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(RichText::new("API 批量发送").strong());
+                ui.label(RichText::new("批量发送").strong());
                 egui::ComboBox::from_id_salt("api_batch_size")
                     .selected_text(format!(
-                        "每次请求 {} 张图片",
+                        "{} 张 / 请求",
                         self.profile_draft.request.batch_size
                     ))
                     .show_ui(ui, |ui| {
@@ -513,11 +524,7 @@ impl BdmApp {
                         }
                     });
             });
-            ui.label(
-                RichText::new("控制一次 API 请求发送几张图片；不会改变最大并发。")
-                    .size(12.0)
-                    .color(MUTED),
-            );
+            hint(ui, "每次请求发送的图片数量，不改变最大并发。");
         });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -540,7 +547,10 @@ impl BdmApp {
                     .range(0..=3)
                     .suffix(" 次"),
             );
-            ui.label("仅连接失败、超时或服务端暂时故障");
+            hint(
+                ui,
+                "仅重试连接失败、超时或服务端暂时故障，不重复提交被拒绝的内容。",
+            );
         });
         ui.horizontal(|ui| {
             ui.label("JSON 输出");
@@ -560,16 +570,12 @@ impl BdmApp {
                     }
                 });
         });
-        ui.label(
-            RichText::new("所有模式都在本地严格解析 JSON，并按图片 ID 校验结果。")
-                .size(12.0)
-                .color(MUTED),
-        );
         ui.add_space(8.0);
         ui.checkbox(
             &mut self.profile_draft.request.send_images,
-            "优化时发送图片 + Danbooru 通用元数据先验（一次一图）",
-        );
+            "发送图片 + 标签",
+        )
+        .on_hover_text("发送图片及 Danbooru 通用视觉标签用于优化。每次发送前仍需确认图片范围。");
         ui.add_enabled_ui(self.profile_draft.request.send_images, |ui| {
             ui.horizontal(|ui| {
                 ui.label("最长边");
@@ -585,17 +591,9 @@ impl BdmApp {
                 );
             });
         });
-        ui.label(
-            RichText::new(
-                "发送前在内存内等比例缩小，小图不放大；最长边不超过 1024 px，单图 JPEG 自动压到 1 MiB 内。每次发送前确认范围，图片模式支持标签和自然语言优化。",
-            )
-                .size(12.0)
-                .color(MUTED),
-        );
-        ui.checkbox(
-            &mut self.profile_draft.request.use_cache,
-            "相同图片、元数据和提示词复用历史优化结果（关闭即可强制重跑）",
-        );
+        icon_label(ui, "image", "等比预处理", "仅在内存中等比例缩小，不放大小图；最长边不超过 1024 px，单图 JPEG 不超过 1 MiB。原文件不修改。");
+        ui.checkbox(&mut self.profile_draft.request.use_cache, "复用历史结果")
+            .on_hover_text("相同图片、元数据和提示词复用历史优化结果；关闭后重新调用 API。");
         ui.add_space(10.0);
         ui.collapsing("自然语言优化 · 系统提示词", |ui| {
             ui.add(
@@ -639,6 +637,8 @@ impl BdmApp {
     }
 
     fn action_dialog(&mut self, ui: &mut egui::Ui, kind: &str) -> bool {
+        ui.set_min_width(460.0);
+        ui.set_max_width(460.0);
         let selected_count = self
             .action_snapshot
             .iter()
@@ -646,7 +646,7 @@ impl BdmApp {
             .count();
         if kind != "去重" {
             section(ui, "范围", "");
-            ui.add_space(12.0);
+            ui.add_space(8.0);
         }
         ui.horizontal_wrapped(|ui| {
             ui.radio_value(
@@ -663,9 +663,9 @@ impl BdmApp {
                 );
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(16.0);
         ui.separator();
-        ui.add_space(8.0);
+        ui.add_space(16.0);
         if kind == "去重" {
             ui.checkbox(
                 &mut self.prefs.similar_image_review,
@@ -689,21 +689,50 @@ impl BdmApp {
             });
             self.candidate_review(ui);
         } else {
-            ui.label(if kind == "导出" {
-                "文本格式"
-            } else {
-                "优化目标"
-            });
+            section(
+                ui,
+                if kind == "导出" {
+                    "文本"
+                } else {
+                    "优化目标"
+                },
+                "",
+            );
+            ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.action_mode, 0, "自然语言");
-                ui.selectable_value(&mut self.action_mode, 1, "优化标签");
+                ui.spacing_mut().item_spacing.x = 12.0;
+                let width = (ui.available_width() - 12.0) / 2.0;
+                if choice_card(
+                    ui,
+                    "text",
+                    "自然语言",
+                    "画面描述",
+                    self.action_mode == 0,
+                    width,
+                )
+                .clicked()
+                {
+                    self.action_mode = 0;
+                }
+                if choice_card(
+                    ui,
+                    "tag",
+                    "优化标签",
+                    "Danbooru",
+                    self.action_mode == 1,
+                    width,
+                )
+                .clicked()
+                {
+                    self.action_mode = 1;
+                }
             });
+            ui.add_space(16.0);
             if kind == "优化" {
                 ui.checkbox(
                     &mut self.workflows.overwrite_optimized,
-                    "覆盖已有优化结果（默认仅补全缺失结果）",
-                );
-                ui.label(RichText::new("自然语言与优化标签分别判断；已有成功结果默认跳过，即使更换模型或提示词。失败项可继续重试。").size(12.0).color(MUTED));
+                    "覆盖已有结果",
+                ).on_hover_text("默认只补全缺失结果；自然语言和标签分别判断。勾选后会重新处理已有成功结果。");
                 let selected = self
                     .prefs
                     .profiles
@@ -711,84 +740,93 @@ impl BdmApp {
                     .map(|p| p.name.as_str())
                     .unwrap_or("选择 API 配置");
                 egui::ComboBox::from_id_salt("optimization_profile")
+                    .width(ui.available_width())
                     .selected_text(selected)
                     .show_ui(ui, |ui| {
                         for (i, profile) in self.prefs.profiles.iter().enumerate() {
                             ui.selectable_value(&mut self.workflows.profile, i, &profile.name);
                         }
                     });
-                ui.label(
-                    RichText::new(
-                        "两种模式均要求图片；Danbooru .raw_tags.txt 提供通用视觉先验。角色、画师及作品名由本地保护。",
-                    )
-                    .size(12.0)
-                    .color(MUTED),
-                );
+                icon_label(ui, "image", "图片 + 标签", "两种模式均发送图片和通用视觉标签；画师、角色及作品名在本地处理，不发送给 AI。发送前仍需确认范围。");
             }
             if kind == "导出" {
+                section(ui, "图片", "");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    let width = (ui.available_width() - 12.0) / 2.0;
+                    if choice_card(ui, "image", "原尺寸", "扁平 · 图片 + TXT", !self.workflows.export_multires, width)
+                        .on_hover_text("默认：保留当前分辨率，所有档位混合直出同一目录，不缩小、不放大。附 1024 训练参考配置，缩放由训练脚本完成。")
+                        .clicked() { self.workflows.export_multires = false; self.workflows.export_folders = false; }
+                    if choice_card(ui, "layers", "多分辨率", "768 · 1024 · 1536 · 2048", self.workflows.export_multires, width)
+                        .on_hover_text("生成四个独立目录，各自放置图片和同名 TXT；不放大小图，尺寸不足的档位跳过。原文件不修改。")
+                        .clicked() { self.workflows.export_multires = true; self.workflows.export_folders = false; }
+                });
+                ui.add_space(16.0);
+                section(ui, "保存位置", "");
+                ui.add_space(8.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.workflows.export_root)
-                        .hint_text("导出目录，例如 D:\\DatasetExport")
-                        .desired_width(410.0),
+                        .hint_text("D:\\DatasetExport")
+                        .desired_width(f32::INFINITY)
+                        .margin(vec2(12.0, 10.0)),
                 );
-                ui.checkbox(
-                    &mut self.workflows.export_multires,
-                    "可选：生成 768／1024／1536／2048 多分辨率副本",
-                );
-                ui.add_enabled_ui(!self.workflows.export_multires, |ui| {
-                    ui.checkbox(
-                        &mut self.workflows.export_folders,
-                        "旧版布局：每张图片独立文件夹",
-                    );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    icon_label(ui, "lock", "保护手动修改", "再次导出只安全更新有导出记录的 TXT；图片哈希异常会停止，手动修改不会被静默覆盖。");
+                    hint(ui, "所有档位符合条件的图片均可导出；默认扁平结构，每张图片配一个同名 TXT。");
                 });
-                ui.label(RichText::new(if self.workflows.export_multires {
-                    "按档位分为四个目录，每个目录内图片 + 同名 TXT；不放大小图，尺寸不足的档位跳过。"
-                } else {
-                    "默认原分辨率直出，所有档位混合放同一目录：图片 + 同名 TXT，不缩小、不放大。附 1024 训练参考配置，训练时按需缩放。"
-                }).size(12.0).color(MUTED));
-                ui.label(
-                    RichText::new("再次导出只安全更新已有记录的 TXT；图片哈希异常立即停止。")
-                        .size(12.0)
-                        .color(MUTED),
-                );
+                ui.collapsing("更多选项", |ui| {
+                    ui.add_enabled_ui(!self.workflows.export_multires, |ui| {
+                        ui.checkbox(&mut self.workflows.export_folders, "每张图片独立文件夹");
+                    });
+                });
             }
         }
-        ui.add_space(14.0);
-        ui.add_space(10.0);
+        ui.add_space(20.0);
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    !self.demo
-                        && !self.is_capture()
-                        && !self.workflow_active()
-                        && (!self.ingest_active() || kind == "去重")
-                        && !self.action_snapshot.is_empty()
-                        && matches!(kind, "优化" | "去重" | "导出"),
-                    egui::Button::new(if kind == "去重" {
-                        "开始筛查"
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add_enabled_ui(
+                        !self.demo
+                            && !self.is_capture()
+                            && !self.workflow_active()
+                            && (!self.ingest_active() || kind == "去重")
+                            && !self.action_snapshot.is_empty()
+                            && matches!(kind, "优化" | "去重" | "导出"),
+                        |ui| {
+                            primary(
+                                ui,
+                                if kind == "去重" {
+                                    "开始筛查"
+                                } else {
+                                    kind
+                                },
+                            )
+                        },
+                    )
+                    .inner
+                    .clicked()
+                {
+                    let ids = self.action_ids();
+                    let operation = if kind == "去重" {
+                        "dedup"
+                    } else if kind == "导出" {
+                        "export"
                     } else {
-                        kind
-                    }),
-                )
-                .clicked()
-            {
-                let ids = self.action_ids();
-                let operation = if kind == "去重" {
-                    "dedup"
-                } else if kind == "导出" {
-                    "export"
-                } else {
-                    "optimize"
-                };
-                match self.start_workflow(ui.ctx(), operation, ids, None) {
-                    Ok(()) if self.workflow_active() => {
-                        self.notify(ui.ctx(), "任务已启动，可在总览查看进度。")
+                        "optimize"
+                    };
+                    match self.start_workflow(ui.ctx(), operation, ids, None) {
+                        Ok(()) if self.workflow_active() => {
+                            self.notify(ui.ctx(), "任务已启动，可在总览查看进度。")
+                        }
+                        Ok(()) => {}
+                        Err(error) => self.workflows.error = Some(error),
                     }
-                    Ok(()) => {}
-                    Err(error) => self.workflows.error = Some(error),
                 }
-            }
-            ui.button("返回").clicked()
+                ui.button("返回").clicked()
+            })
+            .inner
         })
         .inner
     }

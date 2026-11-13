@@ -98,7 +98,7 @@ pub fn setup(ctx: &egui::Context) {
     style.visuals.window_rounding = 10.0.into();
     style.visuals.window_stroke = Stroke::new(1.0_f32, LINE);
     style.visuals.window_shadow = egui::epaint::Shadow::NONE;
-    style.spacing.item_spacing = egui::vec2(10.0, 6.0);
+    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
     style.spacing.interact_size.y = 34.0;
     style.text_styles.insert(TextStyle::Heading, medium(24.0));
@@ -118,6 +118,6 @@ pub fn card() -> egui::Frame {
     egui::Frame::none()
         .fill(PANEL)
         .stroke(Stroke::new(1.0_f32, LINE))
-        .rounding(8.0)
-        .inner_margin(18.0)
+        .rounding(10.0)
+        .inner_margin(20.0)
 }

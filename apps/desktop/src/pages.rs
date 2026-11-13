@@ -332,12 +332,8 @@ impl BdmApp {
             ui.set_width(ui.available_width());
             setting_header(ui, "tag", "文本姓名格式");
             ui.add_space(8.0);
-            ui.label(
-                RichText::new("画师名和角色名不会发送给 AI；在本地合并到标签和自然语言时使用以下格式。自然语言按画师、角色、描述排列。")
-                    .size(12.0)
-                    .color(MUTED),
-            );
-            ui.add_space(6.0);
+            icon_label(ui, "lock", "姓名本地处理", "画师名和角色名不发送给 AI；本地合并到标签与自然语言，按画师、角色、描述排列，下划线转为空格。");
+            ui.add_space(12.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label("画师名");
                 egui::ComboBox::from_id_salt("artist_tag_format")
@@ -368,11 +364,8 @@ impl BdmApp {
                         }
                     });
             });
-            ui.label(
-                RichText::new("例如：画师可输出 @name、name 或 artist:name；角色可输出 name 或 character:name。")
-                    .size(12.0)
-                    .color(MUTED),
-            );
+            ui.add_space(8.0);
+            icon_label(ui, "text", "画师 → 角色 → 描述", "画师格式可选 @name、name 或 artist:name；角色可选 name 或 character:name。");
         });
         ui.add_space(16.0);
         card().show(ui, |ui| {
@@ -423,11 +416,6 @@ impl BdmApp {
             .on_hover_text(
                 "新建下载任务时生效；已下载文件不会被自动改写。关闭后保留原始透明通道。",
             );
-            ui.label(
-                RichText::new("设置只影响新建任务，继续中的任务沿用创建时的设置。")
-                    .size(12.0)
-                    .color(MUTED),
-            );
         });
         ui.add_space(16.0);
         card().show(ui, |ui| {
@@ -435,7 +423,7 @@ impl BdmApp {
             setting_header(ui, "layers", "图片编辑");
             ui.add_space(8.0);
             ui.checkbox(&mut self.prefs.confirm_image_edits,"局部修复后二次确认")
-                .on_hover_text("局部修复开启后先预览再保存；关闭后直接替换。裁剪由图片下方的“预览裁剪”和“保存裁剪”按钮分别控制。设置自动保存。");
+                .on_hover_text("开启后局部修复先预览再保存；关闭后直接保存。裁剪在图片下方确认，原图另行保留。设置自动保存。");
         });
         ui.add_space(16.0);
         card().show(ui, |ui| {

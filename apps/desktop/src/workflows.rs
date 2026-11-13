@@ -998,7 +998,7 @@ impl BdmApp {
                         .collect();
                     job.ids.retain(|id| !generated.contains(id));
                     if job.ids.is_empty() {
-                        return Err("所选图片均已有此类优化结果，无需调用 API；如需重做，请勾选“覆盖已有优化结果”。".into());
+                        return Err("所选图片已有优化结果；如需重做，请勾选“覆盖已有结果”。".into());
                     }
                 }
             }
@@ -1379,20 +1379,25 @@ impl BdmApp {
             .collect();
         if !tasks.is_empty() {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("完成任务自动移出进度区；已停止任务可清理。")
-                        .size(12.0)
-                        .color(MUTED),
+                icon_label(
+                    ui,
+                    "clock",
+                    "任务记录",
+                    "完成任务自动移出进度区；已停止任务可清理。",
                 );
-                if ui
-                    .small_button("清理已停止任务")
-                    .on_hover_text("清理已完成、失败、暂停及待重试的任务记录；保留图片和已生成结果")
-                    .clicked()
-                {
-                    self.dismiss_dashboard_tasks(&tasks);
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if tool_button(ui, "trash", "清理", false)
+                        .on_hover_text(format!(
+                            "清理 {} 条已停止任务记录；保留图片和已生成结果。",
+                            tasks.len()
+                        ))
+                        .clicked()
+                    {
+                        self.dismiss_dashboard_tasks(&tasks);
+                    }
+                });
             });
-            ui.add_space(8.0);
+            ui.add_space(12.0);
         }
     }
 

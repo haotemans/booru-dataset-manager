@@ -464,11 +464,14 @@ impl BdmApp {
         let inpainting = self.image_editor.visible && !self.image_editor.cropping;
         let busy = self.image_editor.active() || self.image_editor.preview.is_some();
         ui.horizontal_centered(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().item_spacing.x = 8.0;
             ui.spacing_mut().interact_size.y = 28.0;
             ui.spacing_mut().button_padding = vec2(8.0, 4.0);
             self.crop_confirm_button(ui, id);
-            let edit = ui.add_enabled(!busy, egui::Button::new("局部修复").selected(inpainting));
+            let edit = ui
+                .add_enabled_ui(!busy, |ui| tool_button(ui, "brush", "修复", inpainting))
+                .inner
+                .on_hover_text("局部修复");
             #[cfg(test)]
             {
                 self.image_editor.editor_button = Some(edit.rect);
@@ -480,10 +483,10 @@ impl BdmApp {
                 self.media_review.sidebar = !inpainting;
             }
             if ui
-                .add_enabled(
-                    !busy || !inpainting,
-                    egui::Button::new("描述").selected(self.media_review.sidebar && !inpainting),
-                )
+                .add_enabled_ui(!busy || !inpainting, |ui| {
+                    tool_button(ui, "text", "描述", self.media_review.sidebar && !inpainting)
+                })
+                .inner
                 .clicked()
             {
                 self.media_review.sidebar = !(self.media_review.sidebar && !inpainting);
@@ -563,16 +566,18 @@ impl BdmApp {
         ui.spacing_mut().item_spacing.x = 6.0;
         ui.spacing_mut().button_padding = vec2(10.0, 5.0);
         ui.spacing_mut().interact_size.y = 28.0;
-        let open = ui.add_enabled(
-            !self.demo
-                && !self.is_capture()
-                && self
-                    .ingest
-                    .stored
-                    .get(&media.id)
-                    .is_some_and(|m| m.path.is_file()),
-            egui::Button::new(RichText::new("打开原图").size(12.0)).fill(PANEL),
-        );
+        let open = ui
+            .add_enabled_ui(
+                !self.demo
+                    && !self.is_capture()
+                    && self
+                        .ingest
+                        .stored
+                        .get(&media.id)
+                        .is_some_and(|m| m.path.is_file()),
+                |ui| tool_icon(ui, "external", "打开原图", false),
+            )
+            .inner;
         #[cfg(test)]
         {
             self.image_editor.open_button = Some(open.rect);
@@ -586,9 +591,8 @@ impl BdmApp {
                 }
             }
         }
-        let download = ui
-            .button("重新下载")
-            .on_hover_text("重新下载原图并保留当前文件备份");
+        let download = tool_icon(ui, "reset", "重新下载", false)
+            .on_hover_text("重新下载原图，需要二次确认；当前文件保留备份。");
         #[cfg(test)]
         {
             self.image_editor.redownload_button = Some(download.rect);
@@ -596,7 +600,7 @@ impl BdmApp {
         if download.clicked() {
             self.request_redownload(ui.ctx(), media.id);
         }
-        if ui.button("适应窗口").clicked() {
+        if tool_icon(ui, "fit", "适应窗口", false).clicked() {
             self.media_review.view = CanvasView::default();
         }
         if ui
@@ -608,8 +612,8 @@ impl BdmApp {
                 1.0 / (self.media_review.view.fit(stage, dimensions) * ui.ctx().pixels_per_point());
             self.media_review.view.pan = egui::Vec2::ZERO;
         }
-        for (label, factor) in [("−", 1.0 / 1.25), ("+", 1.25)] {
-            if ui.button(label).clicked() {
+        for (kind, label, factor) in [("minus", "缩小", 1.0 / 1.25), ("plus", "放大", 1.25)] {
+            if tool_icon(ui, kind, label, false).clicked() {
                 self.media_review
                     .view
                     .zoom_at(stage, stage.center(), factor);
@@ -627,7 +631,7 @@ impl BdmApp {
         ui.spacing_mut().interact_size.y = 24.0;
         let requested = self.ingest.detail_requested == Some(media.id);
         let load = ui
-            .add_enabled(
+            .add_enabled_ui(
                 !self.demo
                     && !self.is_capture()
                     && self
@@ -635,13 +639,14 @@ impl BdmApp {
                         .stored
                         .get(&media.id)
                         .is_some_and(|m| m.path.is_file()),
-                egui::Button::new(if requested {
-                    "使用缩略图"
-                } else {
-                    "加载原图"
-                }),
+                |ui| tool_button(ui, "image", "原图", requested),
             )
-            .on_hover_text("默认显示缩略图；加载原图后可检查完整细节。");
+            .inner
+            .on_hover_text(if requested {
+                "正在查看原图 · 点击切换缩略图"
+            } else {
+                "加载原图以查看完整细节"
+            });
         #[cfg(test)]
         {
             self.media_review.load_original_button = Some(load.rect);

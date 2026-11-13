@@ -6,9 +6,153 @@ use eframe::egui::{
 pub fn primary(ui: &mut Ui, label: &str) -> Response {
     ui.add(
         egui::Button::new(RichText::new(label).color(Color32::WHITE))
-            .fill(INK)
+            .fill(ACCENT)
             .rounding(6.0),
     )
+}
+
+/// A shared, compact vector control for image tools. Keep the accessible name
+/// even when the toolbar only displays an icon.
+pub fn tool_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Response {
+    tool_control(ui, kind, label, label, selected)
+}
+
+pub fn tool_icon(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Response {
+    tool_control(ui, kind, "", label, selected)
+}
+
+fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.into(), FontId::proportional(12.0), INK);
+    let width = if text.is_empty() {
+        30.0
+    } else {
+        galley.size().x + 38.0
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
+    let visuals = ui.style().interact(&response);
+    let color = if ui.is_enabled() {
+        if selected {
+            ACCENT
+        } else {
+            INK
+        }
+    } else {
+        MUTED.gamma_multiply(0.45)
+    };
+    ui.painter().rect(
+        rect,
+        6.0,
+        if selected { SOFT } else { visuals.weak_bg_fill },
+        Stroke::new(
+            1.0,
+            if selected {
+                ACCENT
+            } else {
+                visuals.bg_stroke.color
+            },
+        ),
+    );
+    let center = rect.left_center() + vec2(15.0, 0.0);
+    icon(
+        ui,
+        Rect::from_center_size(center, vec2(15.0, 15.0)),
+        kind,
+        color,
+    );
+    if !text.is_empty() {
+        ui.painter().text(
+            rect.left_center() + vec2(28.0, 0.0),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(12.0),
+            color,
+        );
+    }
+    if response.has_focus() {
+        ui.painter()
+            .rect_stroke(rect.expand(2.0), 7.0, Stroke::new(1.0, ACCENT));
+    }
+    response.on_hover_text(name)
+}
+
+pub fn hint(ui: &mut Ui, detail: &str) {
+    let (rect, response) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+    icon(ui, rect.shrink(3.0), "info", MUTED);
+    response.on_hover_text(detail);
+}
+
+pub fn icon_label(ui: &mut Ui, kind: &str, label: &str, detail: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(vec2(15.0, 15.0), Sense::hover());
+        icon(ui, rect, kind, MUTED);
+        ui.label(RichText::new(label).size(12.0).color(MUTED));
+    })
+    .response
+    .on_hover_text(detail);
+}
+
+pub fn choice_card(
+    ui: &mut Ui,
+    kind: &str,
+    title: &str,
+    detail: &str,
+    selected: bool,
+    width: f32,
+) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 70.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            title,
+        )
+    });
+    ui.painter().rect(
+        rect,
+        8.0,
+        if selected {
+            SOFT
+        } else if response.hovered() {
+            NAV
+        } else {
+            PANEL
+        },
+        Stroke::new(
+            1.0,
+            if selected || response.has_focus() {
+                ACCENT
+            } else {
+                LINE
+            },
+        ),
+    );
+    icon(
+        ui,
+        Rect::from_center_size(rect.left_center() + vec2(24.0, 0.0), vec2(21.0, 21.0)),
+        kind,
+        if selected { ACCENT } else { MUTED },
+    );
+    ui.painter().text(
+        rect.min + vec2(46.0, 15.0),
+        Align2::LEFT_TOP,
+        title,
+        medium(13.0),
+        INK,
+    );
+    ui.painter().text(
+        rect.min + vec2(46.0, 38.0),
+        Align2::LEFT_TOP,
+        detail,
+        FontId::proportional(11.0),
+        MUTED,
+    );
+    response
 }
 
 /// Compact controls retain a readable accessible name and a hover label.
@@ -221,6 +365,57 @@ pub fn icon(ui: &Ui, rect: Rect, kind: &str, color: Color32) {
         p.line_segment([at(a.0, a.1), at(b.0, b.1)], Stroke::new(1.6_f32, color));
     };
     match kind {
+        "info" => {
+            p.circle_stroke(at(0.5, 0.5), rect.width() * 0.4, Stroke::new(1.4, color));
+            p.circle_filled(at(0.5, 0.3), rect.width() * 0.045, color);
+            line((0.5, 0.46), (0.5, 0.74));
+        }
+        "crop" => {
+            line((0.23, 0.04), (0.23, 0.77));
+            line((0.23, 0.77), (0.96, 0.77));
+            line((0.04, 0.23), (0.77, 0.23));
+            line((0.77, 0.23), (0.77, 0.96));
+        }
+        "brush" => {
+            p.add(Shape::closed_line(
+                vec![
+                    at(0.35, 0.58),
+                    at(0.72, 0.12),
+                    at(0.88, 0.26),
+                    at(0.48, 0.7),
+                ],
+                Stroke::new(1.5, color),
+            ));
+            line((0.35, 0.58), (0.16, 0.85));
+            line((0.16, 0.85), (0.48, 0.7));
+            line((0.13, 0.94), (0.61, 0.94));
+        }
+        "text" => {
+            line((0.15, 0.18), (0.85, 0.18));
+            line((0.5, 0.18), (0.5, 0.85));
+            line((0.32, 0.85), (0.68, 0.85));
+        }
+        "fit" => {
+            for (x, y, dx, dy) in [
+                (0.12, 0.12, 0.24, 0.24),
+                (0.88, 0.12, -0.24, 0.24),
+                (0.12, 0.88, 0.24, -0.24),
+                (0.88, 0.88, -0.24, -0.24),
+            ] {
+                line((x, y + dy), (x, y));
+                line((x, y), (x + dx, y));
+            }
+        }
+        "external" => {
+            line((0.43, 0.15), (0.15, 0.15));
+            line((0.15, 0.15), (0.15, 0.85));
+            line((0.15, 0.85), (0.85, 0.85));
+            line((0.85, 0.85), (0.85, 0.57));
+            line((0.49, 0.51), (0.88, 0.12));
+            line((0.58, 0.12), (0.88, 0.12));
+            line((0.88, 0.12), (0.88, 0.42));
+        }
+        "minus" => line((0.16, 0.5), (0.84, 0.5)),
         "pause" => {
             line((0.32, 0.15), (0.32, 0.85));
             line((0.68, 0.15), (0.68, 0.85));

@@ -70,6 +70,9 @@ impl BdmApp {
             .position(|a| a == "--capture")
             .and_then(|i| args.get(i + 1))
             .map(std::path::PathBuf::from);
+        if capture_dir.is_some() {
+            cc.egui_ctx.style_mut(|style| style.animation_time = 0.0);
+        }
         let mut prefs: Preferences = if capture_dir.is_none() {
             cc.storage
                 .and_then(|s| eframe::get_value(s, eframe::APP_KEY))
