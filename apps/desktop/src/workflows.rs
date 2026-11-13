@@ -998,7 +998,9 @@ impl BdmApp {
                         .collect();
                     job.ids.retain(|id| !generated.contains(id));
                     if job.ids.is_empty() {
-                        return Err("所选图片已有优化结果；如需重做，请勾选“覆盖已有结果”。".into());
+                        return Err(
+                            "所选图片均已有优化结果；如需重做，请勾选“覆盖已有结果”。".into()
+                        );
                     }
                 }
             }
