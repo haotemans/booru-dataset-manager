@@ -1425,7 +1425,7 @@ mod tests {
             app.prefs.confirm_image_edits = confirmation;
             app.image_editor.crop.selection = Some(Rect::from_min_size(
                 egui::pos2(10.0, 20.0),
-                vec2(600.0, 400.0),
+                vec2(768.0, 768.0),
             ));
             app.editor_start(&ctx, id, false);
             assert_eq!(app.image_editor.auto_commit, !confirmation);
@@ -1443,14 +1443,14 @@ mod tests {
                 app.image_editor.texture = None;
             } else {
                 assert!(app.image_editor.preview.is_none());
-                assert_eq!(app.ingest.stored[&id].dimensions(), (600, 400));
+                assert_eq!(app.ingest.stored[&id].dimensions(), (768, 768));
                 assert_eq!(
                     app.library
                         .media
                         .iter()
                         .find(|m| m.id == id)
                         .map(|m| (m.width, m.height)),
-                    Some((600, 400))
+                    Some((768, 768))
                 );
             }
         }
