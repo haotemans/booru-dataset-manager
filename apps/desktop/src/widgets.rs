@@ -41,7 +41,7 @@ fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool)
             INK
         }
     } else {
-        MUTED.gamma_multiply(0.45)
+        MUTED
     };
     ui.painter().rect(
         rect,
@@ -104,7 +104,7 @@ pub fn choice_card(
     selected: bool,
     width: f32,
 ) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 70.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 60.0), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -139,14 +139,14 @@ pub fn choice_card(
         if selected { ACCENT } else { MUTED },
     );
     ui.painter().text(
-        rect.min + vec2(46.0, 15.0),
+        rect.min + vec2(46.0, 12.0),
         Align2::LEFT_TOP,
         title,
         medium(13.0),
         INK,
     );
     ui.painter().text(
-        rect.min + vec2(46.0, 38.0),
+        rect.min + vec2(46.0, 34.0),
         Align2::LEFT_TOP,
         detail,
         FontId::proportional(11.0),

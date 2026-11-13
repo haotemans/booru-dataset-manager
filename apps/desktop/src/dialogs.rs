@@ -639,6 +639,11 @@ impl BdmApp {
     fn action_dialog(&mut self, ui: &mut egui::Ui, kind: &str) -> bool {
         ui.set_min_width(460.0);
         ui.set_max_width(460.0);
+        egui::ScrollArea::vertical()
+            .id_salt(("action-options", kind))
+            .max_height((ui.ctx().screen_rect().height() - 210.0).max(200.0))
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
         let selected_count = self
             .action_snapshot
             .iter()
@@ -784,7 +789,8 @@ impl BdmApp {
                 });
             }
         }
-        ui.add_space(20.0);
+            });
+        ui.add_space(16.0);
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
