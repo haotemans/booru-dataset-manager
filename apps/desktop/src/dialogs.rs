@@ -595,26 +595,15 @@ impl BdmApp {
         ui.checkbox(&mut self.profile_draft.request.use_cache, "复用历史结果")
             .on_hover_text("相同图片、元数据和提示词复用历史优化结果；关闭后重新调用 API。");
         ui.add_space(10.0);
-        ui.collapsing("自然语言优化 · 系统提示词", |ui| {
+        ui.collapsing("V4 联合视觉标注 · 系统提示词", |ui| {
             ui.add(
                 egui::TextEdit::multiline(&mut self.profile_draft.request.caption_system_prompt)
-                    .desired_rows(5)
+                    .desired_rows(6)
                     .desired_width(f32::INFINITY),
             );
-            if ui.button("恢复自然语言默认提示词").clicked() {
+            if ui.button("恢复 V4 默认提示词").clicked() {
                 self.profile_draft.request.caption_system_prompt =
                     bdm_config::DEFAULT_CAPTION_SYSTEM_PROMPT.into();
-            }
-        });
-        ui.collapsing("Tag 优化 · 系统提示词", |ui| {
-            ui.add(
-                egui::TextEdit::multiline(&mut self.profile_draft.request.tag_system_prompt)
-                    .desired_rows(5)
-                    .desired_width(f32::INFINITY),
-            );
-            if ui.button("恢复 Tag 默认提示词").clicked() {
-                self.profile_draft.request.tag_system_prompt =
-                    bdm_config::DEFAULT_TAG_SYSTEM_PROMPT.into();
             }
         });
         ui.add_space(12.0);
@@ -694,50 +683,55 @@ impl BdmApp {
             });
             self.candidate_review(ui);
         } else {
-            section(
-                ui,
-                if kind == "导出" {
-                    "文本"
-                } else {
-                    "优化目标"
-                },
-                "",
-            );
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                let width = (ui.available_width() - 12.0) / 2.0;
-                if choice_card(
-                    ui,
-                    "text",
-                    "自然语言",
-                    "画面描述",
-                    self.action_mode == 0,
-                    width,
-                )
-                .clicked()
-                {
-                    self.action_mode = 0;
-                }
-                if choice_card(
-                    ui,
-                    "tag",
-                    "优化标签",
-                    "Danbooru",
-                    self.action_mode == 1,
-                    width,
-                )
-                .clicked()
-                {
-                    self.action_mode = 1;
-                }
-            });
-            ui.add_space(16.0);
+            if kind == "导出" {
+                section(ui, "文本", "");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    let width = (ui.available_width() - 12.0) / 2.0;
+                    if choice_card(
+                        ui,
+                        "text",
+                        "自然语言",
+                        "画面描述",
+                        self.action_mode == 0,
+                        width,
+                    )
+                    .clicked()
+                    {
+                        self.action_mode = 0;
+                    }
+                    if choice_card(
+                        ui,
+                        "tag",
+                        "优化标签",
+                        "Danbooru",
+                        self.action_mode == 1,
+                        width,
+                    )
+                    .clicked()
+                    {
+                        self.action_mode = 1;
+                    }
+                });
+                ui.add_space(16.0);
+            }
             if kind == "优化" {
+                self.action_mode = 2;
+                section(ui, "V4 单次推理双输出", "");
+                ui.add_space(6.0);
+                icon_label(
+                    ui,
+                    "spark",
+                    "自然语言 + Danbooru 标签 + 文字 BBox",
+                    "每张图片只调用一次多模态模型，同步产出单行英文描述与无下划线 Danbooru 视觉标签（涵盖人物、动作、服饰、场景、构图、光影、画风、细节及文字框），画师与角色名在本地强保护拼接。",
+                );
+                ui.add_space(10.0);
                 ui.checkbox(
                     &mut self.workflows.overwrite_optimized,
                     "覆盖已有结果",
-                ).on_hover_text("默认只补全缺失结果；自然语言和标签分别判断。勾选后会重新处理已有成功结果。");
+                ).on_hover_text("默认只补全尚未同时具备自然语言与优化标签的图片。勾选或填写补充提示词后会重新处理已有结果。");
+                ui.add_space(6.0);
                 let selected = self
                     .prefs
                     .profiles
@@ -752,7 +746,17 @@ impl BdmApp {
                             ui.selectable_value(&mut self.workflows.profile, i, &profile.name);
                         }
                     });
-                icon_label(ui, "image", "图片 + 标签", "两种模式均发送图片和通用视觉标签；画师、角色及作品名在本地处理，不发送给 AI。发送前仍需确认范围。");
+                ui.add_space(10.0);
+                ui.label(RichText::new("补充提示词 · 精准重审（可选）").size(12.0).color(MUTED));
+                ui.add_space(4.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.workflows.optimize_hint)
+                        .hint_text("例如：异色瞳左蓝右红，手持折扇，右上角气泡文字需标注…")
+                        .desired_width(f32::INFINITY)
+                        .margin(vec2(10.0, 8.0)),
+                );
+                ui.add_space(8.0);
+                icon_label(ui, "image", "图片 + 通用标签先验", "发送图片和空格分隔的 Danbooru 通用视觉标签先验；画师、角色及作品名在本地合成，不发送给 AI。");
             }
             if kind == "导出" {
                 section(ui, "图片", "");

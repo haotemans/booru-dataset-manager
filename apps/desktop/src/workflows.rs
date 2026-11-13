@@ -26,6 +26,7 @@ pub struct ImageUploadConfirmation {
     pub ids: BTreeSet<i64>,
     pub resume: Option<i64>,
     pub mode: String,
+    pub user_hint: String,
 }
 
 #[cfg(test)]
@@ -191,7 +192,33 @@ mod tests {
             .list_workflows()
             .unwrap()
             .is_empty());
+        f.app.action_mode = 2;
+        f.app
+            .start_workflow(&ctx, "optimize", vec![media.id], None)
+            .unwrap();
+        assert!(
+            matches!(&f.app.dialog, Some(crate::app::Dialog::ImageUpload(scope)) if scope.mode == "joint" && scope.ids.contains(&media.id))
+        );
+        f.app.dialog = None;
+        f.app
+            .workflow_repo()
+            .unwrap()
+            .write_ai_artifact(&media, "tags", "character, scenery", "test-ai")
+            .unwrap();
+        assert!(f
+            .app
+            .start_workflow(&ctx, "optimize", vec![media.id], None)
+            .is_err());
+        f.app.workflows.optimize_hint = "异色瞳左蓝右红".into();
+        f.app
+            .start_workflow(&ctx, "optimize", vec![media.id], None)
+            .unwrap();
+        assert!(
+            matches!(&f.app.dialog, Some(crate::app::Dialog::ImageUpload(scope)) if scope.mode == "joint" && scope.user_hint == "异色瞳左蓝右红" && scope.ids.contains(&media.id))
+        );
+        f.app.workflows.optimize_hint.clear();
         f.app.action_mode = 1;
+        f.app.workflows.overwrite_optimized = true;
         f.app
             .start_workflow(&ctx, "optimize", vec![media.id], None)
             .unwrap();
@@ -770,8 +797,10 @@ mod tests {
 #[derive(Default)]
 pub struct WorkflowSettings {
     pub overwrite_optimized: bool,
+    pub optimize_hint: String,
     pub jobs: Vec<WorkflowJob>,
     pub artifacts: BTreeMap<(usize, String), TextArtifact>,
+    pub annotation_details: BTreeMap<usize, bdm_infrastructure::ai::AnnotationDetails>,
     pub rules: TagRules,
     pub candidates: Vec<DuplicateCandidate>,
     pub profile: usize,
@@ -830,6 +859,12 @@ impl BdmApp {
             .map_err(|e| e.to_string())?
             .into_iter()
             .map(|a| ((a.media_id as usize, a.kind.clone()), a))
+            .collect();
+        self.workflows.annotation_details = repo
+            .list_annotation_details()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|(id, details)| (id as usize, details))
             .collect();
         for media in &mut self.library.media {
             media.optimized = self
@@ -982,24 +1017,39 @@ impl BdmApp {
             profile.validate().map_err(str::to_owned)?;
             job.profile_id = profile.id.clone();
             if resume.is_none() {
-                job.mode = if self.action_mode == 0 {
-                    "caption"
-                } else {
-                    "tags"
+                job.mode = match self.action_mode {
+                    0 => "caption",
+                    1 => "tags",
+                    _ => "joint",
                 }
                 .into();
-                if !self.workflows.overwrite_optimized {
-                    let generated: BTreeSet<_> = repo
-                        .list_artifacts()
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .filter(|a| a.kind == job.mode && a.is_generated_output())
-                        .map(|a| a.media_id)
-                        .collect();
-                    job.ids.retain(|id| !generated.contains(id));
+                job.user_hint = self.workflows.optimize_hint.trim().to_owned();
+                if !self.workflows.overwrite_optimized && job.user_hint.is_empty() {
+                    let existing = repo.list_artifacts().map_err(|e| e.to_string())?;
+                    if job.mode == "joint" {
+                        let tags_done: BTreeSet<_> = existing
+                            .iter()
+                            .filter(|a| a.kind == "tags" && a.is_generated_output())
+                            .map(|a| a.media_id)
+                            .collect();
+                        let captions_done: BTreeSet<_> = existing
+                            .iter()
+                            .filter(|a| a.kind == "caption" && a.is_generated_output())
+                            .map(|a| a.media_id)
+                            .collect();
+                        job.ids
+                            .retain(|id| !(tags_done.contains(id) && captions_done.contains(id)));
+                    } else {
+                        let generated: BTreeSet<_> = existing
+                            .into_iter()
+                            .filter(|a| a.kind == job.mode && a.is_generated_output())
+                            .map(|a| a.media_id)
+                            .collect();
+                        job.ids.retain(|id| !generated.contains(id));
+                    }
                     if job.ids.is_empty() {
                         return Err(
-                            "所选图片均已有优化结果；如需重做，请勾选“覆盖已有结果”。".into()
+                            "所选图片均已有优化结果；如需重做，请勾选“覆盖已有结果”或输入补充提示词。".into()
                         );
                     }
                 }
@@ -1017,6 +1067,7 @@ impl BdmApp {
                         ids,
                         resume,
                         mode: job.mode.clone(),
+                        user_hint: job.user_hint.clone(),
                     },
                 )));
                 return Ok(());
@@ -1131,12 +1182,19 @@ impl BdmApp {
         );
         ui.label(format!(
             "用途：{}。图片及筛选后的 Danbooru 通用标签先验将发送到上述服务。",
-            if scope.mode == "tags" {
-                "优化标签"
-            } else {
-                "优化自然语言"
+            match scope.mode.as_str() {
+                "tags" => "优化标签",
+                "caption" => "优化自然语言",
+                _ => "V4 联合视觉标注（自然语言 + 优化标签 + 文字 BBox）",
             }
         ));
+        if !scope.user_hint.is_empty() {
+            ui.label(
+                RichText::new(format!("补充提示：{}", scope.user_hint))
+                    .size(12.0)
+                    .color(ACCENT),
+            );
+        }
         ui.label(format!(
             "共 {} 张图片；每次 JSON 请求最多 {} 组图文配对，最多 {} 个请求并发；最长边 {} px，JPEG 质量 {}。",
             scope.ids.len(),
@@ -1174,6 +1232,7 @@ impl BdmApp {
                     ids: selected.clone(),
                     resume: scope.resume,
                     mode: scope.mode.clone(),
+                    user_hint: scope.user_hint.clone(),
                 },
             )));
         }
@@ -1202,7 +1261,12 @@ impl BdmApp {
                     .iter()
                     .position(|p| p.id == scope.profile.id)
                     .unwrap();
-                self.action_mode = if scope.mode == "tags" { 1 } else { 0 };
+                self.action_mode = match scope.mode.as_str() {
+                    "tags" => 1,
+                    "caption" => 0,
+                    _ => 2,
+                };
+                self.workflows.optimize_hint = scope.user_hint.clone();
                 match self.start_workflow_with_approval(
                     ui.ctx(),
                     "optimize",
@@ -1436,10 +1500,10 @@ impl BdmApp {
                     ("spark", "文本优化")
                 };
                 let subtitle = if job.kind == "optimize" {
-                    if job.mode == "caption" {
-                        "自然语言"
-                    } else {
-                        "标签"
+                    match job.mode.as_str() {
+                        "caption" => "自然语言",
+                        "tags" => "标签",
+                        _ => "V4 联合双输出",
                     }
                 } else {
                     ""
@@ -1678,10 +1742,10 @@ impl BdmApp {
                                 if job.kind == "optimize" {
                                     ui.label(format!(
                                         "{} · 成功 {} / {} · 待重试 {}",
-                                        if job.mode == "caption" {
-                                            "自然语言"
-                                        } else {
-                                            "标签"
+                                        match job.mode.as_str() {
+                                            "caption" => "自然语言",
+                                            "tags" => "标签",
+                                            _ => "V4 联合双输出",
                                         },
                                         job.ids
                                             .iter()

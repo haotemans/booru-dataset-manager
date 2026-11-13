@@ -1,8 +1,19 @@
 use bdm_domain::tags::{NormalizedTags, TagRules};
 use std::collections::BTreeSet;
 
+const FORBIDDEN_QUALITY_TAGS: &[&str] = &[
+    "masterpiece",
+    "best_quality",
+    "high_quality",
+    "absurdres",
+    "highres",
+    "lowres",
+    "aesthetic_score",
+];
+
 /// Danbooru's raw_tags.txt is provenance, not trusted model instructions.
-/// Pass only locally verified general-category tags as a weak visual prior.
+/// Pass only locally verified general-category tags as a weak visual prior,
+/// with underscores converted to spaces so V4 prompts/outputs stay space-only.
 pub(super) fn generic_metadata_prior(
     raw: &str,
     normalized: &NormalizedTags,
@@ -12,34 +23,47 @@ pub(super) fn generic_metadata_prior(
     let mut seen = BTreeSet::new();
     raw.split_whitespace()
         .map(|tag| rules.canonical(tag))
-        .filter(|tag| ordinary.contains(tag) && seen.insert(tag.clone()))
+        .filter(|tag| {
+            ordinary.contains(tag)
+                && !FORBIDDEN_QUALITY_TAGS.contains(&tag.as_str())
+                && seen.insert(tag.clone())
+        })
+        .map(|tag| tag.replace('_', " "))
         .collect::<Vec<_>>()
         .join(", ")
 }
 
 /// The model cannot designate new identity tags or reclassify unknown tags.
-/// Only tags already verified as Danbooru general (category 0) are accepted.
-/// Unknown candidates are omitted pending local vocabulary enrichment.
+/// Only tags already verified as Danbooru general (category 0) are accepted,
+/// and all returned training/display tags use spaces instead of underscores.
 pub(super) fn verified_visual_tags(tags: &[String], rules: &TagRules) -> Vec<String> {
     let mut seen = BTreeSet::new();
     tags.iter()
         .filter_map(|tag| {
-            let candidate = tag.trim().to_lowercase().replace(' ', "_");
+            let candidate = tag
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+                .replace(' ', "_");
             if candidate.is_empty()
                 || candidate.contains('@')
                 || candidate.contains(':')
+                || candidate.contains(',')
                 || candidate.chars().any(char::is_control)
+                || FORBIDDEN_QUALITY_TAGS.contains(&candidate.as_str())
             {
                 return None;
             }
             let canonical = rules.canonical(&candidate);
             if rules.categories.get(&canonical) != Some(&0)
                 || rules.protected.contains(&canonical)
+                || FORBIDDEN_QUALITY_TAGS.contains(&canonical.as_str())
                 || !seen.insert(canonical.clone())
             {
                 return None;
             }
-            Some(canonical)
+            Some(canonical.replace('_', " "))
         })
         .collect()
 }
@@ -120,7 +144,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn raw_danbooru_prior_excludes_artist_character_copyright_and_protected_tags() {
+    fn raw_danbooru_prior_excludes_artist_character_copyright_and_protected_tags_and_uses_spaces() {
         let mut rules = TagRules::default();
         for (name, category) in [
             ("artist_x", 1),
@@ -131,15 +155,16 @@ mod tests {
             ("smile", 0),
             ("rim_lighting", 0),
             ("protected_x", 0),
+            ("masterpiece", 0),
         ] {
             rules.categories.insert(name.into(), category);
         }
         rules.protected.insert("protected_x".into());
-        let raw = "artist_x character_x franchise_x 1girl blue_hair smile protected_x";
+        let raw = "artist_x character_x franchise_x 1girl blue_hair smile protected_x masterpiece";
         let normalized = bdm_domain::tags::normalize(raw, "artist_x", "character_x", &rules);
         assert_eq!(
             generic_metadata_prior(raw, &normalized, &rules),
-            "1girl, blue_hair, smile"
+            "1girl, blue hair, smile"
         );
         assert_eq!(
             verified_visual_tags(
@@ -150,10 +175,11 @@ mod tests {
                     "unknown_person".into(),
                     "protected_x".into(),
                     "blue_hair".into(),
+                    "masterpiece".into(),
                 ],
                 &rules
             ),
-            vec!["blue_hair", "rim_lighting"]
+            vec!["blue hair", "rim lighting"]
         );
         assert!(caption_mentions_identity(
             "A portrait of Character X in soft light.",

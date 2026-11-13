@@ -29,6 +29,9 @@ pub struct WorkflowJob {
     pub destination: String,
     /// "flat" for training-ready image/TXT pairs; empty means legacy folder layout.
     pub export_layout: String,
+    /// Optional precision refinement hint sent to V4 joint annotation.
+    #[serde(default)]
+    pub user_hint: String,
     pub analysis_attempts: std::collections::BTreeMap<i64, u32>,
     pub analysis_errors: std::collections::BTreeMap<i64, Vec<String>>,
     pub analysis_scope: BTreeSet<i64>,
@@ -209,6 +212,46 @@ impl SqliteCatalog {
         let lock = self.media_lock.clone();
         let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
         self.write_artifact_locked(media, kind, content, provenance, "complete", true)
+    }
+
+    pub fn save_annotation_details(
+        &mut self,
+        media_id: i64,
+        details: &crate::ai::AnnotationDetails,
+    ) -> Result<(), IngestError> {
+        let json = storage(serde_json::to_string(details))?;
+        storage(self.connection.execute(
+            "INSERT OR REPLACE INTO media_quality(media_id,aesthetic,watermark_free,provenance) VALUES(?1,NULL,NULL,?2)",
+            params![media_id, json],
+        ))?;
+        Ok(())
+    }
+
+    pub fn list_annotation_details(
+        &self,
+    ) -> Result<std::collections::BTreeMap<i64, crate::ai::AnnotationDetails>, IngestError> {
+        let mut query = storage(
+            self.connection
+                .prepare("SELECT media_id,provenance FROM media_quality"),
+        )?;
+        let rows: Vec<(i64, String)> = storage(
+            query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .and_then(|rows| rows.collect()),
+        )?;
+        let mut out = std::collections::BTreeMap::new();
+        for (media_id, provenance) in rows {
+            if let Ok(details) = serde_json::from_str::<crate::ai::AnnotationDetails>(&provenance) {
+                if !details.text_regions.is_empty()
+                    || !details.special_elements.is_empty()
+                    || details.user_hint.is_some()
+                    || !details.schema_version.is_empty()
+                {
+                    out.insert(media_id, details);
+                }
+            }
+        }
+        Ok(out)
     }
 
     fn write_artifact_locked(

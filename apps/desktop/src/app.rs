@@ -227,8 +227,9 @@ impl BdmApp {
     }
 
     pub fn open_action(&mut self, kind: &str) {
-        self.action_mode = 0;
+        self.action_mode = if kind == "优化" { 2 } else { 0 };
         self.action_selected = false;
+        self.workflows.optimize_hint.clear();
         self.action_snapshot = if self.gallery {
             self.scope_media().iter().map(|m| m.id).collect()
         } else if !self.selected.is_empty() {

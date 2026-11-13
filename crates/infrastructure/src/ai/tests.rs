@@ -90,8 +90,9 @@ fn source_category_lookup_validates_new_visual_tags_without_sending_its_key_to_a
         .into_iter()
         .find(|a| a.kind == "tags")
         .unwrap();
-    assert!(artifact.content.contains("new_visual_tag"));
-    assert!(!artifact.content.contains("new_artist_name"));
+    assert!(artifact.content.contains("new visual tag"));
+    assert!(!artifact.content.contains('_'));
+    assert!(!artifact.content.contains("new artist name"));
 }
 
 fn server(responses: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
@@ -823,4 +824,130 @@ fn vision_tagging_uses_danbooru_prior_and_auto_saves_result() {
         .unwrap()
         .contains("special_term"));
     assert_eq!(job.state, "completed");
+}
+
+#[test]
+fn v4_joint_inference_produces_both_caption_and_space_tags_with_bbox_in_one_call() {
+    let mut f = crate::workflow_tests::fixture();
+    let cancel = AtomicBool::new(false);
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &cancel,
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let mut rules = f.repo.tag_rules().unwrap();
+    rules.categories.extend([
+        ("solo".into(), 0),
+        ("1girl".into(), 0),
+        ("long_hair".into(), 0),
+        ("white_dress".into(), 0),
+        ("scenery".into(), 0),
+        ("rim_lighting".into(), 0),
+        ("lineart".into(), 0),
+        ("speech_bubble".into(), 0),
+    ]);
+    f.repo.save_tag_rules(&rules).unwrap();
+
+    let joint_response = json!({
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {
+                "content": json!({
+                    "schema": "bdm-v4-joint-v1",
+                    "items": [{
+                        "id": media.id,
+                        "caption": "a girl with long hair wearing a white dress, standing in front of a scenic background, soft rim lighting from the left, clean lineart, a speech bubble in the top right reading \"Hello\"",
+                        "optimized_tags": [
+                            "solo",
+                            "1girl",
+                            "long_hair",
+                            "white dress",
+                            "scenery",
+                            "rim_lighting",
+                            "lineart",
+                            "speech bubble"
+                        ],
+                        "text_regions": [{
+                            "text": "Hello",
+                            "bbox_1000_xyxy": [700, 80, 920, 210],
+                            "kind": "dialog",
+                            "legibility": "readable"
+                        }],
+                        "special_elements": ["x_ray"]
+                    }]
+                }).to_string()
+            }
+        }]
+    });
+    let (endpoint, worker) = server(vec![(200, joint_response)]);
+    let mut profile = profile();
+    profile.endpoint = endpoint;
+    profile.artist_tag_format = "at".into();
+    profile.character_tag_format = "plain".into();
+    profile.settings.send_images = true;
+    profile.upload_approval = Some(UploadApproval {
+        profile_id: profile.id.clone(),
+        endpoint: profile.endpoint.clone(),
+        model: profile.model.clone(),
+        settings: profile.settings.clone(),
+        ids: BTreeSet::from([media.id]),
+    });
+    let mut job = f.repo.new_workflow("optimize", vec![media.id]).unwrap();
+    job.mode = "joint".into();
+    job.user_hint = "focus on speech bubble and lighting".into();
+    run(&mut f.repo, &mut job, &profile, &cancel, |_| {}).unwrap();
+    let requests = worker.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    let content = requests[0]["messages"][1]["content"].as_array().unwrap();
+    let input: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(input["operation"], "joint");
+    assert_eq!(input["schema"], "bdm-v4-joint-v1");
+    assert_eq!(
+        input["items"][0]["user_hint"],
+        "focus on speech bubble and lighting"
+    );
+    assert_eq!(job.state, "completed");
+
+    let artifacts = f.repo.list_artifacts().unwrap();
+    let caption = artifacts.iter().find(|a| a.kind == "caption").unwrap();
+    let tags = artifacts.iter().find(|a| a.kind == "tags").unwrap();
+    assert_eq!(caption.state, "complete");
+    assert_eq!(tags.state, "complete");
+    assert!(caption
+        .content
+        .starts_with("@artist, character, a girl with long hair"));
+    assert!(!caption.content.contains('\n'));
+    assert_eq!(
+        tags.content,
+        "@artist, character, special term, solo, 1girl, long hair, white dress, scenery, rim lighting, lineart, speech bubble"
+    );
+    assert!(!tags.content.contains('_'));
+    assert_eq!(
+        std::fs::read_to_string(media.path.with_extension("txt")).unwrap(),
+        caption.content
+    );
+    assert_eq!(
+        std::fs::read_to_string(media.path.with_extension("tags.txt")).unwrap(),
+        tags.content
+    );
+    let details = f.repo.list_annotation_details().unwrap();
+    let media_details = &details[&media.id];
+    assert_eq!(media_details.schema_version, "2.0");
+    assert_eq!(media_details.text_regions.len(), 1);
+    assert_eq!(media_details.text_regions[0].text, "Hello");
+    assert_eq!(
+        media_details.text_regions[0].bbox_1000_xyxy,
+        [700, 80, 920, 210]
+    );
+    assert_eq!(media_details.special_elements, vec!["x_ray"]);
+    assert_eq!(
+        media_details.user_hint.as_deref(),
+        Some("focus on speech bubble and lighting")
+    );
 }

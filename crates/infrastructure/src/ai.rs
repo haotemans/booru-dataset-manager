@@ -19,6 +19,7 @@ mod images;
 mod protocol;
 #[cfg(test)]
 mod tests;
+pub use protocol::{AnnotationDetails, TextRegion};
 use protocol::{BatchResponse, ItemResult};
 
 /// Approval belongs to one explicit dispatch scope and is never saved as a profile preference.
@@ -134,6 +135,32 @@ pub fn format_caption(
         .join(", ")
 }
 
+pub fn format_merged_tags(
+    visual_tags: &[String],
+    normalized: &bdm_domain::tags::NormalizedTags,
+    artist_format: &str,
+    character_format: &str,
+) -> String {
+    let mut merged = normalized
+        .tags
+        .iter()
+        .filter(|tag| !normalized.ordinary.contains(tag))
+        .map(|tag| {
+            if let Some(name) = normalized.artists.iter().find(|name| {
+                name.as_str() == tag.as_str() || format!("@artist {name}").as_str() == tag.as_str()
+            }) {
+                format_protected_tag("artist", name, artist_format)
+            } else if normalized.characters.iter().any(|name| name == tag) {
+                format_protected_tag("character", tag, character_format)
+            } else {
+                tag.replace('_', " ")
+            }
+        })
+        .collect::<Vec<_>>();
+    merged.extend(visual_tags.iter().map(|t| t.replace('_', " ")));
+    merged.join(", ")
+}
+
 /// Recognize only the exact metadata suffix emitted by the previous formatter;
 /// leave arbitrary human prose and already formatted captions untouched.
 pub fn reformat_legacy_caption(
@@ -171,7 +198,9 @@ pub fn reformat_legacy_caption(
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod formatting_tests {
-    use super::{format_caption, format_protected_tag, reformat_legacy_caption};
+    use super::{
+        format_caption, format_merged_tags, format_protected_tag, reformat_legacy_caption,
+    };
 
     #[test]
     fn captions_prefix_artists_then_characters_and_only_migrate_exact_legacy_suffixes() {
@@ -206,8 +235,11 @@ mod formatting_tests {
     }
 
     #[test]
-    fn protected_name_formats_are_local_and_explicit() {
-        assert_eq!(format_protected_tag("artist", "alice", "at"), "@alice");
+    fn protected_name_formats_are_local_and_explicit_without_underscores() {
+        assert_eq!(
+            format_protected_tag("artist", "alice_bob", "at"),
+            "@alice bob"
+        );
         assert_eq!(format_protected_tag("artist", "alice", "plain"), "alice");
         assert_eq!(
             format_protected_tag("artist", "alice", "typed"),
@@ -218,6 +250,26 @@ mod formatting_tests {
             "character:alice"
         );
         assert_eq!(format_protected_tag("character", "alice", "plain"), "alice");
+        let names = bdm_domain::tags::NormalizedTags {
+            tags: vec![
+                "@artist sample_artist".into(),
+                "luna_rin".into(),
+                "special_term".into(),
+                "1girl".into(),
+            ],
+            artists: vec!["sample_artist".into()],
+            characters: vec!["luna_rin".into()],
+            ordinary: vec!["1girl".into()],
+            protected: vec!["special_term".into()],
+            warnings: Vec::new(),
+        };
+        let merged =
+            format_merged_tags(&["1girl".into(), "long hair".into()], &names, "at", "plain");
+        assert_eq!(
+            merged,
+            "@sample artist, luna rin, special term, 1girl, long hair"
+        );
+        assert!(!merged.contains('_'));
     }
 }
 
@@ -394,19 +446,40 @@ fn invalid_result_reason(content: &str, input: &[Value], mode: &str) -> &'static
     let Some(object) = value.as_object() else {
         return "JSON 顶层必须是对象，不能是数组或字符串";
     };
+    if mode == "joint"
+        && input.len() == 1
+        && value.get("schema_version").and_then(Value::as_str) == Some("2.0")
+        && value.get("items").is_none()
+    {
+        return "V4 单图 JSON 缺少有效的 caption、optimized_tags 或合法的归一化 text_regions 坐标";
+    }
     if object
         .keys()
         .any(|key| !matches!(key.as_str(), "schema" | "operation" | "items"))
     {
         return "JSON 顶层包含额外字段，只允许 schema、items 和可选 operation";
     }
-    if value["schema"] != protocol::SCHEMA {
-        return "JSON 的 schema 缺失或不是 bdm-text-v1";
+    let valid_schema = if mode == "joint" {
+        matches!(
+            value["schema"].as_str(),
+            Some(protocol::JOINT_SCHEMA | protocol::SCHEMA | "2.0")
+        )
+    } else {
+        value["schema"] == protocol::SCHEMA
+    };
+    if !valid_schema {
+        return "JSON 的 schema 缺失或不是当前协议版本";
     }
-    if value
-        .get("operation")
-        .is_some_and(|v| !v.is_null() && v.as_str() != Some(mode))
-    {
+    if value.get("operation").is_some_and(|v| {
+        !v.is_null()
+            && !v.as_str().is_some_and(|op| {
+                if mode == "joint" {
+                    matches!(op, "joint" | "joint_caption_and_tags")
+                } else {
+                    op == mode
+                }
+            })
+    }) {
         return "JSON 的 operation 与当前优化目标不一致";
     }
     let Some(rows) = value["items"].as_array() else {
@@ -430,18 +503,31 @@ fn invalid_result_reason(content: &str, input: &[Value], mode: &str) -> &'static
         if !seen.insert(id) {
             return "同一批响应重复返回了图片 ID";
         }
-        let field = if mode == "tags" { "tags" } else { "caption" };
-        if row
-            .as_object()
-            .is_some_and(|o| o.keys().any(|k| k != "id" && k != field))
-        {
-            return "图片结果包含额外字段，只允许 id 和当前目标 caption/tags";
-        }
-        if mode == "caption" && row["caption"].as_str().is_none() {
-            return "图片结果 caption 缺失或不是字符串（不接受 text/description 替代字段）";
-        }
-        if mode == "tags" && row["tags"].as_array().is_none() {
-            return "图片结果 tags 缺失或不是数组";
+        if mode == "joint" {
+            if row["caption"].as_str().is_none() {
+                return "图片结果 caption 缺失或不是字符串";
+            }
+            if row
+                .get("optimized_tags")
+                .or_else(|| row.get("tags"))
+                .is_none_or(|v| !v.is_array() && !v.is_string())
+            {
+                return "图片结果 optimized_tags 缺失或格式无效";
+            }
+        } else {
+            let field = if mode == "tags" { "tags" } else { "caption" };
+            if row
+                .as_object()
+                .is_some_and(|o| o.keys().any(|k| k != "id" && k != field))
+            {
+                return "图片结果包含额外字段，只允许 id 和当前目标 caption/tags";
+            }
+            if mode == "caption" && row["caption"].as_str().is_none() {
+                return "图片结果 caption 缺失或不是字符串（不接受 text/description 替代字段）";
+            }
+            if mode == "tags" && row["tags"].as_array().is_none() {
+                return "图片结果 tags 缺失或不是数组";
+            }
         }
     }
     "图片文本为空、过长或包含不支持的内容，请检查 caption/tags"
@@ -454,6 +540,14 @@ struct AiBatch {
     images: Vec<images::PreparedImage>,
     constraints: BTreeMap<i64, bdm_domain::tags::NormalizedTags>,
     signatures: BTreeMap<i64, String>,
+}
+
+fn normalized_mode(mode: &str) -> &str {
+    match mode {
+        "tags" => "tags",
+        "caption" => "caption",
+        _ => "joint",
+    }
 }
 
 pub fn run(
@@ -499,6 +593,8 @@ pub fn run(
         report(job);
         return Ok(());
     }
+    let mode = normalized_mode(&job.mode).to_owned();
+    let user_hint = job.user_hint.trim().to_owned();
     let mut builder = Client::builder();
     if reqwest::Url::parse(&profile.endpoint)
         .ok()
@@ -547,14 +643,31 @@ pub fn run(
     let mut rules = repo.tag_rules()?;
     let rules_digest = format!("{:x}", Sha256::digest(storage(serde_json::to_vec(&rules))?));
     let artifacts = repo.list_artifacts()?;
-    for artifact in artifacts.iter().filter(|a| {
-        a.kind == job.mode
-            && a.provenance.starts_with(&format!(
-                "{}:{}:job-{}:bdm-text-v1",
-                profile.id, profile.model, job.id
-            ))
-    }) {
-        job.accepted.insert(artifact.media_id);
+    if mode == "joint" {
+        let prefix = format!("{}:{}:job-{}:", profile.id, profile.model, job.id);
+        let tags_done: BTreeSet<_> = artifacts
+            .iter()
+            .filter(|a| a.kind == "tags" && a.provenance.starts_with(&prefix))
+            .map(|a| a.media_id)
+            .collect();
+        let captions_done: BTreeSet<_> = artifacts
+            .iter()
+            .filter(|a| a.kind == "caption" && a.provenance.starts_with(&prefix))
+            .map(|a| a.media_id)
+            .collect();
+        for id in tags_done.intersection(&captions_done) {
+            job.accepted.insert(*id);
+        }
+    } else {
+        for artifact in artifacts.iter().filter(|a| {
+            a.kind == mode
+                && a.provenance.starts_with(&format!(
+                    "{}:{}:job-{}:bdm-text-v1",
+                    profile.id, profile.model, job.id
+                ))
+        }) {
+            job.accepted.insert(artifact.media_id);
+        }
     }
     job.state = "running".into();
     job.error = None;
@@ -645,7 +758,7 @@ pub fn run(
                             None
                         };
                         let prior = paired_txt.as_deref().unwrap_or("");
-                        let prompt = if job.mode == "tags" {
+                        let prompt = if mode == "tags" {
                             &profile.settings.tag_system_prompt
                         } else {
                             &profile.settings.caption_system_prompt
@@ -654,16 +767,17 @@ pub fn run(
                             "{:x}",
                             Sha256::digest(
                                 serde_json::to_vec(&json!({
-                                    "mode":job.mode,
+                                    "mode":mode,
                                     "media_sha256":media.sha256,
                                     "prior":prior,
+                                    "user_hint":user_hint,
                                     "endpoint":profile.endpoint,
                                     "model":profile.model,
                                     "prompt":prompt,
                                     "rules_digest":rules_digest,
                                     "artist_format":profile.artist_tag_format,
                                     "character_format":profile.character_tag_format,
-                                    "identity_spacing":"spaces-v1",
+                                    "identity_spacing":"spaces-v2",
                                     "image_max_edge":profile.settings.image_max_edge,
                                     "jpeg_quality":profile.settings.jpeg_quality
                                 }))
@@ -671,31 +785,73 @@ pub fn run(
                             )
                         );
                         signatures.insert(*id, signature.clone());
-                        if profile.settings.use_cache {
+                        if profile.settings.use_cache && user_hint.is_empty() {
                             let marker = format!(":cache={signature}");
-                            let hit: Option<String> = storage(
-                                repo.connection
-                                    .query_row(
-                                        "SELECT content FROM text_artifacts
-                                 WHERE media_id=?1 AND kind=?2 AND provenance LIKE ?3
-                                 ORDER BY id DESC LIMIT 1",
-                                        params![id, job.mode, format!("%{marker}")],
-                                        |row| row.get(0),
-                                    )
-                                    .optional(),
-                            )?;
-                            if let Some(content) = hit {
-                                repo.write_ai_artifact(
-                                    media,
-                                    &job.mode,
-                                    &content,
-                                    &format!(
-                                        "{}:{}:job-{}:bdm-text-v1:cache={signature}",
-                                        profile.id, profile.model, job.id
-                                    ),
+                            if mode == "joint" {
+                                let caption_hit: Option<String> = storage(
+                                    repo.connection
+                                        .query_row(
+                                            "SELECT content FROM text_artifacts
+                                     WHERE media_id=?1 AND kind='caption' AND provenance LIKE ?2
+                                     ORDER BY id DESC LIMIT 1",
+                                            params![id, format!("%{marker}")],
+                                            |row| row.get(0),
+                                        )
+                                        .optional(),
                                 )?;
-                                job.accepted.insert(*id);
-                                continue;
+                                let tags_hit: Option<String> = storage(
+                                    repo.connection
+                                        .query_row(
+                                            "SELECT content FROM text_artifacts
+                                     WHERE media_id=?1 AND kind='tags' AND provenance LIKE ?2
+                                     ORDER BY id DESC LIMIT 1",
+                                            params![id, format!("%{marker}")],
+                                            |row| row.get(0),
+                                        )
+                                        .optional(),
+                                )?;
+                                if let (Some(caption_content), Some(tags_content)) =
+                                    (caption_hit, tags_hit)
+                                {
+                                    let prov = format!(
+                                        "{}:{}:job-{}:bdm-v4-joint-v1:cache={signature}",
+                                        profile.id, profile.model, job.id
+                                    );
+                                    repo.write_ai_artifact(
+                                        media,
+                                        "caption",
+                                        &caption_content,
+                                        &prov,
+                                    )?;
+                                    repo.write_ai_artifact(media, "tags", &tags_content, &prov)?;
+                                    job.accepted.insert(*id);
+                                    continue;
+                                }
+                            } else {
+                                let hit: Option<String> = storage(
+                                    repo.connection
+                                        .query_row(
+                                            "SELECT content FROM text_artifacts
+                                     WHERE media_id=?1 AND kind=?2 AND provenance LIKE ?3
+                                     ORDER BY id DESC LIMIT 1",
+                                            params![id, mode, format!("%{marker}")],
+                                            |row| row.get(0),
+                                        )
+                                        .optional(),
+                                )?;
+                                if let Some(content) = hit {
+                                    repo.write_ai_artifact(
+                                        media,
+                                        &mode,
+                                        &content,
+                                        &format!(
+                                            "{}:{}:job-{}:bdm-text-v1:cache={signature}",
+                                            profile.id, profile.model, job.id
+                                        ),
+                                    )?;
+                                    job.accepted.insert(*id);
+                                    continue;
+                                }
                             }
                         }
                         if send_images {
@@ -713,11 +869,20 @@ pub fn run(
                                 }
                             }
                         }
-                        input.push(if let Some(txt) = paired_txt {
-                            json!({"id":id,"tags":normalized.ordinary,"paired_txt":txt})
+                        let space_tags: Vec<String> = normalized
+                            .ordinary
+                            .iter()
+                            .map(|t| t.replace('_', " "))
+                            .collect();
+                        let mut item_json = if let Some(txt) = paired_txt {
+                            json!({"id":id,"tags":space_tags,"paired_txt":txt})
                         } else {
-                            json!({"id":id,"tags":normalized.ordinary})
-                        });
+                            json!({"id":id,"tags":space_tags})
+                        };
+                        if !user_hint.is_empty() {
+                            item_json["user_hint"] = json!(user_hint);
+                        }
+                        input.push(item_json);
                         constraints.insert(*id, normalized);
                     }
                 }
@@ -769,7 +934,7 @@ pub fn run(
                             profile,
                             &packet.input,
                             &packet.images,
-                            &job.mode,
+                            &mode,
                             cancel,
                         );
                         match &response {
@@ -811,7 +976,7 @@ pub fn run(
                     params![scope, storage(serde_json::to_string(&rate))?],
                 ))?;
                 responses = std::thread::scope(|threads| {
-                    let mode = job.mode.as_str();
+                    let mode = mode.as_str();
                     let client = &client;
                     let handles = packets
                         .iter()
@@ -887,11 +1052,16 @@ pub fn run(
                 // them. A category lookup failure defers the item rather than silently
                 // dropping all novel details or trusting a model-invented identity.
                 let mut category_lookup_failed = false;
-                if job.mode == "tags" {
+                if matches!(mode.as_str(), "tags" | "joint") {
                     if let Ok(value) = &response {
                         let mut unknown = BTreeSet::new();
                         for row in value.items.values() {
-                            if let ItemResult::Tags(tags) = row {
+                            let proposed_tags = match row {
+                                ItemResult::Tags(tags) => Some(tags),
+                                ItemResult::Joint(joint) => Some(&joint.tags),
+                                ItemResult::Caption(_) => None,
+                            };
+                            if let Some(tags) = proposed_tags {
                                 for tag in tags {
                                     let name = tag.trim().to_lowercase().replace(' ', "_");
                                     if name.is_empty()
@@ -945,7 +1115,6 @@ pub fn run(
                         }
                     }
                 }
-                let mut accepted = BTreeSet::new();
                 let content_failure = category_lookup_failed
                     || matches!(
                         response,
@@ -959,93 +1128,164 @@ pub fn run(
                         let Some(normalized) = constraints.get(&id) else {
                             continue;
                         };
-                        let text = if let ItemResult::Tags(tags) = row {
-                            if category_lookup_failed {
-                                continue;
-                            }
-                            if tags.len() > 512
-                                || tags.iter().any(|t| {
-                                    t.len() > 256
-                                        || t.chars().any(char::is_control)
-                                        || t.trim().is_empty()
-                                })
-                            {
-                                continue;
-                            }
-                            let tags = identity::verified_visual_tags(tags, &rules);
-                            if tags.is_empty() {
-                                // Do not replace the last usable artifact with only rejected identity tags.
-                                continue;
-                            }
-                            let mut merged = normalized
-                                .tags
-                                .iter()
-                                .filter(|tag| !normalized.ordinary.contains(tag))
-                                .map(|tag| {
-                                    if let Some(name) = normalized.artists.iter().find(|name| {
-                                        name.as_str() == tag.as_str()
-                                            || format!("@artist {name}").as_str() == tag.as_str()
-                                    }) {
-                                        format_protected_tag(
-                                            "artist",
-                                            name,
-                                            &profile.artist_tag_format,
+                        match row {
+                            ItemResult::Joint(joint) => {
+                                if category_lookup_failed {
+                                    continue;
+                                }
+                                if joint.caption.is_empty()
+                                    || joint.caption.len() > 8192
+                                    || joint.caption.chars().any(char::is_control)
+                                    || identity::caption_mentions_identity(
+                                        &joint.caption,
+                                        normalized,
+                                        &rules,
+                                        &media.post.tag_string_copyright,
+                                    )
+                                {
+                                    continue;
+                                }
+                                let tags = identity::verified_visual_tags(&joint.tags, &rules);
+                                if tags.is_empty() {
+                                    continue;
+                                }
+                                if tags.iter().any(|t| t == "solo")
+                                    && tags.iter().any(|t| {
+                                        matches!(
+                                            t.as_str(),
+                                            "2girls"
+                                                | "2boys"
+                                                | "3girls"
+                                                | "3boys"
+                                                | "multiple girls"
+                                                | "multiple boys"
                                         )
-                                    } else if normalized.characters.iter().any(|name| name == tag) {
-                                        format_protected_tag(
-                                            "character",
-                                            tag,
-                                            &profile.character_tag_format,
-                                        )
-                                    } else {
-                                        tag.clone()
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-                            merged.extend(tags.iter().cloned());
-                            merged.join(", ")
-                        } else {
-                            let ItemResult::Caption(caption) = row else {
-                                continue;
-                            };
-                            if caption.is_empty()
-                                || caption.len() > 8192
-                                || caption
-                                    .chars()
-                                    .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
-                            {
-                                continue;
+                                    })
+                                {
+                                    continue;
+                                }
+                                let formatted_caption = format_caption(
+                                    &joint.caption,
+                                    normalized,
+                                    &profile.artist_tag_format,
+                                    &profile.character_tag_format,
+                                );
+                                let formatted_tags = format_merged_tags(
+                                    &tags,
+                                    normalized,
+                                    &profile.artist_tag_format,
+                                    &profile.character_tag_format,
+                                );
+                                let provenance = format!(
+                                    "{}:{}:job-{}:bdm-v4-joint-v1:cache={}",
+                                    profile.id,
+                                    profile.model,
+                                    job.id,
+                                    signatures.get(&id).map(String::as_str).unwrap_or("")
+                                );
+                                repo.write_ai_artifact(
+                                    media,
+                                    "caption",
+                                    &formatted_caption,
+                                    &provenance,
+                                )?;
+                                repo.write_ai_artifact(
+                                    media,
+                                    "tags",
+                                    &formatted_tags,
+                                    &provenance,
+                                )?;
+                                repo.save_annotation_details(
+                                    id,
+                                    &AnnotationDetails {
+                                        schema_version: "2.0".into(),
+                                        text_regions: joint.text_regions.clone(),
+                                        special_elements: joint.special_elements.clone(),
+                                        user_hint: (!user_hint.is_empty())
+                                            .then(|| user_hint.clone()),
+                                    },
+                                )?;
+                                job.accepted.insert(id);
+                                job.analysis_errors.remove(&id);
                             }
-                            if identity::caption_mentions_identity(
-                                caption,
-                                normalized,
-                                &rules,
-                                &media.post.tag_string_copyright,
-                            ) {
-                                continue;
+                            ItemResult::Tags(tags) => {
+                                if category_lookup_failed {
+                                    continue;
+                                }
+                                if tags.len() > 512
+                                    || tags.iter().any(|t| {
+                                        t.len() > 256
+                                            || t.chars().any(char::is_control)
+                                            || t.trim().is_empty()
+                                    })
+                                {
+                                    continue;
+                                }
+                                let tags = identity::verified_visual_tags(tags, &rules);
+                                if tags.is_empty() {
+                                    // Do not replace the last usable artifact with only rejected identity tags.
+                                    continue;
+                                }
+                                let text = format_merged_tags(
+                                    &tags,
+                                    normalized,
+                                    &profile.artist_tag_format,
+                                    &profile.character_tag_format,
+                                );
+                                repo.write_ai_artifact(
+                                    media,
+                                    &mode,
+                                    &text,
+                                    &format!(
+                                        "{}:{}:job-{}:bdm-text-v1:cache={}",
+                                        profile.id,
+                                        profile.model,
+                                        job.id,
+                                        signatures.get(&id).map(String::as_str).unwrap_or("")
+                                    ),
+                                )?;
+                                job.accepted.insert(id);
+                                job.analysis_errors.remove(&id);
                             }
-                            format_caption(
-                                caption,
-                                normalized,
-                                &profile.artist_tag_format,
-                                &profile.character_tag_format,
-                            )
-                        };
-                        repo.write_ai_artifact(
-                            media,
-                            &job.mode,
-                            &text,
-                            &format!(
-                                "{}:{}:job-{}:bdm-text-v1:cache={}",
-                                profile.id,
-                                profile.model,
-                                job.id,
-                                signatures.get(&id).map(String::as_str).unwrap_or("")
-                            ),
-                        )?;
-                        job.accepted.insert(id);
-                        job.analysis_errors.remove(&id);
-                        accepted.insert(id);
+                            ItemResult::Caption(caption) => {
+                                if caption.is_empty()
+                                    || caption.len() > 8192
+                                    || caption
+                                        .chars()
+                                        .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+                                {
+                                    continue;
+                                }
+                                if identity::caption_mentions_identity(
+                                    caption,
+                                    normalized,
+                                    &rules,
+                                    &media.post.tag_string_copyright,
+                                ) {
+                                    continue;
+                                }
+                                let text = format_caption(
+                                    caption,
+                                    normalized,
+                                    &profile.artist_tag_format,
+                                    &profile.character_tag_format,
+                                );
+                                repo.write_ai_artifact(
+                                    media,
+                                    &mode,
+                                    &text,
+                                    &format!(
+                                        "{}:{}:job-{}:bdm-text-v1:cache={}",
+                                        profile.id,
+                                        profile.model,
+                                        job.id,
+                                        signatures.get(&id).map(String::as_str).unwrap_or("")
+                                    ),
+                                )?;
+                                job.accepted.insert(id);
+                                job.analysis_errors.remove(&id);
+                            }
+                        }
                     }
                 }
                 let failed: Vec<_> = work
@@ -1061,7 +1301,7 @@ pub fn run(
                     record_failure(job, &failed, &message);
                     repo.audit(
                         "api_batch_failure",
-                        &json!({"job_id":job.id,"mode":job.mode,"ids":failed,"reason":message})
+                        &json!({"job_id":job.id,"mode":mode,"ids":failed,"reason":message})
                             .to_string(),
                     )?;
                 } else {

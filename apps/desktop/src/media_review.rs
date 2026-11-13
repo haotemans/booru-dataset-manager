@@ -11,6 +11,7 @@ use std::sync::mpsc::Receiver;
 pub struct ReviewState {
     pub tab: usize,
     pub auto_advance: bool,
+    pub refine_hint: String,
     pub(crate) sidebar: bool,
     canvas_id: Option<usize>,
     pub(crate) view: CanvasView,
@@ -39,6 +40,7 @@ impl Default for ReviewState {
         Self {
             tab: 0,
             auto_advance: true,
+            refine_hint: String::new(),
             sidebar: false,
             canvas_id: None,
             view: CanvasView::default(),
@@ -987,6 +989,99 @@ impl BdmApp {
                         ui.add_space(16.0);
                     }
                 }
+                if let Some(details) = self.workflows.annotation_details.get(&id).cloned() {
+                    if !details.text_regions.is_empty() || !details.special_elements.is_empty() {
+                        ui.add_space(10.0);
+                        egui::Frame::none()
+                            .fill(NAV)
+                            .rounding(6.0)
+                            .inner_margin(10.0)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                if !details.special_elements.is_empty() {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(RichText::new("特殊结构").size(12.0).color(MUTED));
+                                        for elem in &details.special_elements {
+                                            badge(ui, &elem.replace('_', " "), ACCENT);
+                                        }
+                                    });
+                                    if !details.text_regions.is_empty() {
+                                        ui.add_space(6.0);
+                                    }
+                                }
+                                if !details.text_regions.is_empty() {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "画面文字 BBox · {}",
+                                            details.text_regions.len()
+                                        ))
+                                        .size(12.0)
+                                        .color(MUTED),
+                                    );
+                                    ui.add_space(4.0);
+                                    for r in &details.text_regions {
+                                        let [x1, y1, x2, y2] = r.bbox_1000_xyxy;
+                                        ui.horizontal_wrapped(|ui| {
+                                            badge(
+                                                ui,
+                                                &format!(
+                                                    "{} [{x1},{y1},{x2},{y2}]",
+                                                    r.kind.replace('_', " ")
+                                                ),
+                                                MUTED,
+                                            );
+                                            ui.label(RichText::new(&r.text).size(12.0).color(INK));
+                                        });
+                                    }
+                                }
+                            });
+                    }
+                }
+                if tab != 0 && !self.demo && !self.is_capture() {
+                    ui.add_space(10.0);
+                    egui::Frame::none()
+                        .fill(NAV)
+                        .rounding(6.0)
+                        .inner_margin(10.0)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(
+                                RichText::new("补充提示重审 · 同步更新自然语言与标签")
+                                    .size(12.0)
+                                    .color(MUTED),
+                            );
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.media_review.refine_hint)
+                                    .hint_text("输入细节修正提示，重跑当前图片 V4 双输出…")
+                                    .desired_width(f32::INFINITY),
+                            );
+                            ui.add_space(6.0);
+                            if ui
+                                .add_enabled(
+                                    !self.workflow_active() && !self.ingest_active(),
+                                    egui::Button::new(
+                                        RichText::new("用补充提示重新优化此图").size(12.0),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                self.action_mode = 2;
+                                self.workflows.overwrite_optimized = true;
+                                self.workflows.optimize_hint =
+                                    self.media_review.refine_hint.trim().to_owned();
+                                match self.start_workflow(
+                                    ui.ctx(),
+                                    "optimize",
+                                    vec![id as i64],
+                                    None,
+                                ) {
+                                    Ok(()) => {}
+                                    Err(err) => self.form_error = err,
+                                }
+                            }
+                        });
+                }
                 if let Some(stored) = self.ingest.stored.get(&id).filter(|_| tab != 2) {
                     let warnings = bdm_domain::tags::normalize(
                         &stored.post.tag_string,
@@ -1118,7 +1213,11 @@ impl BdmApp {
             .workflows
             .jobs
             .iter()
-            .filter(|j| j.kind == "optimize" && j.mode == mode && j.ids.contains(&(id as i64)))
+            .filter(|j| {
+                j.kind == "optimize"
+                    && (j.mode == mode || j.mode == "joint" || j.mode.is_empty())
+                    && j.ids.contains(&(id as i64))
+            })
             .max_by_key(|j| j.id);
         if let Some(job) = job {
             return match job.state.as_str() {
