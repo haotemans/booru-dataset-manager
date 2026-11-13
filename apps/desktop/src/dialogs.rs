@@ -649,11 +649,11 @@ impl BdmApp {
             .iter()
             .filter(|id| self.selected_media.contains(id))
             .count();
-        if kind != "去重" {
-            section(ui, "范围", "");
-            ui.add_space(8.0);
-        }
         ui.horizontal_wrapped(|ui| {
+            if kind != "去重" {
+                ui.label(RichText::new("范围").font(medium(13.0)));
+                ui.add_space(12.0);
+            }
             ui.radio_value(
                 &mut self.action_selected,
                 false,
@@ -782,11 +782,6 @@ impl BdmApp {
                     icon_label(ui, "lock", "保护手动修改", "再次导出只安全更新有导出记录的 TXT；图片哈希异常会停止，手动修改不会被静默覆盖。");
                     hint(ui, "所有档位符合条件的图片均可导出；默认扁平结构，每张图片配一个同名 TXT。");
                 });
-                ui.collapsing("更多选项", |ui| {
-                    ui.add_enabled_ui(!self.workflows.export_multires, |ui| {
-                        ui.checkbox(&mut self.workflows.export_folders, "每张图片独立文件夹");
-                    });
-                });
             }
         }
             });
@@ -831,7 +826,15 @@ impl BdmApp {
                         Err(error) => self.workflows.error = Some(error),
                     }
                 }
-                ui.button("返回").clicked()
+                let close = ui.button("返回").clicked();
+                if kind == "导出" {
+                    ui.menu_button("更多", |ui| {
+                        ui.add_enabled_ui(!self.workflows.export_multires, |ui| {
+                            ui.checkbox(&mut self.workflows.export_folders, "每张图片独立文件夹");
+                        });
+                    });
+                }
+                close
             })
             .inner
         })
