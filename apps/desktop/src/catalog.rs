@@ -18,6 +18,17 @@ struct PendingLookup {
     receiver: Receiver<Result<SourceTag, CatalogError>>,
 }
 
+fn merge_tag_suggestions(found: &mut Vec<SourceTag>, candidates: Vec<SourceTag>) {
+    for candidate in candidates {
+        if !found
+            .iter()
+            .any(|existing| existing.provider == candidate.provider && existing.id == candidate.id)
+        {
+            found.push(candidate);
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct CatalogSettings {
     pub suggestions: Vec<SourceTag>,
@@ -353,7 +364,18 @@ impl BdmApp {
                     credentials
                         .and_then(bdm_infrastructure::danbooru::DanbooruProvider::new)
                         .and_then(|provider| {
-                            bdm_application::catalog::lookup_tag(&provider, kind, &name)
+                            let result =
+                                bdm_application::catalog::lookup_tag(&provider, kind, &name);
+                            if result == Err(CatalogError::NotFound) {
+                                if let Ok(candidates) =
+                                    provider.suggest_tags(&name, kind.category())
+                                {
+                                    if let Ok(mut found) = worker_suggestions.lock() {
+                                        merge_tag_suggestions(&mut found, candidates);
+                                    }
+                                }
+                            }
+                            result
                         })
                 };
                 let use_gelbooru = mode == bdm_domain::sources::DownloadSource::Gelbooru
@@ -377,7 +399,7 @@ impl BdmApp {
                                     provider.suggest_tags(&name, kind.category())
                                 {
                                     if let Ok(mut found) = worker_suggestions.lock() {
-                                        *found = candidates;
+                                        merge_tag_suggestions(&mut found, candidates);
                                     }
                                 }
                             }
@@ -598,6 +620,39 @@ mod tests {
         assert_eq!(app.save_found_collection(), Ok(true));
         assert_eq!(app.library.artists[0].tag, candidate.name);
         assert_eq!(app.library.artists[0].provider, SourceProvider::Gelbooru);
+    }
+
+    #[test]
+    fn automatic_candidates_keep_both_sites_and_save_only_the_selected_identity() {
+        use bdm_domain::sources::SourceProvider;
+        let danbooru = SourceTag {
+            provider: SourceProvider::Danbooru,
+            id: 501,
+            name: "synthetic_artist4".into(),
+            category: 1,
+            post_count: 10,
+        };
+        let gelbooru = SourceTag {
+            provider: SourceProvider::Gelbooru,
+            ..danbooru.clone()
+        };
+        let mut candidates = vec![danbooru.clone()];
+        merge_tag_suggestions(&mut candidates, vec![danbooru.clone(), gelbooru.clone()]);
+        assert_eq!(candidates.len(), 2);
+        for selected in [danbooru, gelbooru] {
+            let mut app = app();
+            app.navigate(Page::Artist);
+            app.begin_add_collection();
+            app.input_tag = "synthetic_artist".into();
+            app.catalog.suggestions = candidates.clone();
+            app.select_tag_suggestion(&selected).unwrap();
+            assert!(app.library.artists.is_empty());
+            assert_eq!(app.catalog.lookup_provider, Some(selected.provider));
+            assert_eq!(app.save_found_collection(), Ok(true));
+            assert_eq!(app.library.artists.len(), 1);
+            assert_eq!(app.library.artists[0].provider, selected.provider);
+            assert_eq!(app.library.artists[0].tag, selected.name);
+        }
     }
 
     #[test]

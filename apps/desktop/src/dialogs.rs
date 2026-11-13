@@ -423,7 +423,12 @@ impl BdmApp {
             );
             for candidate in self.catalog.suggestions.clone() {
                 if ui
-                    .button(format!("{} · {} 张", candidate.name, candidate.post_count))
+                    .button(format!(
+                        "{} · {} · {} 张",
+                        candidate.provider.label(),
+                        candidate.name,
+                        candidate.post_count
+                    ))
                     .clicked()
                 {
                     if let Err(error) = self.select_tag_suggestion(&candidate) {

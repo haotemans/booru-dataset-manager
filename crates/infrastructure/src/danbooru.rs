@@ -101,6 +101,29 @@ impl DanbooruProvider {
         let bytes = Self::send(self.request("profile.json").query(&[("only", "id,name")]))?;
         verify_profile(&bytes, &credentials.username)
     }
+
+    /// Prefix candidates help users resolve site-specific artist and character names.
+    /// They are suggestions only; the caller still requires explicit selection.
+    pub fn suggest_tags(&self, prefix: &str, category: u8) -> Result<Vec<SourceTag>, CatalogError> {
+        if prefix.len() < 2
+            || prefix.len() > 512
+            || prefix
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace() || c == '*')
+        {
+            return Ok(Vec::new());
+        }
+        let pattern = format!("{prefix}*");
+        let category_parameter = category.to_string();
+        let bytes = Self::send(self.request("tags.json").query(&[
+            ("search[name_matches]", pattern.as_str()),
+            ("search[category]", category_parameter.as_str()),
+            ("search[order]", "count"),
+            ("limit", "50"),
+            ("only", "id,name,category,post_count"),
+        ]))?;
+        decode_tag_suggestions(&bytes, prefix, category)
+    }
 }
 
 fn media_url(value: &str) -> Result<reqwest::Url, IngestError> {
@@ -306,6 +329,49 @@ struct TagPayload {
     post_count: i64,
 }
 
+fn decode_tag_suggestions(
+    bytes: &[u8],
+    prefix: &str,
+    category: u8,
+) -> Result<Vec<SourceTag>, CatalogError> {
+    let tags: Vec<TagPayload> =
+        serde_json::from_slice(bytes).map_err(|_| CatalogError::InvalidResponse)?;
+    if tags.len() > 50 {
+        return Err(CatalogError::InvalidResponse);
+    }
+    let mut result = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for tag in tags {
+        if tag.id <= 0
+            || tag.post_count < 0
+            || !matches!(tag.category, 0 | 1 | 3 | 4 | 5)
+            || tag.name.is_empty()
+            || tag.name.len() > 512
+            || tag
+                .name
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(CatalogError::InvalidResponse);
+        }
+        if tag.name.starts_with(prefix)
+            && tag.name != prefix
+            && tag.category == category
+            && seen.insert(tag.id)
+            && result.len() < 6
+        {
+            result.push(SourceTag {
+                provider: bdm_domain::sources::SourceProvider::Danbooru,
+                id: tag.id,
+                name: tag.name,
+                category: tag.category,
+                post_count: tag.post_count,
+            });
+        }
+    }
+    Ok(result)
+}
+
 fn status_error(status: u16, headers: &HeaderMap) -> Result<(), CatalogError> {
     if headers
         .get("cf-mitigated")
@@ -407,6 +473,39 @@ impl TagProvider for DanbooruProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_are_bounded_literal_category_matches_and_not_aliases() {
+        let mut tags = vec![
+            serde_json::json!({"id":1,"name":"synthetic_prefix4","category":1,"post_count":10}),
+            serde_json::json!({"id":1,"name":"synthetic_prefix4","category":1,"post_count":10}),
+            serde_json::json!({"id":2,"name":"synthetic_prefix_character","category":4,"post_count":10}),
+            serde_json::json!({"id":3,"name":"syntheticXprefix4","category":1,"post_count":10}),
+            serde_json::json!({"id":4,"name":"synthetic_prefix","category":1,"post_count":10}),
+        ];
+        let bytes = serde_json::to_vec(&tags).unwrap();
+        let found = decode_tag_suggestions(&bytes, "synthetic_prefix", 1).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "synthetic_prefix4");
+        assert_eq!(
+            found[0].provider,
+            bdm_domain::sources::SourceProvider::Danbooru
+        );
+        tags.extend((10..25).map(|id| serde_json::json!({"id":id,"name":format!("synthetic_prefix_{id}"),"category":1,"post_count":10})));
+        assert_eq!(
+            decode_tag_suggestions(&serde_json::to_vec(&tags).unwrap(), "synthetic_prefix", 1)
+                .unwrap()
+                .len(),
+            6
+        );
+        tags.push(
+            serde_json::json!({"id":99,"name":"synthetic_prefix bad","category":1,"post_count":10}),
+        );
+        assert_eq!(
+            decode_tag_suggestions(&serde_json::to_vec(&tags).unwrap(), "synthetic_prefix", 1),
+            Err(CatalogError::InvalidResponse)
+        );
+    }
 
     #[test]
     fn exact_tag_bulk_categories_filter_unrequested_and_preserve_identity_categories() {
