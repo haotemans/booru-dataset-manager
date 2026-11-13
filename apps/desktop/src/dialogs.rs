@@ -755,7 +755,8 @@ impl BdmApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     let width = (ui.available_width() - 12.0) / 2.0;
-                    if choice_card(ui, "image", "原尺寸", "扁平 · 图片 + TXT", !self.workflows.export_multires, width)
+                    let detail = if self.workflows.export_folders { "逐图文件夹" } else { "扁平 · 图片 + TXT" };
+                    if choice_card(ui, "image", "原尺寸", detail, !self.workflows.export_multires, width)
                         .on_hover_text("默认：保留当前分辨率，所有档位混合直出同一目录，不缩小、不放大。附 1024 训练参考配置，缩放由训练脚本完成。")
                         .clicked() { self.workflows.export_multires = false; self.workflows.export_folders = false; }
                     if choice_card(ui, "layers", "多分辨率", "768 · 1024 · 1536 · 2048", self.workflows.export_multires, width)

@@ -1,4 +1,8 @@
-use crate::{app::BdmApp, theme::*};
+use crate::{
+    app::BdmApp,
+    theme::*,
+    widgets::{icon_label, tool_button},
+};
 use bdm_domain::editing::MaskRegion;
 use bdm_infrastructure::editing::{self, RepairPreview};
 use eframe::egui::{self, vec2, Rect, RichText};
