@@ -1144,9 +1144,8 @@ fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError>
         .source_archive
         .as_ref()
         .ok_or_else(|| IngestError::StorageDetails("缺少原始输入存档，未自动修改。".into()))?;
-    let parent: StoredMedia = storage(serde_json::from_slice(&storage(fs::read(
-        directory.join(".edit-parent.json"),
-    ))?)?)?;
+    let parent_bytes = storage(fs::read(directory.join(".edit-parent.json")))?;
+    let parent: StoredMedia = storage(serde_json::from_slice(&parent_bytes))?;
     if !archive.downloaded_original
         || archive.path.parent() != Some(directory)
         || parent.id != media.id
