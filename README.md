@@ -6,7 +6,7 @@ A Windows desktop application for managing booru-sourced image datasets, visual 
 
 ## Run the desktop UI
 
-Crop confirmation now produces a training image with a persistent 768/1024/1536/2048 area-budget selector (default 1024), both dimensions aligned to 32, no upscaling, and a no-second-resize/crop geometry check. The button shows the actual output dimensions. New downloads retain their unmodified bytes; edits preserve the original or a clearly identified legacy input snapshot. Flat training-crop exports include a compatible `dataset.toml`. See [training crops](docs/features/TRAINING_CROPS.md) for original preservation, quality limits and training configuration requirements.
+Crop confirmation automatically preserves available detail up to the 2048 area ceiling, aligns dimensions to 32 and never upscales. The toolbar shows the approximate tier and actual save dimensions without requiring a manual tier choice. Default flat export copies all eligible tiers at their current resolution, with matching TXT files and a 1024 training reference; the trainer handles any necessary scaling. Optional multi-resolution copies are explicitly enabled. Original downloads remain archived. See [training crops](docs/features/TRAINING_CROPS.md).
 
 The current built application is `target/debug/bdm-desktop.exe`; use this single entry for all features, including review, inpainting and cropping. Older named builds are archived under `target/archived-builds/`. Cargo's other files and directories under `target/debug/` are build caches, not alternative application versions.
 

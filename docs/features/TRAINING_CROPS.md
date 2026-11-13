@@ -1,47 +1,59 @@
-# Training crops and sd-scripts compatibility
+# Automatic training crops and native-size export
 
-The review ratio buttons define the source selection. Crop confirmation now
-prepares a training image, using a persistent 768/1024/1536/2048 area-budget
-selector (default 1024). Both output dimensions are multiples of 32. The
-selected budget is an upper bound, not a claim that small inputs have acquired
-more detail. The confirmation button displays the actual output dimensions.
+The review ratio buttons define the source selection. Crop confirmation uses
+an automatic plan: preserve available detail, align both output dimensions to
+32, and apply the 2048-square area ceiling only when the selection exceeds it.
+There is no manual resolution selector. The toolbar shows an approximate
+768/1024/1536/2048 tier, determined by the nearest equivalent-area resolution
+`sqrt(width * height)`, and the save button shows the actual pixel dimensions.
+The tier label never triggers resizing by itself.
 
 `bdm_domain::training` follows the local sd-scripts
 `BucketManager(no_upscale=True, reso_steps=32)` geometry, including integer
-rounding and centered edge trimming. It rejects upscaling and verifies that
-running the output dimensions through the same algorithm again makes no
-geometrical change. The input selection and output must meet short side 576
-and 550,000 pixels. Unsupported small/wide selections remain unsaved with a
-reason; images are never enlarged to satisfy those limits.
-
-The image pipeline crops the user selection, downsamples with Lanczos3 when
-needed, and trims the calculated edges. JPEG training output uses quality 95.
-Source selection, resized dimensions, trim offsets, final dimensions and
-resolution budget are recorded with the edit. A nominal aspect label need not
-equal the final rounded bucket ratio exactly.
+rounding and centered edge trimming. Images are never enlarged. The selection
+and resulting image must have a short side of at least 576 and at least
+550,000 pixels. JPEG training output uses quality 95. Source selection, resized
+dimensions, trim offsets, final dimensions and the 2048 area ceiling are
+recorded with the edit. A nominal aspect label can differ slightly from the
+final rounded bucket ratio.
 
 New imports retain `downloaded-original.<ext>` before transparency processing.
 Edits retain a hash-verified source archive; the working image and thumbnail
-can change while this archive stays intact. Legacy files without an original
-download archive retain their first available input snapshot. Its metadata
-states whether the bytes match the source MD5; an already altered legacy file
-is not relabeled as a recovered original. Source metadata and source URLs are
-preserved. Restore-previous-version retains the preceding edit geometry.
+can change while this archive stays intact. Legacy files without a download
+archive retain their first available input snapshot. Metadata identifies
+whether its bytes match the source MD5. Source metadata and URLs are preserved.
+Restore-previous-version retains the preceding edit geometry. Existing crops
+made with a lower ceiling are not enlarged or rewritten automatically.
 
-Flat export of training crops also writes `dataset.toml`, with the maximum
-selected area budget, `enable_bucket=true`, `bucket_no_upscale=true`,
-`bucket_reso_steps=32`, and random crop/flip/color augmentation disabled. It
-checks every image already present in that export root before generating the
-config. Misaligned mixed-in images make the export report a failure rather
-than publishing an inaccurate training-ready config. Caption versus Tag
-selection still determines the single matching TXT per exported image.
+## Default: native-size flat export
 
-The generated config uses the absolute export directory. Export again after
-moving the dataset. Its provenance is under `.bdm-manifests`; manual config
-changes are preserved and reported as integrity conflicts instead of silently
-overwritten. Training must use this config. The local Anima/Moss entry points
-must preserve explicit TOML bucket settings; folder defaults are 32/no-upscale.
+All approved images with the selected successful text artifact are eligible,
+regardless of their resolution tier. Each current image is copied byte for
+byte, alongside its matching TXT, into the same directory. Export performs no
+resizing, upscaling, tier filtering or tier-based folder splitting. Existing
+images and manually edited text retain integrity protection.
 
-Cropping does not establish that an existing caption still describes the
-cropped content. Review text before training; this action does not invoke an
-API or rewrite text automatically.
+`dataset.toml` is a **1024 training reference**, with `enable_bucket=true`,
+`bucket_no_upscale=true`, `bucket_reso_steps=32`, and random crop/flip/color
+augmentation disabled. The trainer may resize or trim larger/unaligned inputs
+when it loads this native-size export; exporting itself does not. This replaces
+the former behavior that inferred the training resolution from the largest
+crop ceiling and rejected mixed native dimensions. The local Anima/Moss entry
+points use the managed reference when given its export directory.
+
+## Optional: multiple resolution copies
+
+An explicit, default-off export option generates separate `768`, `1024`,
+`1536` and `2048` directories. Each contains flat image/TXT pairs and its own
+matching `dataset.toml`. Variants are derived from the current image without
+modifying it. Small images are not enlarged: an image can have identical
+sizes in several larger-ceiling directories. A variant that cannot meet the
+576-short-side/550,000-pixel floor is omitted; an image with no valid variants
+fails the task with an explicit reason. Each generated variant is checked to
+remain geometrically unchanged by the corresponding training configuration.
+
+The configs use absolute export paths. Export again after moving the dataset.
+Provenance is under `.bdm-manifests`; manual config changes are preserved and
+reported as integrity conflicts. Cropping does not prove that existing text
+still describes the cropped content. Review captions before training; neither
+cropping nor exporting invokes an API or regenerates descriptions.

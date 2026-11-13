@@ -4,6 +4,24 @@ use serde::{Deserialize, Serialize};
 pub const RESOLUTIONS: [u32; 4] = [768, 1024, 1536, 2048];
 pub const STEP: u32 = 32;
 
+/// Retain available detail up to the highest training ceiling. The tier is an
+/// informational equivalent-area label; choosing it must never shrink an image.
+pub fn automatic_plan(width: u32, height: u32) -> Result<TrainingCrop, &'static str> {
+    plan(width, height, 2048)
+}
+
+pub fn nearest_tier(width: u32, height: u32) -> u32 {
+    let equivalent = (f64::from(width) * f64::from(height)).sqrt();
+    RESOLUTIONS
+        .into_iter()
+        .min_by(|a, b| {
+            (f64::from(*a) - equivalent)
+                .abs()
+                .total_cmp(&(f64::from(*b) - equivalent).abs())
+        })
+        .unwrap()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrainingCrop {
     pub resolution: u32,
@@ -74,6 +92,27 @@ pub fn plan(width: u32, height: u32, resolution: u32) -> Result<TrainingCrop, &'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_tiers_keep_native_detail_and_only_cap_above_2048() {
+        for (size, expected, tier) in [
+            ([800, 800], [800, 800], 768),
+            ([1120, 896], [1120, 896], 1024),
+            ([1536, 1536], [1536, 1536], 1536),
+            ([2048, 2048], [2048, 2048], 2048),
+            ([2160, 1509], [2144, 1504], 2048),
+            ([3000, 3000], [2048, 2048], 2048),
+        ] {
+            let result = automatic_plan(size[0], size[1]).unwrap();
+            assert_eq!(result.output, expected);
+            assert_eq!(nearest_tier(expected[0], expected[1]), tier);
+            assert_eq!(
+                automatic_plan(expected[0], expected[1]).unwrap().resized,
+                expected
+            );
+        }
+        assert!(automatic_plan(512, 512).is_err());
+    }
 
     #[test]
     fn kohya_reference_shapes_are_stable_and_never_upscaled() {

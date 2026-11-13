@@ -782,6 +782,7 @@ pub struct WorkflowSettings {
     pub export_root: String,
     /// Explicit opt-in to old per-image folder structure.
     pub export_folders: bool,
+    pub export_multires: bool,
     pub candidate_page: usize,
     auto_analysis_waiting: bool,
     pub(crate) auto_analysis_enabled: bool,
@@ -959,7 +960,9 @@ impl BdmApp {
                 return Err("请输入导出目录的绝对路径。".into());
             }
             job.destination = destination.display().to_string();
-            job.export_layout = if self.workflows.export_folders {
+            job.export_layout = if self.workflows.export_multires {
+                "multi-resolution"
+            } else if self.workflows.export_folders {
                 "folders"
             } else {
                 "flat"

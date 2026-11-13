@@ -2075,6 +2075,109 @@ fn export_reconciles_hashes_and_preserves_selected_text_format() {
 }
 
 #[test]
+fn mixed_resolution_flat_export_keeps_bytes_and_multires_is_explicit() {
+    let mut f = fixture();
+    let cancel = AtomicBool::new(false);
+    let mut source = Vec::new();
+    for (index, size) in [768, 1024, 1536, 2048].into_iter().enumerate() {
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            size,
+            size,
+            image::Rgb([20, 80, 140]),
+        ))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+        f.provider.bytes = encoded.into_inner();
+        f.post.id = 100 + index as i64;
+        f.post.md5 = format!("{:x}", Md5::digest(&f.provider.bytes));
+        f.post.file_size = f.provider.bytes.len() as u64;
+        f.post.image_width = size;
+        f.post.image_height = size;
+        f.repo
+            .import(
+                &f.post,
+                &f.directory.path().join("library"),
+                f.collection,
+                576,
+                &cancel,
+                &f.provider,
+            )
+            .unwrap();
+        let media = f
+            .repo
+            .list_media()
+            .unwrap()
+            .into_iter()
+            .find(|m| m.post.id == f.post.id)
+            .unwrap();
+        f.repo.set_media_keep(media.id, true).unwrap();
+        f.repo
+            .write_artifact(&media, "caption", "A blue image.", "test", "complete")
+            .unwrap();
+        source.push((media, size, f.provider.bytes.clone()));
+    }
+    let ids = source
+        .iter()
+        .map(|(media, _, _)| media.id)
+        .collect::<Vec<_>>();
+    let flat = f.directory.path().join("native flat");
+    let mut job = f.repo.new_workflow("export", ids.clone()).unwrap();
+    job.mode = "caption".into();
+    job.export_layout = "flat".into();
+    crate::export::run(&mut f.repo, &mut job, &flat, &cancel, |_| {}).unwrap();
+    assert_eq!(job.state, "completed");
+    assert_eq!(job.accepted.len(), 4);
+    for (media, size, bytes) in &source {
+        let output = flat.join(format!("media_{}.png", media.id));
+        assert_eq!(std::fs::read(&output).unwrap(), *bytes);
+        assert_eq!(image::image_dimensions(&output).unwrap(), (*size, *size));
+        assert_eq!(
+            std::fs::read_to_string(output.with_extension("txt")).unwrap(),
+            "A blue image."
+        );
+        assert!(!flat.join(size.to_string()).exists());
+    }
+    assert!(std::fs::read_to_string(flat.join("dataset.toml"))
+        .unwrap()
+        .contains("resolution = [1024, 1024]"));
+    let config_manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(flat.join(".bdm-manifests/training-config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(config_manifest["training_may_resize"], true);
+
+    let multi = f.directory.path().join("optional copies");
+    let mut job = f.repo.new_workflow("export", vec![ids[0], ids[3]]).unwrap();
+    job.mode = "caption".into();
+    job.export_layout = "multi-resolution".into();
+    crate::export::run(&mut f.repo, &mut job, &multi, &cancel, |_| {}).unwrap();
+    assert_eq!(job.accepted.len(), 2);
+    assert!(!multi.join(format!("media_{}.png", ids[3])).exists());
+    for resolution in bdm_domain::training::RESOLUTIONS {
+        let directory = multi.join(resolution.to_string());
+        assert_eq!(
+            image::image_dimensions(directory.join(format!("media_{}.png", ids[3]))).unwrap(),
+            (resolution, resolution)
+        );
+        assert_eq!(
+            image::image_dimensions(directory.join(format!("media_{}.png", ids[0]))).unwrap(),
+            (768, 768)
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join(format!("media_{}.txt", ids[3]))).unwrap(),
+            "A blue image."
+        );
+        assert!(std::fs::read_to_string(directory.join("dataset.toml"))
+            .unwrap()
+            .contains(&format!("resolution = [{resolution}, {resolution}]")));
+    }
+    for (media, _, bytes) in source {
+        assert_eq!(std::fs::read(&media.path).unwrap(), bytes);
+    }
+}
+
+#[test]
 fn flat_export_updates_only_owned_txt_and_rejects_modified_pairs() {
     let mut f = fixture();
     let cancel = AtomicBool::new(false);

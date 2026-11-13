@@ -325,23 +325,21 @@ impl BdmApp {
             .image_editor
             .crop
             .pixels(vec2(dimensions.0 as f32, dimensions.1 as f32));
-        ui.add_enabled_ui(!busy && self.image_editor.preview.is_none(), |ui| {
-            egui::ComboBox::from_id_salt("crop-training-resolution")
-                .width(68.0)
-                .selected_text(format!("{}档", self.prefs.training_resolution))
-                .show_ui(ui, |ui| {
-                    for resolution in bdm_domain::training::RESOLUTIONS {
-                        ui.selectable_value(
-                            &mut self.prefs.training_resolution,
-                            resolution,
-                            format!("{resolution} 上限 · 不放大"),
-                        );
-                    }
-                });
-        });
-        let planned = crop.map(|crop| {
-            bdm_domain::training::plan(crop.width, crop.height, self.prefs.training_resolution)
-        });
+        let planned =
+            crop.map(|crop| bdm_domain::training::automatic_plan(crop.width, crop.height));
+        let automatic = if active {
+            planned.clone()
+        } else {
+            Some(bdm_domain::training::automatic_plan(
+                dimensions.0,
+                dimensions.1,
+            ))
+        };
+        let tier = automatic.as_ref().and_then(|plan| plan.as_ref().ok());
+        ui.label(tier.map_or_else(
+            || "自动档位".into(),
+            |plan| format!("自动 ≈{}", bdm_domain::training::nearest_tier(plan.output[0], plan.output[1])),
+        )).on_hover_text("按选区有效像素自动匹配，无需选择。保留可用分辨率，仅对齐 32；超过 2048 档才生成缩小的训练版，原图保留。默认导出不再缩小图片。");
         let label = match &planned {
             Some(Ok(plan)) if active => format!("裁剪 {}×{}", plan.output[0], plan.output[1]),
             _ => "裁剪确认".into(),
@@ -360,7 +358,7 @@ impl BdmApp {
         save.on_hover_text(planned.as_ref().map_or_else(
             || "先选择比例或绘制裁剪框".into(),
             |plan| match plan {
-                Ok(plan) => format!("直接保存训练版 {} × {} px；步长 32，禁止放大。裁剪前文件保留；训练需使用随导出生成的 dataset.toml。", plan.output[0], plan.output[1]),
+                Ok(plan) => format!("直接保存训练版 {} × {} px；步长 32，禁止放大。裁剪前文件保留；默认导出保留此尺寸，1024 训练时由脚本按需缩放。", plan.output[0], plan.output[1]),
                 Err(error) => (*error).into(),
             },
         ));
@@ -680,7 +678,6 @@ impl BdmApp {
         self.image_editor.reset(id);
         let root = crate::paths::project_root();
         let model = self.image_editor.model_name();
-        let training_resolution = self.prefs.training_resolution;
         let media = self.ingest.stored.get(&id).cloned();
         let regions = self.image_editor.regions.clone();
         let cropping = self.image_editor.cropping;
@@ -708,13 +705,8 @@ impl BdmApp {
                 ResultEvent::Preview(media.ok_or("原图不可用。".into()).and_then(|media| {
                     if cropping {
                         crop.ok_or("请先框选裁剪区域。".into()).and_then(|crop| {
-                            editing::training_crop_preview(
-                                &media,
-                                crop,
-                                training_resolution,
-                                &thread_cancel,
-                            )
-                            .map_err(|e| e.to_string())
+                            editing::training_crop_preview(&media, crop, 2048, &thread_cancel)
+                                .map_err(|e| e.to_string())
                         })
                     } else {
                         editing::preview(&root, &media, model, regions, &thread_cancel)
@@ -1211,7 +1203,7 @@ mod tests {
         fn frame(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) -> bool {
             fn has_resolution(shape: &egui::Shape) -> bool {
                 match shape {
-                    egui::Shape::Text(text) => text.galley.text() == "1024档",
+                    egui::Shape::Text(text) => text.galley.text().starts_with("自动 ≈"),
                     egui::Shape::Vec(shapes) => shapes.iter().any(has_resolution),
                     _ => false,
                 }

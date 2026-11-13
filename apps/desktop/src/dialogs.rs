@@ -732,10 +732,25 @@ impl BdmApp {
                         .desired_width(410.0),
                 );
                 ui.checkbox(
-                    &mut self.workflows.export_folders,
-                    "旧版布局：每张图片独立文件夹（默认扁平训练集）",
+                    &mut self.workflows.export_multires,
+                    "可选：生成 768／1024／1536／2048 多分辨率副本",
                 );
-                ui.label(RichText::new("默认同名图片 + TXT；再次导出时只安全更新已有导出记录的 TXT。图片哈希异常立即停止。").size(12.0).color(MUTED));
+                ui.add_enabled_ui(!self.workflows.export_multires, |ui| {
+                    ui.checkbox(
+                        &mut self.workflows.export_folders,
+                        "旧版布局：每张图片独立文件夹",
+                    );
+                });
+                ui.label(RichText::new(if self.workflows.export_multires {
+                    "按档位分为四个目录，每个目录内图片 + 同名 TXT；不放大小图，尺寸不足的档位跳过。"
+                } else {
+                    "默认原分辨率直出，所有档位混合放同一目录：图片 + 同名 TXT，不缩小、不放大。附 1024 训练参考配置，训练时按需缩放。"
+                }).size(12.0).color(MUTED));
+                ui.label(
+                    RichText::new("再次导出只安全更新已有记录的 TXT；图片哈希异常立即停止。")
+                        .size(12.0)
+                        .color(MUTED),
+                );
             }
         }
         ui.add_space(14.0);
