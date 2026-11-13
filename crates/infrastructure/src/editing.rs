@@ -3,7 +3,7 @@ use bdm_domain::{
     editing::{CropRect, EditRecord, MaskRegion},
     ingest::StoredMedia,
 };
-use bdm_ports::{IngestError, IngestRepository, MediaProvider};
+use bdm_ports::{IngestError, MediaProvider};
 use image::{GenericImageView, ImageFormat};
 use rusqlite::params;
 use sha2::{Digest, Sha256};
@@ -1134,6 +1134,10 @@ pub struct CropPngRepair {
     pub media_id: i64,
     pub state: String,
     pub reason: String,
+}
+
+pub fn write_crop_png_report(path: &Path, report: &[CropPngRepair]) -> Result<(), IngestError> {
+    staged(path, &storage(serde_json::to_vec_pretty(report))?)
 }
 
 fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError> {

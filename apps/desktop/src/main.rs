@@ -46,9 +46,9 @@ fn main() -> eframe::Result<()> {
             let mut repo =
                 bdm_infrastructure::catalog::SqliteCatalog::open(std::path::Path::new(catalog))?;
             let report = repo.repair_jpeg_crops_as_png(&backup, apply)?;
-            std::fs::write(
-                backup.join(if apply { "applied.json" } else { "audit.json" }),
-                serde_json::to_vec_pretty(&report)?,
+            bdm_infrastructure::editing::write_crop_png_report(
+                &backup.join(if apply { "applied.json" } else { "audit.json" }),
+                &report,
             )?;
             Ok(())
         })();
