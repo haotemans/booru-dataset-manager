@@ -325,22 +325,20 @@ impl BdmApp {
             .image_editor
             .crop
             .pixels(vec2(dimensions.0 as f32, dimensions.1 as f32));
-        if active {
-            ui.add_enabled_ui(!busy && self.image_editor.preview.is_none(), |ui| {
-                egui::ComboBox::from_id_salt("crop-training-resolution")
-                    .width(68.0)
-                    .selected_text(format!("{}档", self.prefs.training_resolution))
-                    .show_ui(ui, |ui| {
-                        for resolution in bdm_domain::training::RESOLUTIONS {
-                            ui.selectable_value(
-                                &mut self.prefs.training_resolution,
-                                resolution,
-                                format!("{resolution} 上限 · 不放大"),
-                            );
-                        }
-                    });
-            });
-        }
+        ui.add_enabled_ui(!busy && self.image_editor.preview.is_none(), |ui| {
+            egui::ComboBox::from_id_salt("crop-training-resolution")
+                .width(68.0)
+                .selected_text(format!("{}档", self.prefs.training_resolution))
+                .show_ui(ui, |ui| {
+                    for resolution in bdm_domain::training::RESOLUTIONS {
+                        ui.selectable_value(
+                            &mut self.prefs.training_resolution,
+                            resolution,
+                            format!("{resolution} 上限 · 不放大"),
+                        );
+                    }
+                });
+        });
         let planned = crop.map(|crop| {
             bdm_domain::training::plan(crop.width, crop.height, self.prefs.training_resolution)
         });
@@ -1211,13 +1209,27 @@ mod tests {
     #[test]
     fn clicking_the_selected_ratio_cancels_without_writing_the_image() {
         fn frame(ctx: &egui::Context, app: &mut BdmApp, events: Vec<egui::Event>) {
-            let _ = ctx.run(
+            fn has_resolution(shape: &egui::Shape) -> bool {
+                match shape {
+                    egui::Shape::Text(text) => text.galley.text() == "1024档",
+                    egui::Shape::Vec(shapes) => shapes.iter().any(has_resolution),
+                    _ => false,
+                }
+            }
+            let output = ctx.run(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1050.0, 720.0))),
                     events,
                     ..Default::default()
                 },
                 |ctx| app.shell(ctx),
+            );
+            assert!(
+                output
+                    .shapes
+                    .iter()
+                    .any(|shape| has_resolution(&shape.shape)),
+                "training resolution must remain visible before selection and after cancellation"
             );
         }
         fn click_ratio(ctx: &egui::Context, app: &mut BdmApp, ratio: usize) {

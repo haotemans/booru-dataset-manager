@@ -387,7 +387,9 @@ impl BdmApp {
             return;
         };
         let task_status = std::env::args().any(|arg| arg == "--capture-task-status");
-        let training_crop = std::env::args().any(|arg| arg == "--capture-training-crop");
+        let training_idle = std::env::args().any(|arg| arg == "--capture-training-idle");
+        let training_crop =
+            training_idle || std::env::args().any(|arg| arg == "--capture-training-crop");
         if training_crop && self.capture_step == 0 && self.capture_frames == 0 {
             self.library = crate::model::Library::demo();
             self.open_media(3);
@@ -401,10 +403,12 @@ impl BdmApp {
             media.width = 2000;
             media.height = 1600;
             self.image_editor.reset(3);
-            self.image_editor.visible = true;
-            self.image_editor.cropping = true;
-            self.image_editor.crop.ratio = 11;
-            self.image_editor.crop.center(egui::vec2(2000.0, 1600.0));
+            if !training_idle {
+                self.image_editor.visible = true;
+                self.image_editor.cropping = true;
+                self.image_editor.crop.ratio = 11;
+                self.image_editor.crop.center(egui::vec2(2000.0, 1600.0));
+            }
         }
         let source_settings = std::env::args().any(|arg| arg == "--capture-source-settings");
         if source_settings && self.capture_step == 0 && self.capture_frames == 0 {
