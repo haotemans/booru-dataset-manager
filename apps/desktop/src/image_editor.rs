@@ -182,14 +182,13 @@ impl BdmApp {
         if self.demo || self.is_capture() {
             return Err("示例图片没有本地原图文件。".into());
         }
-        let path = self
-            .ingest
-            .stored
-            .get(&id)
-            .ok_or("找不到当前图片记录。")?
-            .path
-            .canonicalize()
-            .map_err(|_| "原图文件缺失。")?;
+        let stored = self.ingest.stored.get(&id).ok_or("找不到当前图片记录。")?;
+        let original = stored
+            .edit
+            .as_ref()
+            .and_then(|edit| edit.source_archive.as_ref())
+            .map_or(&stored.path, |archive| &archive.path);
+        let path = original.canonicalize().map_err(|_| "原图文件缺失。")?;
         if !path.is_file() {
             return Err("原图文件缺失。".into());
         }
@@ -317,21 +316,53 @@ impl BdmApp {
             .image_editor
             .crop
             .pixels(vec2(dimensions.0 as f32, dimensions.1 as f32));
+        if active {
+            ui.add_enabled_ui(!busy && self.image_editor.preview.is_none(), |ui| {
+                egui::ComboBox::from_id_salt("crop-training-resolution")
+                    .width(68.0)
+                    .selected_text(format!("{}档", self.prefs.training_resolution))
+                    .show_ui(ui, |ui| {
+                        for resolution in bdm_domain::training::RESOLUTIONS {
+                            ui.selectable_value(
+                                &mut self.prefs.training_resolution,
+                                resolution,
+                                format!("{resolution} 上限 · 不放大"),
+                            );
+                        }
+                    });
+            });
+        }
+        let planned = crop.map(|crop| {
+            bdm_domain::training::plan(crop.width, crop.height, self.prefs.training_resolution)
+        });
+        let label = match &planned {
+            Some(Ok(plan)) if active => format!("裁剪 {}×{}", plan.output[0], plan.output[1]),
+            _ => "裁剪确认".into(),
+        };
         let real =
             !self.demo && !self.is_capture() && !self.ingest_active() && !self.workflow_active();
         let save = ui.add_enabled(
-            active && real && !busy && crop.is_some(),
-            egui::Button::new(RichText::new("裁剪确认")).selected(active),
+            active && real && !busy && planned.as_ref().is_some_and(|plan| plan.is_ok()),
+            egui::Button::new(RichText::new(label)).selected(active),
         );
         #[cfg(test)]
         {
             self.image_editor.crop_save_button = Some(save.rect);
         }
         let clicked = save.clicked();
-        save.on_hover_text(crop.map_or_else(
+        save.on_hover_text(planned.as_ref().map_or_else(
             || "先选择比例或绘制裁剪框".into(),
-            |c| format!("直接保存 {} × {} px，替换当前图片", c.width, c.height),
+            |plan| match plan {
+                Ok(plan) => format!("直接保存训练版 {} × {} px；步长 32，禁止放大。裁剪前文件保留；训练需使用随导出生成的 dataset.toml。", plan.output[0], plan.output[1]),
+                Err(error) => (*error).into(),
+            },
         ));
+        if active {
+            if let Some(Err(error)) = planned {
+                ui.label(RichText::new("尺寸不足").color(AMBER))
+                    .on_hover_text(error);
+            }
+        }
         if clicked {
             if self.image_editor.preview.is_some() {
                 if let Err(error) = self.editor_commit(ui.ctx(), id) {
@@ -640,6 +671,7 @@ impl BdmApp {
         self.image_editor.reset(id);
         let root = crate::paths::project_root();
         let model = self.image_editor.model_name();
+        let training_resolution = self.prefs.training_resolution;
         let media = self.ingest.stored.get(&id).cloned();
         let regions = self.image_editor.regions.clone();
         let cropping = self.image_editor.cropping;
@@ -667,8 +699,13 @@ impl BdmApp {
                 ResultEvent::Preview(media.ok_or("原图不可用。".into()).and_then(|media| {
                     if cropping {
                         crop.ok_or("请先框选裁剪区域。".into()).and_then(|crop| {
-                            editing::crop_preview(&media, crop, &thread_cancel)
-                                .map_err(|e| e.to_string())
+                            editing::training_crop_preview(
+                                &media,
+                                crop,
+                                training_resolution,
+                                &thread_cancel,
+                            )
+                            .map_err(|e| e.to_string())
                         })
                     } else {
                         editing::preview(&root, &media, model, regions, &thread_cancel)
@@ -1243,8 +1280,12 @@ mod tests {
             crate::theme::setup(&ctx);
             app.prefs.confirm_image_edits = confirm;
             app.image_editor.cropping = true;
-            app.image_editor.crop.ratio = 2;
+            app.image_editor.crop.ratio = 1;
             app.image_editor.crop.center(vec2(800.0, 800.0));
+            app.image_editor.crop.selection = Some(Rect::from_center_size(
+                egui::pos2(400.0, 400.0),
+                vec2(768.0, 768.0),
+            ));
             for _ in 0..3 {
                 render(&ctx, &mut app, vec![]);
             }
@@ -1273,7 +1314,7 @@ mod tests {
             assert!(!app.image_editor.visible);
             assert_eq!(
                 app.ingest.stored[&(media.id as usize)].dimensions(),
-                (800, 600)
+                (768, 768)
             );
             assert_ne!(std::fs::read(&media.path).unwrap(), original);
             assert_eq!(app.prefs.confirm_image_edits, confirm);

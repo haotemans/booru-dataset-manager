@@ -751,6 +751,12 @@ impl SqliteCatalog {
         .sync_all()
         .map_err(|_| IngestError::Storage)?;
         durable_write(
+            &staging
+                .path()
+                .join(format!("downloaded-original.{}", post.file_ext)),
+            &bytes,
+        )?;
+        durable_write(
             &staging.path().join("original.raw_tags.txt"),
             post.tag_string.as_bytes(),
         )?;

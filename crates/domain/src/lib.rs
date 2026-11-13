@@ -9,3 +9,4 @@ pub mod metadata;
 pub mod review;
 pub mod sources;
 pub mod tags;
+pub mod training;

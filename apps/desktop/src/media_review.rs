@@ -545,8 +545,13 @@ impl BdmApp {
 
     fn review_dimensions(&self, media: &Media) -> egui::Vec2 {
         if self.image_editor.visible && self.image_editor.show_preview {
-            if let Some(crop) = self.image_editor.preview.as_ref().and_then(|p| p.crop) {
-                return vec2(crop.width as f32, crop.height as f32);
+            if let Some(preview) = &self.image_editor.preview {
+                if let Some(plan) = &preview.training {
+                    return vec2(plan.output[0] as f32, plan.output[1] as f32);
+                }
+                if let Some(crop) = preview.crop {
+                    return vec2(crop.width as f32, crop.height as f32);
+                }
             }
         }
         vec2(media.width.max(1) as f32, media.height.max(1) as f32)

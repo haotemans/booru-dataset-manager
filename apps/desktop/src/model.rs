@@ -109,6 +109,7 @@ pub struct Preferences {
     pub auto_load_review_original: bool,
     pub similar_image_review: bool,
     pub review_similarity: f32,
+    pub training_resolution: u32,
     #[serde(default = "default_artist_tag_format")]
     pub artist_tag_format: ProtectedTagFormat,
     #[serde(default)]
@@ -136,6 +137,7 @@ impl Default for Preferences {
             auto_load_review_original: false,
             similar_image_review: true,
             review_similarity: 0.95,
+            training_resolution: 1024,
             artist_tag_format: default_artist_tag_format(),
             character_tag_format: ProtectedTagFormat::Plain,
         }
@@ -143,6 +145,9 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn normalize(&mut self) {
+        if !bdm_domain::training::RESOLUTIONS.contains(&self.training_resolution) {
+            self.training_resolution = 1024;
+        }
         if !self.review_similarity.is_finite() {
             self.review_similarity = 0.95;
         }

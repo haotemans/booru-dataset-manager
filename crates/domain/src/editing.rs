@@ -73,6 +73,13 @@ impl MaskRegion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SourceArchive {
+    pub path: std::path::PathBuf,
+    pub sha256: String,
+    pub downloaded_original: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EditRecord {
     pub operation: String,
     pub model: String,
@@ -86,6 +93,10 @@ pub struct EditRecord {
     pub dimensions: Option<[u32; 2]>,
     #[serde(default)]
     pub crop: Option<CropRect>,
+    #[serde(default)]
+    pub training: Option<crate::training::TrainingCrop>,
+    #[serde(default)]
+    pub source_archive: Option<SourceArchive>,
 }
 
 #[cfg(test)]

@@ -387,6 +387,24 @@ impl BdmApp {
             return;
         };
         let task_status = std::env::args().any(|arg| arg == "--capture-task-status");
+        let training_crop = std::env::args().any(|arg| arg == "--capture-training-crop");
+        if training_crop && self.capture_step == 0 && self.capture_frames == 0 {
+            self.library = crate::model::Library::demo();
+            self.open_media(3);
+            self.capture_review_content();
+            let media = self
+                .library
+                .media
+                .iter_mut()
+                .find(|media| media.id == 3)
+                .unwrap();
+            media.width = 2000;
+            media.height = 1600;
+            self.image_editor.visible = true;
+            self.image_editor.cropping = true;
+            self.image_editor.crop.ratio = 11;
+            self.image_editor.crop.center(egui::vec2(2000.0, 1600.0));
+        }
         let source_settings = std::env::args().any(|arg| arg == "--capture-source-settings");
         if source_settings && self.capture_step == 0 && self.capture_frames == 0 {
             self.navigate(Page::Settings);
@@ -502,7 +520,7 @@ impl BdmApp {
         if self.capture_step
             >= if download_queries {
                 2
-            } else if task_status || source_settings {
+            } else if task_status || source_settings || training_crop {
                 1
             } else if review_layout {
                 44
@@ -589,7 +607,9 @@ impl BdmApp {
                     image::save_buffer(
                         dir.join(format!(
                             "{}.png",
-                            if source_settings {
+                            if training_crop {
+                                "training-crop"
+                            } else if source_settings {
                                 "source-settings"
                             } else if download_queries {
                                 if self.capture_step == 0 {
@@ -632,7 +652,7 @@ impl BdmApp {
                     }
                     continue;
                 }
-                if task_status || source_settings {
+                if task_status || source_settings || training_crop {
                     let _ = std::fs::write(
                         dir.join("capture.complete"),
                         "Task status capture completed",
@@ -858,6 +878,7 @@ impl BdmApp {
                                     model: "synthetic".into(),
                                     regions: self.image_editor.regions.clone(),
                                     crop: None,
+                                    training: None,
                                 });
                         }
                     }
@@ -912,6 +933,7 @@ impl BdmApp {
                                     width: 270,
                                     height: 480,
                                 }),
+                                training: None,
                             });
                         self.image_editor.show_preview = true;
                         self.media_review.view = crate::media_review::CanvasView::default();
@@ -1146,6 +1168,7 @@ mod tests {
         assert!(saved.similar_image_review);
         assert_eq!(saved.review_similarity, 0.95);
         app.prefs.review_similarity = 0.999;
+        app.prefs.training_resolution = 1536;
         app.prefs.similar_image_review = false;
         app.prefs.confirm_image_edits = false;
         app.prefs.auto_load_review_original = true;
@@ -1155,6 +1178,7 @@ mod tests {
         assert!(!restarted.prefs.confirm_image_edits);
         assert!(restarted.prefs.auto_load_review_original);
         assert_eq!(restarted.prefs.review_similarity, 0.999);
+        assert_eq!(restarted.prefs.training_resolution, 1536);
         assert!(!restarted.prefs.similar_image_review);
         assert_eq!(
             restarted.prefs.download_media,

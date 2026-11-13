@@ -77,8 +77,129 @@ mod tests {
                 end: [140.0, 120.0],
             }],
             crop: None,
+            training: None,
         }
     }
+    #[test]
+    fn training_crop_keeps_download_bytes_roundtrips_restore_and_exports_matching_config() {
+        let mut f = crate::workflow_tests::fixture();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2000,
+            1600,
+            image::Rgb([30, 80, 150]),
+        ))
+        .write_to(&mut encoded, ImageFormat::Png)
+        .unwrap();
+        f.provider.bytes = encoded.into_inner();
+        f.post.image_width = 2000;
+        f.post.image_height = 1600;
+        f.post.file_size = f.provider.bytes.len() as u64;
+        f.post.md5 = format!("{:x}", md5::Md5::digest(&f.provider.bytes));
+        let cancel = AtomicBool::new(false);
+        f.repo
+            .import(
+                &f.post,
+                &f.directory.path().join("library"),
+                f.collection,
+                800,
+                &cancel,
+                &f.provider,
+            )
+            .unwrap();
+        let media = f.repo.list_media().unwrap().remove(0);
+        let original = fs::read(&media.path).unwrap();
+        let raw = fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
+        let preview = training_crop_preview(
+            &media,
+            CropRect {
+                x: 100,
+                y: 100,
+                width: 1600,
+                height: 1280,
+            },
+            1024,
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(
+            image::open(&preview.image).unwrap().dimensions(),
+            (1120, 896)
+        );
+        let first = f.repo.commit_repair(media.id, &preview).unwrap();
+        let archive = first
+            .edit
+            .as_ref()
+            .unwrap()
+            .source_archive
+            .as_ref()
+            .unwrap();
+        assert!(archive.downloaded_original);
+        assert_eq!(fs::read(&archive.path).unwrap(), original);
+        assert_eq!(first.post, media.post);
+        assert_eq!(
+            fs::read(first.path.with_extension("raw_tags.txt")).unwrap(),
+            raw
+        );
+        let preview = training_crop_preview(
+            &first,
+            CropRect {
+                x: 0,
+                y: 0,
+                width: 1120,
+                height: 896,
+            },
+            768,
+            &cancel,
+        )
+        .unwrap();
+        let second = f.repo.commit_repair(media.id, &preview).unwrap();
+        assert_eq!(
+            second.edit.as_ref().unwrap().source_archive.as_ref(),
+            Some(archive)
+        );
+        let restored = f.repo.restore_last_edit(media.id).unwrap();
+        assert_eq!(restored.dimensions(), first.dimensions());
+        assert_eq!(restored.edit, first.edit);
+        assert_eq!(hash(&restored.path).unwrap(), first.sha256);
+        assert_eq!(fs::read(&archive.path).unwrap(), original);
+        f.repo.set_media_keep(media.id, true).unwrap();
+        f.repo
+            .write_artifact(
+                &restored,
+                "caption",
+                "A blue training image.",
+                "test",
+                "complete",
+            )
+            .unwrap();
+        let mut job = f.repo.new_workflow("export", vec![media.id]).unwrap();
+        job.mode = "caption".into();
+        job.export_layout = "flat".into();
+        let destination = f.directory.path().join("training-export");
+        crate::export::run(&mut f.repo, &mut job, &destination, &cancel, |_| {}).unwrap();
+        let config = fs::read_to_string(destination.join("dataset.toml")).unwrap();
+        assert!(config.contains("resolution = [1024, 1024]"));
+        assert!(config.contains("bucket_no_upscale = true"));
+        assert!(config.contains("bucket_reso_steps = 32"));
+        assert_eq!(
+            image::image_dimensions(destination.join(format!("media_{}.png", media.id))).unwrap(),
+            (1120, 896)
+        );
+        let manual = format!("{config}\n# user modification\n");
+        fs::write(destination.join("dataset.toml"), &manual).unwrap();
+        let mut repeated = f.repo.new_workflow("export", vec![media.id]).unwrap();
+        repeated.mode = "caption".into();
+        repeated.export_layout = "flat".into();
+        assert!(
+            crate::export::run(&mut f.repo, &mut repeated, &destination, &cancel, |_| {}).is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("dataset.toml")).unwrap(),
+            manual
+        );
+    }
+
     #[test]
     fn redownload_restores_cropped_and_repaired_originals_with_backup_and_source_metadata() {
         for crop in [false, true] {
@@ -546,6 +667,7 @@ pub struct RepairPreview {
     pub model: String,
     pub regions: Vec<MaskRegion>,
     pub crop: Option<CropRect>,
+    pub training: Option<bdm_domain::training::TrainingCrop>,
 }
 
 pub fn crop_preview(
@@ -582,7 +704,42 @@ pub fn crop_preview(
         model: "local-crop-v1".into(),
         regions: Vec::new(),
         crop: Some(crop),
+        training: None,
     })
+}
+
+pub fn training_crop_preview(
+    media: &StoredMedia,
+    crop: CropRect,
+    resolution: u32,
+    cancel: &AtomicBool,
+) -> Result<RepairPreview, IngestError> {
+    let plan = bdm_domain::training::plan(crop.width, crop.height, resolution)
+        .map_err(|error| IngestError::StorageDetails(error.into()))?;
+    let mut preview = crop_preview(media, crop, cancel)?;
+    let image = storage(image::open(&preview.image))?;
+    let resized = if image.dimensions() == (plan.resized[0], plan.resized[1]) {
+        image
+    } else {
+        image.resize_exact(
+            plan.resized[0],
+            plan.resized[1],
+            image::imageops::FilterType::Lanczos3,
+        )
+    };
+    let output = resized.crop_imm(
+        plan.offset[0],
+        plan.offset[1],
+        plan.output[0],
+        plan.output[1],
+    );
+    storage(output.save(&preview.image))?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(IngestError::Cancelled);
+    }
+    preview.model = "local-training-crop-kohya32-v1".into();
+    preview.training = Some(plan);
+    Ok(preview)
 }
 
 pub fn preview(
@@ -639,6 +796,7 @@ pub fn preview(
         },
         regions,
         crop: None,
+        training: None,
     })
 }
 
@@ -698,12 +856,67 @@ struct Journal {
     thumbnail: PathBuf,
     mask: PathBuf,
     source: PathBuf,
+    #[serde(default)]
+    parent: Option<StoredMedia>,
 }
 
 fn staged(path: &Path, bytes: &[u8]) -> Result<(), IngestError> {
     let mut file = storage(fs::File::create(path))?;
     storage(file.write_all(bytes))?;
     storage(file.sync_all())
+}
+
+fn preserve_source(
+    media: &StoredMedia,
+    directory: &Path,
+) -> Result<bdm_domain::editing::SourceArchive, IngestError> {
+    if let Some(archive) = media
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.source_archive.clone())
+    {
+        if archive.path.parent() != Some(directory) || hash(&archive.path)? != archive.sha256 {
+            return Err(IngestError::Integrity);
+        }
+        return Ok(archive);
+    }
+    let downloaded = directory.join(format!("downloaded-original.{}", media.post.file_ext));
+    let bytes = storage(fs::read(if downloaded.is_file() {
+        &downloaded
+    } else {
+        &media.path
+    }))?;
+    let sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let downloaded_original = format!("{:x}", md5::Md5::digest(&bytes)) == media.post.md5;
+    if downloaded.is_file() {
+        if !downloaded_original {
+            return Err(IngestError::Integrity);
+        }
+        return Ok(bdm_domain::editing::SourceArchive {
+            path: downloaded,
+            sha256,
+            downloaded_original: true,
+        });
+    }
+    let path = directory.join(format!(
+        ".original-preserved-{sha256}.{}",
+        media.post.file_ext
+    ));
+    if path.is_file() {
+        if hash(&path)? != sha256 {
+            return Err(IngestError::Integrity);
+        }
+    } else {
+        let mut file = storage(tempfile::NamedTempFile::new_in(directory))?;
+        storage(file.write_all(&bytes))?;
+        storage(file.as_file().sync_all())?;
+        storage(file.persist_noclobber(&path).map_err(|error| error.error))?;
+    }
+    Ok(bdm_domain::editing::SourceArchive {
+        path,
+        sha256,
+        downloaded_original,
+    })
 }
 
 impl SqliteCatalog {
@@ -859,13 +1072,24 @@ impl SqliteCatalog {
             return Err(IngestError::StorageDetails("任务已取消。".into()));
         }
         let mut media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
+        let parent = media.clone();
         if media.sha256 != preview.parent_sha256 || hash(&media.path)? != preview.parent_sha256 {
             return Err(IngestError::Integrity);
         }
         let directory = media.path.parent().ok_or(IngestError::Storage)?.to_owned();
         let image = storage(image::open(&preview.image))?;
         if let Some(crop) = preview.crop {
-            if !crop.valid(media.dimensions()) || image.dimensions() != (crop.width, crop.height) {
+            let expected = if let Some(plan) = &preview.training {
+                let verified = bdm_domain::training::plan(crop.width, crop.height, plan.resolution)
+                    .map_err(|_| IngestError::Integrity)?;
+                if plan != &verified {
+                    return Err(IngestError::Integrity);
+                }
+                (plan.output[0], plan.output[1])
+            } else {
+                (crop.width, crop.height)
+            };
+            if !crop.valid(media.dimensions()) || image.dimensions() != expected {
                 return Err(IngestError::Integrity);
             }
         } else {
@@ -884,7 +1108,14 @@ impl SqliteCatalog {
             _ => return Err(IngestError::InvalidMedia),
         };
         let mut bytes = std::io::Cursor::new(Vec::new());
-        storage(image.write_to(&mut bytes, format))?;
+        if preview.training.is_some() && format == ImageFormat::Jpeg {
+            storage(
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 95)
+                    .encode_image(&image.to_rgb8()),
+            )?;
+        } else {
+            storage(image.write_to(&mut bytes, format))?;
+        }
         let bytes = bytes.into_inner();
         storage(image::load_from_memory(&bytes))?;
         let pending = directory.join(".repair-output");
@@ -911,7 +1142,15 @@ impl SqliteCatalog {
             .edit
             .as_ref()
             .map_or_else(|| media.sha256.clone(), |e| e.source_sha256.clone());
+        let source_archive = preserve_source(&media, &directory)?;
         media.sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let training = preview.training.clone().or_else(|| {
+            if preview.crop.is_none() {
+                media.edit.as_ref().and_then(|edit| edit.training.clone())
+            } else {
+                None
+            }
+        });
         media.edit = Some(EditRecord {
             operation: if preview.crop.is_some() {
                 "crop"
@@ -935,6 +1174,8 @@ impl SqliteCatalog {
                 .as_secs(),
             dimensions: Some([image.width(), image.height()]),
             crop: preview.crop,
+            training,
+            source_archive: Some(source_archive),
         });
         let journal = Journal {
             media,
@@ -942,6 +1183,7 @@ impl SqliteCatalog {
             thumbnail,
             mask,
             source,
+            parent: Some(parent),
         };
         // Cancellation is safe before durable intent. Once published, finish the journaled edit.
         if cancel.load(Ordering::Relaxed) {
@@ -1029,7 +1271,9 @@ impl SqliteCatalog {
                         Ok(())
                     }),
                 )?;
-                storage(fs::remove_file(source))?;
+                if source != target {
+                    storage(fs::remove_file(source))?;
+                }
             }
         }
         if hash(&media.path)? != media.sha256 {
@@ -1069,6 +1313,12 @@ impl SqliteCatalog {
             ],
         ))?;
         storage(tx.commit())?;
+        if let Some(parent) = &journal.parent {
+            staged(
+                &directory.join(".edit-parent.json"),
+                &storage(serde_json::to_vec(parent))?,
+            )?;
+        }
         let old_mask = directory.join("inpainting-mask.png");
         if record.operation == "crop" && old_mask.is_file() {
             storage(fs::remove_file(old_mask))?;
@@ -1092,6 +1342,23 @@ impl SqliteCatalog {
         }
         let bytes = storage(fs::read(&source))?;
         let restored = storage(image::load_from_memory(&bytes))?;
+        let parent_path = directory.join(".edit-parent.json");
+        let parent = if parent_path.is_file() {
+            let parent: StoredMedia =
+                storage(serde_json::from_slice(&storage(fs::read(&parent_path))?))?;
+            if parent.id != media.id
+                || parent.sha256 != edit.parent_sha256
+                || parent.dimensions() != restored.dimensions()
+            {
+                return Err(IngestError::Integrity);
+            }
+            Some(parent)
+        } else {
+            if restored.dimensions() != (media.post.image_width, media.post.image_height) {
+                return Err(IngestError::Integrity);
+            }
+            None
+        };
         let thumbnail = restored.thumbnail(320, 320);
         let pending = directory.join(".restore-output");
         let pending_thumbnail = directory.join(".restore-thumbnail");
@@ -1121,7 +1388,10 @@ impl SqliteCatalog {
         storage(fs::remove_file(&pending_thumbnail))?;
         storage(fs::remove_file(&source))?;
         media.sha256 = edit.parent_sha256;
-        media.edit = None;
+        media.edit = parent.and_then(|parent| parent.edit);
+        if parent_path.is_file() {
+            storage(fs::remove_file(parent_path))?;
+        }
         let tx = storage(
             self.connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
