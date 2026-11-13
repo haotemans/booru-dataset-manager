@@ -400,6 +400,7 @@ impl BdmApp {
                 .unwrap();
             media.width = 2000;
             media.height = 1600;
+            self.image_editor.reset(3);
             self.image_editor.visible = true;
             self.image_editor.cropping = true;
             self.image_editor.crop.ratio = 11;

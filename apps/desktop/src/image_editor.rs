@@ -183,11 +183,20 @@ impl BdmApp {
             return Err("示例图片没有本地原图文件。".into());
         }
         let stored = self.ingest.stored.get(&id).ok_or("找不到当前图片记录。")?;
+        let downloaded = stored
+            .path
+            .parent()
+            .map(|directory| {
+                directory.join(format!("downloaded-original.{}", stored.post.file_ext))
+            })
+            .filter(|path| path.is_file());
         let original = stored
             .edit
             .as_ref()
             .and_then(|edit| edit.source_archive.as_ref())
-            .map_or(&stored.path, |archive| &archive.path);
+            .map(|archive| &archive.path)
+            .or(downloaded.as_ref())
+            .unwrap_or(&stored.path);
         let path = original.canonicalize().map_err(|_| "原图文件缺失。")?;
         if !path.is_file() {
             return Err("原图文件缺失。".into());
@@ -547,10 +556,12 @@ impl BdmApp {
                     }
                 } else if self.image_editor.preview.is_some() {
                     if let Some(crop) = self.image_editor.preview.as_ref().and_then(|p| p.crop) {
+                        let dimensions = self.image_editor.preview.as_ref().and_then(|p| p.training.as_ref())
+                            .map_or([crop.width,crop.height], |plan| plan.output);
                         ui.label(
                             RichText::new(format!(
                                 "裁剪预览 · {} × {} px",
-                                crop.width, crop.height
+                                dimensions[0], dimensions[1]
                             ))
                             .font(medium(14.0)),
                         );
