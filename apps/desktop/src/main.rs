@@ -45,7 +45,19 @@ fn main() -> eframe::Result<()> {
             let apply = args.iter().any(|arg| arg == "--apply");
             let mut repo =
                 bdm_infrastructure::catalog::SqliteCatalog::open(std::path::Path::new(catalog))?;
-            let report = repo.repair_jpeg_crops_as_png(&backup, apply)?;
+            let originals = args
+                .iter()
+                .position(|arg| arg == "--native-originals")
+                .and_then(|index| args.get(index + 1));
+            let report = if let Some(originals) = originals {
+                let originals = std::path::Path::new(originals);
+                if !originals.is_absolute() {
+                    return Err("absolute originals path required".into());
+                }
+                repo.rebuild_native_crops_from_originals(&backup, apply, originals)?
+            } else {
+                repo.repair_jpeg_crops_as_png(&backup, apply)?
+            };
             bdm_infrastructure::editing::write_crop_png_report(
                 &backup.join(if apply { "applied.json" } else { "audit.json" }),
                 &report,

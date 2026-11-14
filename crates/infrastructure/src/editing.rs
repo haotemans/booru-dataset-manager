@@ -618,6 +618,89 @@ mod tests {
     }
 
     #[test]
+    fn verified_original_rebuild_restores_native_crop_pixels_above_2048_without_resizing() {
+        let mut f = crate::workflow_tests::fixture();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(3000, 2500, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 251) as u8, ((x + y) % 251) as u8])
+        }))
+        .write_to(&mut encoded, ImageFormat::Jpeg)
+        .unwrap();
+        f.provider.bytes = encoded.into_inner();
+        f.post.image_width = 3000;
+        f.post.image_height = 2500;
+        f.post.file_ext = "jpg".into();
+        f.post.file_size = f.provider.bytes.len() as u64;
+        f.post.md5 = format!("{:x}", md5::Md5::digest(&f.provider.bytes));
+        let cancel = AtomicBool::new(false);
+        f.repo
+            .import(
+                &f.post,
+                &f.directory.path().join("library"),
+                f.collection,
+                800,
+                &cancel,
+                &f.provider,
+            )
+            .unwrap();
+        let original = f.repo.list_media().unwrap().remove(0);
+        let crop = CropRect {
+            x: 37,
+            y: 53,
+            width: 2880,
+            height: 2304,
+        };
+        let small = training_crop_preview(&original, crop, 1024, &cancel).unwrap();
+        let old = f.repo.commit_repair(original.id, &small).unwrap();
+        assert!(old.dimensions().0 < crop.width);
+        let downloads = f.directory.path().join("fresh");
+        let fresh = downloads.join(format!("media_{}/original.jpg", old.id));
+        fs::create_dir_all(fresh.parent().unwrap()).unwrap();
+        fs::write(&fresh, b"not the original").unwrap();
+        let backup = f.directory.path().join("native-rebuild");
+        assert_eq!(
+            f.repo
+                .rebuild_native_crops_from_originals(&backup, false, &downloads)
+                .unwrap()[0]
+                .state,
+            "unchanged"
+        );
+        assert_eq!(hash(&old.path).unwrap(), old.sha256);
+        fs::write(&fresh, &f.provider.bytes).unwrap();
+        assert_eq!(
+            f.repo
+                .rebuild_native_crops_from_originals(&backup, true, &downloads)
+                .unwrap()[0]
+                .state,
+            "rebuilt"
+        );
+        let native = f.repo.list_media().unwrap().remove(0);
+        assert_eq!(native.dimensions(), (2880, 2304));
+        assert!(
+            native
+                .edit
+                .as_ref()
+                .unwrap()
+                .training
+                .as_ref()
+                .unwrap()
+                .native
+        );
+        let expected = image::load_from_memory(&f.provider.bytes)
+            .unwrap()
+            .crop_imm(crop.x, crop.y, crop.width, crop.height);
+        assert_eq!(
+            image::open(&native.path).unwrap().to_rgba8(),
+            expected.to_rgba8()
+        );
+        assert_eq!(native.post, original.post);
+        assert_eq!(
+            hash(&backup.join(format!("media_{}/before.png", old.id))).unwrap(),
+            old.sha256
+        );
+    }
+
+    #[test]
     fn png_path_transition_recovers_after_catalog_failure_without_touching_source_jpeg() {
         let mut f = crate::workflow_tests::fixture();
         let mut encoded = std::io::Cursor::new(Vec::new());
@@ -902,6 +985,25 @@ pub fn training_crop_preview(
 ) -> Result<RepairPreview, IngestError> {
     let plan = bdm_domain::training::plan(crop.width, crop.height, resolution)
         .map_err(|error| IngestError::StorageDetails(error.into()))?;
+    planned_crop_preview(media, crop, plan, cancel)
+}
+
+pub fn native_crop_preview(
+    media: &StoredMedia,
+    crop: bdm_domain::editing::CropRect,
+    cancel: &AtomicBool,
+) -> Result<RepairPreview, IngestError> {
+    let plan = bdm_domain::training::automatic_plan(crop.width, crop.height)
+        .map_err(|error| IngestError::StorageDetails(error.into()))?;
+    planned_crop_preview(media, crop, plan, cancel)
+}
+
+fn planned_crop_preview(
+    media: &StoredMedia,
+    crop: bdm_domain::editing::CropRect,
+    plan: bdm_domain::training::TrainingCrop,
+    cancel: &AtomicBool,
+) -> Result<RepairPreview, IngestError> {
     let mut preview = crop_preview(media, crop, cancel)?;
     let image = storage(image::open(&preview.image))?;
     let resized = if image.dimensions() == (plan.resized[0], plan.resized[1]) {
@@ -1140,7 +1242,7 @@ pub fn write_crop_png_report(path: &Path, report: &[CropPngRepair]) -> Result<()
     staged(path, &storage(serde_json::to_vec_pretty(report))?)
 }
 
-fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError> {
+fn verified_crop_parent(media: &StoredMedia, native: bool) -> Result<StoredMedia, IngestError> {
     let edit = media.edit.as_ref().ok_or(IngestError::InvalidMedia)?;
     let crop = edit.crop.ok_or(IngestError::InvalidMedia)?;
     let directory = media.path.parent().ok_or(IngestError::Storage)?;
@@ -1155,7 +1257,8 @@ fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError>
         || parent.id != media.id
         || parent.post != media.post
         || parent.edit.is_some()
-        || parent.path != media.path
+        || (parent.path != media.path
+            && (!native || parent.path.with_extension("png") != media.path))
         || parent.sha256 != edit.parent_sha256
         || hash(&directory.join(".edit-source"))? != parent.sha256
         || archive.sha256 != parent.sha256
@@ -1167,7 +1270,7 @@ fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError>
         return Err(IngestError::Integrity);
     }
     let expected = if let Some(plan) = &edit.training {
-        let verified = bdm_domain::training::plan(crop.width, crop.height, plan.resolution)
+        let verified = bdm_domain::training::verify(crop.width, crop.height, plan)
             .map_err(|_| IngestError::Integrity)?;
         if &verified != plan {
             return Err(IngestError::Integrity);
@@ -1176,7 +1279,8 @@ fn verified_crop_parent(media: &StoredMedia) -> Result<StoredMedia, IngestError>
     } else {
         (crop.width, crop.height)
     };
-    if expected != media.dimensions() || media.path.with_extension("png").exists() {
+    let target = media.path.with_extension("png");
+    if expected != media.dimensions() || (target.exists() && (!native || target != media.path)) {
         return Err(IngestError::Integrity);
     }
     Ok(parent)
@@ -1190,6 +1294,24 @@ impl SqliteCatalog {
         backup: &Path,
         apply: bool,
     ) -> Result<Vec<CropPngRepair>, IngestError> {
+        self.rebuild_crop_png(backup, apply, None)
+    }
+
+    pub fn rebuild_native_crops_from_originals(
+        &mut self,
+        backup: &Path,
+        apply: bool,
+        originals: &Path,
+    ) -> Result<Vec<CropPngRepair>, IngestError> {
+        self.rebuild_crop_png(backup, apply, Some(originals))
+    }
+
+    fn rebuild_crop_png(
+        &mut self,
+        backup: &Path,
+        apply: bool,
+        originals: Option<&Path>,
+    ) -> Result<Vec<CropPngRepair>, IngestError> {
         storage(fs::create_dir_all(backup))?;
         if apply && !backup.join("catalog-before.sqlite3").exists() {
             storage(self.connection.backup(
@@ -1200,37 +1322,64 @@ impl SqliteCatalog {
         }
         let mut report = Vec::new();
         for media in self.list_media()? {
-            if !matches!(media.current_extension(), "jpg" | "jpeg")
-                || !media
-                    .edit
-                    .as_ref()
-                    .is_some_and(|edit| edit.operation == "crop")
+            if !(if originals.is_some() {
+                matches!(media.post.file_ext.as_str(), "jpg" | "jpeg")
+            } else {
+                matches!(media.current_extension(), "jpg" | "jpeg")
+            }) || !media
+                .edit
+                .as_ref()
+                .is_some_and(|edit| edit.operation == "crop")
             {
                 continue;
             }
             let result = (|| -> Result<(), IngestError> {
-                let mut source = verified_crop_parent(&media)?;
+                let mut source = verified_crop_parent(&media, originals.is_some())?;
+                let verified_input = if let Some(originals) = originals {
+                    let path = originals.join(format!("media_{}/original.jpg", media.id));
+                    let bytes = storage(fs::read(&path))?;
+                    if format!("{:x}", md5::Md5::digest(&bytes)) != media.post.md5
+                        || hash(&path)? != source.sha256
+                    {
+                        return Err(IngestError::Integrity);
+                    }
+                    Some(path)
+                } else {
+                    None
+                };
                 if !apply {
                     return Ok(());
                 }
                 let edit = media.edit.as_ref().ok_or(IngestError::InvalidMedia)?;
-                source.path = edit
-                    .source_archive
-                    .as_ref()
-                    .ok_or(IngestError::Integrity)?
-                    .path
-                    .clone();
+                source.path = verified_input.clone().unwrap_or(
+                    edit.source_archive
+                        .as_ref()
+                        .ok_or(IngestError::Integrity)?
+                        .path
+                        .clone(),
+                );
                 let crop = edit.crop.ok_or(IngestError::Integrity)?;
                 let cancel = AtomicBool::new(false);
-                let mut preview = if let Some(plan) = &edit.training {
-                    training_crop_preview(&source, crop, plan.resolution, &cancel)?
+                let mut preview = if verified_input.is_some() {
+                    native_crop_preview(&source, crop, &cancel)?
+                } else if let Some(plan) = &edit.training {
+                    if plan.native {
+                        native_crop_preview(&source, crop, &cancel)?
+                    } else {
+                        training_crop_preview(&source, crop, plan.resolution, &cancel)?
+                    }
                 } else {
                     crop_preview(&source, crop, &cancel)?
                 };
-                preview.model = "local-crop-png-rebuilt-v2".into();
+                preview.model = if verified_input.is_some() {
+                    "local-native-crop-png-rebuilt-v3"
+                } else {
+                    "local-crop-png-rebuilt-v2"
+                }
+                .into();
                 let saved = backup.join(format!("media_{}", media.id));
                 storage(fs::create_dir_all(&saved))?;
-                let previous = saved.join("before.jpg");
+                let previous = saved.join(format!("before.{}", media.current_extension()));
                 if previous.exists() {
                     if hash(&previous)? != media.sha256 {
                         return Err(IngestError::Integrity);
@@ -1252,7 +1401,7 @@ impl SqliteCatalog {
                     return Err(IngestError::Integrity);
                 }
                 let rebuilt = self.commit_repair(media.id, &preview)?;
-                if rebuilt.dimensions() != media.dimensions()
+                if rebuilt.dimensions() != storage(image::image_dimensions(&preview.image))?
                     || storage(image::open(&rebuilt.path))?.to_rgba8()
                         != storage(image::open(&preview.image))?.to_rgba8()
                 {
@@ -1442,7 +1591,7 @@ impl SqliteCatalog {
         let image = storage(image::open(&preview.image))?;
         if let Some(crop) = preview.crop {
             let expected = if let Some(plan) = &preview.training {
-                let verified = bdm_domain::training::plan(crop.width, crop.height, plan.resolution)
+                let verified = bdm_domain::training::verify(crop.width, crop.height, plan)
                     .map_err(|_| IngestError::Integrity)?;
                 if plan != &verified {
                     return Err(IngestError::Integrity);

@@ -4,10 +4,28 @@ use serde::{Deserialize, Serialize};
 pub const RESOLUTIONS: [u32; 4] = [768, 1024, 1536, 2048];
 pub const STEP: u32 = 32;
 
-/// Retain available detail up to the highest training ceiling. The tier is an
-/// informational equivalent-area label; choosing it must never shrink an image.
+/// Native crop: preserve every retained pixel and trim only for 32 alignment.
+/// Resolution is informational; explicit export variants use `plan` instead.
 pub fn automatic_plan(width: u32, height: u32) -> Result<TrainingCrop, &'static str> {
-    plan(width, height, 2048)
+    let output = [width / STEP * STEP, height / STEP * STEP];
+    if output[0].min(output[1]) < 576 || u64::from(output[0]) * u64::from(output[1]) < 550_000 {
+        return Err("选区对齐后不足短边 576 px／0.55 MP；不会放大补足。");
+    }
+    Ok(TrainingCrop {
+        resolution: nearest_tier(output[0], output[1]),
+        native: true,
+        resized: [width, height],
+        output,
+        offset: [(width - output[0]) / 2, (height - output[1]) / 2],
+    })
+}
+
+pub fn verify(width: u32, height: u32, saved: &TrainingCrop) -> Result<TrainingCrop, &'static str> {
+    if saved.native {
+        automatic_plan(width, height)
+    } else {
+        plan(width, height, saved.resolution)
+    }
 }
 
 pub fn nearest_tier(width: u32, height: u32) -> u32 {
@@ -25,6 +43,8 @@ pub fn nearest_tier(width: u32, height: u32) -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrainingCrop {
     pub resolution: u32,
+    #[serde(default)]
+    pub native: bool,
     pub resized: [u32; 2],
     pub output: [u32; 2],
     pub offset: [u32; 2],
@@ -63,6 +83,7 @@ fn geometry(width: u32, height: u32, resolution: u32) -> Option<TrainingCrop> {
     }
     Some(TrainingCrop {
         resolution,
+        native: false,
         resized,
         output,
         offset: [(resized[0] - output[0]) / 2, (resized[1] - output[1]) / 2],
@@ -94,17 +115,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn automatic_tiers_keep_native_detail_and_only_cap_above_2048() {
+    fn automatic_tiers_keep_native_pixels_even_above_2048() {
         for (size, expected, tier) in [
             ([800, 800], [800, 800], 768),
             ([1120, 896], [1120, 896], 1024),
             ([1536, 1536], [1536, 1536], 1536),
             ([2048, 2048], [2048, 2048], 2048),
             ([2160, 1509], [2144, 1504], 2048),
-            ([3000, 3000], [2048, 2048], 2048),
+            ([3000, 3000], [2976, 2976], 2048),
+            ([9746, 5482], [9728, 5472], 2048),
         ] {
             let result = automatic_plan(size[0], size[1]).unwrap();
             assert_eq!(result.output, expected);
+            assert_eq!(result.resized, size);
+            assert!(result.native);
             assert_eq!(nearest_tier(expected[0], expected[1]), tier);
             assert_eq!(
                 automatic_plan(expected[0], expected[1]).unwrap().resized,

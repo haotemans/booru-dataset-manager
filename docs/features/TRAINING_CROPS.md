@@ -1,8 +1,9 @@
 # Automatic training crops and native-size export
 
 The review ratio buttons define the source selection. Crop confirmation uses
-an automatic plan: preserve available detail, align both output dimensions to
-32, and apply the 2048-square area ceiling only when the selection exceeds it.
+an automatic native-pixel plan: keep the selection at its original scale and
+align both output dimensions to 32 by trimming edges. There is no area ceiling
+and no automatic downsampling, including selections larger than the 2048 tier.
 There is no manual resolution selector. The toolbar shows an approximate
 768/1024/1536/2048 tier, determined by the nearest equivalent-area resolution
 `sqrt(width * height)`, and the save button shows the actual pixel dimensions.
@@ -15,7 +16,7 @@ and resulting image must have a short side of at least 576 and at least
 550,000 pixels. All confirmed crop/repair outputs and optional resolution
 variants are saved as lossless PNG with a matching `.png` filename; source
 post extensions and original bytes remain unchanged. Source selection, resized
-dimensions, trim offsets, final dimensions and the 2048 area ceiling are
+dimensions, trim offsets, final dimensions and native-pixel mode are
 recorded with the edit. A nominal aspect label can differ slightly from the
 final rounded bucket ratio.
 
@@ -71,3 +72,12 @@ already recompressed JPEG. Unverifiable history is reported and left untouched.
 Flat re-export migrates an owned JPEG/WebP pair to PNG only after hash, source
 and text checks; the old image is retained as a `.bak` under the export metadata
 directory so recursive trainers do not see duplicate image files.
+
+For an explicit verified-original rebuild, add `--native-originals <directory>` to
+the offline repair command. Each `media_<id>/original.jpg` must match both the
+source-post MD5 and the verified parent SHA-256. Retained original downloads or newly downloaded
+originals with identical verified bytes are accepted. The old working PNG and catalog
+are backed up; the original crop selection is regenerated at native scale,
+never at its previous smaller area ceiling. Missing/invalid original files prevent
+changes. Only 32-alignment edge trimming remains. Legacy saved crop plans without
+`native=true` retain their old meaning when read; they are not silently relabeled.

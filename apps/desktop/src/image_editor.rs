@@ -349,7 +349,7 @@ impl BdmApp {
                 )
             },
         );
-        icon_label(ui, "spark", &automatic_label, "自动匹配档位，保留选区细节并对齐 32；不放大。超过 2048 档才生成训练版，原图保留。默认导出不缩小。");
+        icon_label(ui, "spark", &automatic_label, "原像素裁剪，只对齐 32；不缩小、不放大，以 PNG 无损保存。档位仅作参考，训练缩放由脚本完成。");
         let label = match &planned {
             Some(Ok(plan)) if active => format!("{}×{}", plan.output[0], plan.output[1]),
             _ => "裁剪".into(),
@@ -717,7 +717,7 @@ impl BdmApp {
                 ResultEvent::Preview(media.ok_or("原图不可用。".into()).and_then(|media| {
                     if cropping {
                         crop.ok_or("请先框选裁剪区域。".into()).and_then(|crop| {
-                            editing::training_crop_preview(&media, crop, 2048, &thread_cancel)
+                            editing::native_crop_preview(&media, crop, &thread_cancel)
                                 .map_err(|e| e.to_string())
                         })
                     } else {
