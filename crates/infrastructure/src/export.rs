@@ -61,25 +61,45 @@ pub fn run(
                 job.cursor += 1;
                 continue;
             };
-            let Some(text) = artifacts.iter().find(|a| {
+            let text = artifacts.iter().find(|a| {
                 a.media_id == id
                     && a.kind == job.mode
                     && a.state == "complete"
                     && !a.content.trim().is_empty()
-            }) else {
+            });
+            let base = format!("media_{id}");
+            let has_existing_text = match job.export_layout.as_str() {
+                "flat" => destination.join(format!("{base}.txt")).is_file(),
+                "multi-resolution" => {
+                    bdm_domain::training::RESOLUTIONS
+                        .into_iter()
+                        .any(|resolution| {
+                            destination
+                                .join(resolution.to_string())
+                                .join(format!("{base}.txt"))
+                                .is_file()
+                        })
+                }
+                _ => destination
+                    .join(&base)
+                    .join(format!("{base}.txt"))
+                    .is_file(),
+            };
+            if text.is_none() && !has_existing_text {
                 job.cursor += 1;
                 continue;
-            };
+            }
             if !media.keep {
                 job.cursor += 1;
                 continue;
             }
-            let content = if job.mode == "tags" {
-                bdm_domain::tags::filter_character_tags(&text.content, true, &rules)
-            } else {
-                text.content.clone()
-            };
-            let base = format!("media_{id}");
+            let content = text.map_or_else(String::new, |text| {
+                if job.mode == "tags" {
+                    bdm_domain::tags::filter_character_tags(&text.content, true, &rules)
+                } else {
+                    text.content.clone()
+                }
+            });
             let directory = destination.join(&base);
             let image_name = format!("{base}.{}", media.current_extension());
             let original = storage(fs::read(&media.path))?;
@@ -113,6 +133,9 @@ pub fn run(
                         let bytes = training_variant(&image, &plan)?;
                         let variant_name = format!("{base}.png");
                         let variant_root = destination.join(resolution.to_string());
+                        if text.is_none() && !variant_root.join(format!("{base}.txt")).is_file() {
+                            continue;
+                        }
                         storage(fs::create_dir_all(&variant_root))?;
                         let mut variant = manifest.clone();
                         variant["source_sha256"] = media.sha256.clone().into();

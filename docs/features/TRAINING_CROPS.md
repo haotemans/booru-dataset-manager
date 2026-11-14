@@ -43,6 +43,8 @@ Re-exporting into the same managed directory updates the owned current image,
 including a restored larger PNG with the same filename. Existing TXT files are
 kept byte for byte, including their encoding and line endings; only missing TXT
 files are created. This applies to flat, folder and multi-resolution layouts.
+An existing TXT also permits an image-only refresh when the library has no
+current completed text artifact; missing text is never synthesized or uploaded.
 Ownership is checked against the prior image/source/hash receipt before replacing
 an image. Manual image changes and unowned format collisions stop that item.
 Old image formats are removed after the new image is verified. No image `.bak`

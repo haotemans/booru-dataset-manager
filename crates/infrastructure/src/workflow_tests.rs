@@ -2240,6 +2240,11 @@ fn flat_export_refreshes_owned_png_without_touching_existing_txt_or_manual_image
     )
     .unwrap();
     let cropped = f.repo.commit_repair(media.id, &crop).unwrap();
+    // Refreshing the image must work from the already-exported TXT alone.
+    f.repo
+        .connection
+        .execute("DELETE FROM text_artifacts WHERE media_id=?1", [media.id])
+        .unwrap();
     job.cursor = 0;
     crate::export::run(&mut f.repo, &mut job, &root, &cancel, |_| {}).unwrap();
     assert_eq!(std::fs::read(&txt_path).unwrap(), manual_text);
