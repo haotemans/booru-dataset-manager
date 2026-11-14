@@ -46,6 +46,13 @@ permission prompts remain controlled by Antigravity's permission mode.
 | `bdm_scan_duplicates` | Analyze up to 64 explicit IDs using existing local pHash/DINOv3 tooling |
 | `bdm_resolve_duplicates` | Keep both images, or queue one duplicate while designating its survivor |
 
+Collection and image lists are paginated with `after_id`/`next_after_id`; the
+collection tool also accepts a name substring in `collection`. Responses use
+compact metadata to fit the client's inline tool budget. Long existing text
+can be shortened in inspection results with `content_truncated=true`; stored
+TXT bytes are never shortened. Duplicate scans return at most 24 pending pairs
+per response; resolve them and rescan the cached scope for remaining pairs.
+
 The model must view the full current image before a mutation. An exact crop
 preview is required before applying that crop. Bboxes use normalized
 `[left, top, right, bottom]` coordinates in 0..1000 relative to the current image,

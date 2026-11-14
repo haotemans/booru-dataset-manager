@@ -286,6 +286,10 @@ fn duplicate_scan_cannot_auto_delete_and_final_review_preserves_associations() {
     assert_eq!(f.repo.list_media().unwrap().len(), 2);
     assert!(f
         .repo
+        .candidate_rejected(first.id.min(second.id), first.id.max(second.id))
+        .unwrap());
+    assert!(f
+        .repo
         .delete_review_scope(&BTreeSet::from([first.id, second.id]))
         .is_err());
     f.repo
@@ -337,4 +341,41 @@ fn media_mutation_lock_is_an_os_file_lock_not_only_a_process_mutex() {
     assert!(fs2::FileExt::try_lock_exclusive(&file).is_err());
     drop(guard);
     fs2::FileExt::try_lock_exclusive(&file).unwrap();
+}
+
+#[test]
+fn collection_and_image_pages_are_bounded_and_can_be_traversed_without_dropped_ids() {
+    fn text(result: rmcp::model::CallToolResult) -> serde_json::Value {
+        let value = serde_json::to_value(result).unwrap();
+        serde_json::from_str(value["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+    let (mut f, settings, m) = fixture();
+    let mut after = 0;
+    let mut seen = BTreeSet::new();
+    loop {
+        let page = text(
+            tools::collections(
+                &mut f.repo,
+                &settings,
+                ListArgs {
+                    limit: Some(1),
+                    after_id: after,
+                    collection: None,
+                },
+            )
+            .unwrap(),
+        );
+        assert!(page.to_string().len() < 8192);
+        let rows = page["collections"].as_array().unwrap();
+        if rows.is_empty() {
+            break;
+        }
+        assert_eq!(rows.len(), 1);
+        assert!(seen.insert(rows[0]["id"].as_i64().unwrap()));
+        after = page["next_after_id"].as_i64().unwrap();
+    }
+    assert_eq!(seen.len(), f.repo.list().unwrap().len());
+    let page = text(tools::list(&mut f.repo, &settings, ListArgs::default()).unwrap());
+    assert_eq!(page["images"][0]["id"], m.id);
+    assert_eq!(page["next_after_id"], m.id);
 }

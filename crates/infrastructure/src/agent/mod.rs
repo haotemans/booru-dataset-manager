@@ -102,11 +102,12 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "List artist/character/query collections and their image counts.",
+        description = "Page artist/character/query collections and image counts. Optional collection is a name substring; continue with next_after_id.",
         annotations(read_only_hint = true)
     )]
-    async fn bdm_collections(&self) -> CallToolResult {
-        self.task(tools::collections).await
+    async fn bdm_collections(&self, Parameters(args): Parameters<ListArgs>) -> CallToolResult {
+        self.task(move |repo, settings| tools::collections(repo, settings, args))
+            .await
     }
 
     #[tool(

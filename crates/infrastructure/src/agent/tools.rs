@@ -101,10 +101,24 @@ fn original(m: &StoredMedia, settings: &Settings) -> Result<PathBuf, IngestError
     Ok(path)
 }
 fn info(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
-    let artifacts=repo.list_artifacts()?.into_iter().filter(|a|a.media_id==m.id).map(|a|json!({"kind":a.kind,"state":a.state,"reviewed":a.reviewed,"content":a.content,"generated":a.is_generated_output()})).collect::<Vec<_>>();
+    let artifacts=repo.list_artifacts()?.into_iter().filter(|a|a.media_id==m.id).map(|a|{
+        let content=a.content.chars().take(1200).collect::<String>();
+        json!({"kind":a.kind,"state":a.state,"reviewed":a.reviewed,"content":content,"content_truncated":content.len()<a.content.len(),"generated":a.is_generated_output()})
+    }).collect::<Vec<_>>();
+    let edit=m.edit.as_ref().map(|e|json!({"operation":e.operation,"crop":e.crop,"training":e.training,"dimensions":e.dimensions,"verified_original":e.source_archive.as_ref().is_some_and(|a|a.downloaded_original)}));
     Ok(
-        json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"original_dimensions":[m.post.image_width,m.post.image_height],"keep":m.keep,"artists":m.post.tag_string_artist,"characters":m.post.tag_string_character,"general_tags":m.post.tag_string_general,"current_edit":m.edit,"text":artifacts,"agent_review":repo.agent_review_value(m.id)?}),
+        json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"original_dimensions":[m.post.image_width,m.post.image_height],"keep":m.keep,"artists":m.post.tag_string_artist,"characters":m.post.tag_string_character,"general_tags":m.post.tag_string_general.chars().take(1000).collect::<String>(),"current_edit":edit,"text":artifacts,"agent_review":review_summary(repo,m)?}),
     )
+}
+fn review_summary(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
+    Ok(repo.agent_review_value(m.id)?.map(|r|json!({"decision":r["decision"],"current":r["image_sha256"]==m.sha256,"aesthetic":r["report"]["aesthetic"],"training_suitability":r["report"]["training_suitability"],"reason":r["report"]["reason"].as_str().unwrap_or("").chars().take(160).collect::<String>()})).unwrap_or(Value::Null))
+}
+fn page(mut rows: Vec<Value>, field: &str) -> CallToolResult {
+    while rows.len() > 1 && serde_json::to_vec(&rows).is_ok_and(|b| b.len() > 7800) {
+        rows.pop();
+    }
+    let next = rows.last().and_then(|r| r["id"].as_i64());
+    result(json!({(field):rows,"next_after_id":next}))
 }
 fn picture(image: DynamicImage, mut data: Value) -> Result<CallToolResult, IngestError> {
     let native = image.dimensions();
@@ -142,12 +156,16 @@ fn rect(bbox: [u32; 4], dims: (u32, u32)) -> Result<CropRect, IngestError> {
 pub(super) fn collections(
     repo: &mut SqliteCatalog,
     _: &Settings,
+    args: ListArgs,
 ) -> Result<CallToolResult, IngestError> {
     let media = repo.list_media()?;
-    let rows = repo
-        .list()
-        .map_err(|_| IngestError::Storage)?
+    let mut collections = repo.list().map_err(|_| IngestError::Storage)?;
+    collections.sort_by_key(|c| c.id);
+    let needle = args.collection.unwrap_or_default().to_lowercase();
+    let rows = collections
         .into_iter()
+        .filter(|c| c.id > args.after_id && c.name.to_lowercase().contains(&needle))
+        .take(args.limit.unwrap_or(32).clamp(1, 64))
         .map(|c| {
             let count = media
                 .iter()
@@ -161,14 +179,14 @@ pub(super) fn collections(
             json!({"id":c.id,"tag":c.name,"kind":kind,"provider":c.provider,"images":count})
         })
         .collect::<Vec<_>>();
-    Ok(result(json!({"collections":rows})))
+    Ok(page(rows, "collections"))
 }
 pub(super) fn list(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: ListArgs,
 ) -> Result<CallToolResult, IngestError> {
-    let limit = args.limit.unwrap_or(24).clamp(1, 64);
+    let limit = args.limit.unwrap_or(12).clamp(1, 24);
     let collection = if let Some(tag) = args.collection {
         Some(
             repo.list()
@@ -185,12 +203,9 @@ pub(super) fn list(
     let artifacts = repo.list_artifacts()?;
     let rows=all.iter().filter(|m|m.id>args.after_id && collection.as_ref().is_none_or(|ids|!ids.is_disjoint(&m.collections))).take(limit).map(|m|{
         let path_ok=checked_path(&m.path,settings).is_ok();
-        Ok(json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"keep":m.keep,"artist":m.post.tag_string_artist,"in_configured_library":path_ok,"caption_complete":artifacts.iter().any(|a|a.media_id==m.id&&a.kind=="caption"&&a.state=="complete"&&!a.content.is_empty()),"tags_generated":artifacts.iter().any(|a|a.media_id==m.id&&a.kind=="tags"&&a.is_generated_output()),"agent_review":repo.agent_review_value(m.id)?}))
+        Ok(json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"keep":m.keep,"artist":m.post.tag_string_artist,"in_configured_library":path_ok,"caption_complete":artifacts.iter().any(|a|a.media_id==m.id&&a.kind=="caption"&&a.state=="complete"&&!a.content.is_empty()),"tags_generated":artifacts.iter().any(|a|a.media_id==m.id&&a.kind=="tags"&&a.is_generated_output()),"agent_review":review_summary(repo,m)?}))
     }).collect::<Result<Vec<_>,IngestError>>()?;
-    let next = rows.last().and_then(|v| v["id"].as_i64());
-    Ok(result(
-        json!({"images":rows,"next_after_id":next,"note":"Call bdm_view_image before image decisions; these are metadata only."}),
-    ))
+    Ok(page(rows, "images"))
 }
 pub(super) fn view(
     repo: &mut SqliteCatalog,
@@ -517,8 +532,9 @@ pub(super) fn scan(
         "agent_duplicate_scan",
         &json!({"job":job.id,"ids":ids,"state":job.state}).to_string(),
     )?;
+    let count = candidates.len();
     Ok(result(
-        json!({"state":job.state,"error":job.error,"candidates":candidates,"files_deleted":0,"note":"View both current images before resolving. Missing DINOv3 is not a successful visual-similarity analysis."}),
+        json!({"state":job.state,"error":job.error,"candidate_count":count,"candidates":candidates.into_iter().take(24).collect::<Vec<_>>(),"more_pending":count>24,"files_deleted":0,"note":"View both current images before resolving. Resolve returned pairs and rescan for remaining pending pairs. Missing DINOv3 is not successful visual analysis."}),
     ))
 }
 
@@ -591,6 +607,17 @@ pub(super) fn pair(
             state::save_review(repo, m.id, &m.sha256, "keep", &report, None)?;
         }
     }
+    // Suppress automatic deletion by the ordinary dedup worker while the AI's
+    // chosen removal is still awaiting final deletion review.
+    let candidate = bdm_domain::dedup::DuplicateCandidate {
+        first: first.id.min(second.id),
+        second: first.id.max(second.id),
+        phash_distance: None,
+        cosine: None,
+        model_version: None,
+        state: "rejected".into(),
+    };
+    repo.save_candidate(&candidate)?;
     repo.audit("agent_duplicate_decision", &report.to_string())?;
     Ok(result(json!({"decision":report,"files_deleted":0})))
 }
