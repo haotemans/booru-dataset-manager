@@ -1371,6 +1371,7 @@ fn verified_crop_parent(media: &StoredMedia, native: bool) -> Result<StoredMedia
         .ok_or_else(|| IngestError::StorageDetails("缺少原始输入存档，未自动修改。".into()))?;
     let parent_bytes = storage(fs::read(directory.join(".edit-parent.json")))?;
     let parent: StoredMedia = storage(serde_json::from_slice(&parent_bytes))?;
+    let undo = directory.join(".edit-source");
     if !archive.downloaded_original
         || archive.path.parent() != Some(directory)
         || parent.id != media.id
@@ -1379,11 +1380,7 @@ fn verified_crop_parent(media: &StoredMedia, native: bool) -> Result<StoredMedia
         || (parent.path != media.path
             && (!native || parent.path.with_extension("png") != media.path))
         || parent.sha256 != edit.parent_sha256
-        || hash(if directory.join(".edit-source").is_file() {
-            &directory.join(".edit-source")
-        } else {
-            &archive.path
-        })? != parent.sha256
+        || hash(if undo.is_file() { &undo } else { &archive.path })? != parent.sha256
         || archive.sha256 != parent.sha256
         || hash(&archive.path)? != parent.sha256
         || format!("{:x}", md5::Md5::digest(storage(fs::read(&archive.path))?)) != media.post.md5
