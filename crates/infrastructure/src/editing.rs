@@ -1678,14 +1678,17 @@ impl SqliteCatalog {
         // Redownload intentionally replaces the current edit; do not retain its
         // earlier result as another permanent image.
         let mut obsolete = vec![(media.path.clone(), media.sha256.clone())];
-        if stored_bytes.as_slice() == storage(fs::read(&downloaded))?.as_slice() {
-            if let Some(archive) = media.edit.as_ref().and_then(|e| e.source_archive.as_ref()) {
+        let original_is_working =
+            stored_bytes.as_slice() == storage(fs::read(&downloaded))?.as_slice();
+        let retained_original =
+            directory.join(format!("downloaded-original.{}", media.post.file_ext));
+        if let Some(archive) = media.edit.as_ref().and_then(|e| e.source_archive.as_ref()) {
+            if original_is_working || archive.path != retained_original {
                 obsolete.push((archive.path.clone(), archive.sha256.clone()));
             }
-            obsolete.push((
-                directory.join(format!("downloaded-original.{}", media.post.file_ext)),
-                source_sha256.clone(),
-            ));
+        }
+        if original_is_working {
+            obsolete.push((retained_original, source_sha256.clone()));
         }
         for (path, sha) in obsolete {
             if path != updated.path
@@ -1696,7 +1699,7 @@ impl SqliteCatalog {
                 storage(fs::remove_file(path))?;
             }
         }
-        for name in [".edit-source", ".edit-parent.json"] {
+        for name in [".edit-source", ".edit-parent.json", "inpainting-mask.png"] {
             let path = directory.join(name);
             if path.is_file() {
                 storage(fs::remove_file(path))?;
@@ -2168,6 +2171,10 @@ impl SqliteCatalog {
             }
             if undo.is_file() {
                 storage(fs::remove_file(undo))?;
+            }
+            let old_mask = directory.join("inpainting-mask.png");
+            if old_mask.is_file() {
+                storage(fs::remove_file(old_mask))?;
             }
         }
         Ok(media)
