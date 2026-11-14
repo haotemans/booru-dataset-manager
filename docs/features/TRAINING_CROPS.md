@@ -20,13 +20,16 @@ dimensions, trim offsets, final dimensions and native-pixel mode are
 recorded with the edit. A nominal aspect label can differ slightly from the
 final rounded bucket ratio.
 
-New imports retain `downloaded-original.<ext>` before transparency processing.
-Edits retain a hash-verified source archive; the working image and thumbnail
-can change while this archive stays intact. Legacy files without a download
-archive retain their first available input snapshot. Metadata identifies
-whether its bytes match the source MD5. Source metadata and URLs are preserved.
-Restore-previous-version retains the preceding edit geometry. Existing crops
-made with a lower ceiling are not enlarged or rewritten automatically.
+Retention is one complete original download and one current edited PNG, plus
+one disposable preview thumbnail. Before an edit, an unchanged download needs
+only one image file. Imports keep a separate `downloaded-original.<ext>` only
+when transparency processing changes the working bytes. Edits preserve one
+hash-verified original archive and replace the current PNG; they do not create
+undo images or retain successive crop/inpainting versions. Crops and source
+URLs remain in metadata. The review action **Restore complete original** returns
+to the full verified download, rather than to a historical edited version.
+Re-download likewise replaces the working result without an extra backup image.
+Legacy files without a verified original are never silently called restored.
 
 ## Default: native-size flat export
 

@@ -81,6 +81,100 @@ mod tests {
         }
     }
     #[test]
+    fn repeated_crops_keep_one_original_and_one_current_image_and_restore_full_download() {
+        for (extension, format) in [("png", ImageFormat::Png), ("jpg", ImageFormat::Jpeg)] {
+            let mut f = crate::workflow_tests::fixture();
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image::load_from_memory(&f.provider.bytes)
+                .unwrap()
+                .write_to(&mut encoded, format)
+                .unwrap();
+            f.provider.bytes = encoded.into_inner();
+            f.post.file_ext = extension.into();
+            f.post.file_size = f.provider.bytes.len() as u64;
+            f.post.md5 = format!("{:x}", md5::Md5::digest(&f.provider.bytes));
+            let cancel = AtomicBool::new(false);
+            f.repo
+                .import(
+                    &f.post,
+                    &f.directory.path().join("library"),
+                    f.collection,
+                    800,
+                    &cancel,
+                    &f.provider,
+                )
+                .unwrap();
+            let original = f.repo.list_media().unwrap().remove(0);
+            let directory = original.path.parent().unwrap();
+            let image_count = || {
+                fs::read_dir(directory)
+                    .unwrap()
+                    .map(|e| e.unwrap().path())
+                    .filter(|p| {
+                        p.file_name().unwrap() != "preview.png"
+                            && matches!(
+                                p.extension().and_then(|v| v.to_str()),
+                                Some("png" | "jpg" | "jpeg" | "webp")
+                            )
+                    })
+                    .count()
+            };
+            assert_eq!(image_count(), 1);
+            let raw_tags = fs::read(original.path.with_extension("raw_tags.txt")).unwrap();
+            let mut current = original.clone();
+            for index in 0..3 {
+                let preview = native_crop_preview(
+                    &current,
+                    CropRect {
+                        x: if index == 0 { 16 } else { 0 },
+                        y: if index == 0 { 16 } else { 0 },
+                        width: 768,
+                        height: 768,
+                    },
+                    &cancel,
+                )
+                .unwrap();
+                current = f.repo.commit_repair(original.id, &preview).unwrap();
+                assert_eq!(image_count(), 2);
+                assert!(!directory.join(".edit-source").exists());
+                let archive = current
+                    .edit
+                    .as_ref()
+                    .unwrap()
+                    .source_archive
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(fs::read(&archive.path).unwrap(), f.provider.bytes);
+                assert_eq!(
+                    image::open(&current.path).unwrap().to_rgba8(),
+                    image::open(&preview.image).unwrap().to_rgba8()
+                );
+            }
+            let restored = f.repo.restore_downloaded_original(original.id).unwrap();
+            assert_eq!(restored.path, original.path);
+            assert!(restored.edit.is_none());
+            assert_eq!(fs::read(&restored.path).unwrap(), f.provider.bytes);
+            assert_eq!(image_count(), 1);
+            assert_eq!(
+                fs::read(restored.path.with_extension("raw_tags.txt")).unwrap(),
+                raw_tags
+            );
+            let preview = native_crop_preview(
+                &restored,
+                CropRect {
+                    x: 16,
+                    y: 16,
+                    width: 768,
+                    height: 768,
+                },
+                &cancel,
+            )
+            .unwrap();
+            f.repo.commit_repair(original.id, &preview).unwrap();
+            assert_eq!(image_count(), 2);
+        }
+    }
+    #[test]
     fn training_crop_keeps_download_bytes_roundtrips_restore_and_exports_matching_config() {
         let mut f = crate::workflow_tests::fixture();
         let mut encoded = std::io::Cursor::new(Vec::new());
@@ -158,11 +252,24 @@ mod tests {
             second.edit.as_ref().unwrap().source_archive.as_ref(),
             Some(archive)
         );
-        let restored = f.repo.restore_last_edit(media.id).unwrap();
-        assert_eq!(restored.dimensions(), first.dimensions());
-        assert_eq!(restored.edit, first.edit);
-        assert_eq!(hash(&restored.path).unwrap(), first.sha256);
-        assert_eq!(fs::read(&archive.path).unwrap(), original);
+        assert!(f.repo.restore_last_edit(media.id).is_err());
+        let restored = f.repo.restore_downloaded_original(media.id).unwrap();
+        assert_eq!(restored.dimensions(), media.dimensions());
+        assert!(restored.edit.is_none());
+        assert_eq!(fs::read(&restored.path).unwrap(), original);
+        let preview = training_crop_preview(
+            &restored,
+            CropRect {
+                x: 100,
+                y: 100,
+                width: 1600,
+                height: 1280,
+            },
+            1024,
+            &cancel,
+        )
+        .unwrap();
+        let restored = f.repo.commit_repair(media.id, &preview).unwrap();
         f.repo.set_media_keep(media.id, true).unwrap();
         f.repo
             .write_artifact(
@@ -201,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn redownload_restores_cropped_and_repaired_originals_with_backup_and_source_metadata() {
+    fn redownload_restores_originals_without_retaining_old_edit_images() {
         for crop in [false, true] {
             let mut f = imported();
             let media = f.repo.list_media().unwrap().remove(0);
@@ -223,8 +330,7 @@ mod tests {
                 synthetic(&media)
             };
             let edited = f.repo.commit_repair(media.id, &preview).unwrap();
-            let edited_bytes = fs::read(&edited.path).unwrap();
-            assert_ne!(edited_bytes, original);
+            assert_ne!(fs::read(&edited.path).unwrap(), original);
             let restored = f
                 .repo
                 .redownload_original(media.id, &f.provider, &AtomicBool::new(false))
@@ -250,8 +356,7 @@ mod tests {
                         .starts_with(".redownload-backup-")
                 })
                 .collect();
-            assert_eq!(backups.len(), 1);
-            assert_eq!(fs::read(&backups[0]).unwrap(), edited_bytes);
+            assert!(backups.is_empty());
             f.repo.recover_repairs().unwrap();
             assert_eq!(f.repo.list_media().unwrap()[0], restored);
         }
@@ -738,7 +843,21 @@ mod tests {
             image::open(&edited.path).unwrap().to_rgba8(),
             image::open(&preview.image).unwrap().to_rgba8()
         );
-        assert_eq!(hash(&media.path).unwrap(), media.sha256);
+        assert!(!media.path.exists());
+        assert_eq!(
+            hash(
+                &edited
+                    .edit
+                    .as_ref()
+                    .unwrap()
+                    .source_archive
+                    .as_ref()
+                    .unwrap()
+                    .path
+            )
+            .unwrap(),
+            media.sha256
+        );
     }
 
     #[test]
@@ -1260,7 +1379,11 @@ fn verified_crop_parent(media: &StoredMedia, native: bool) -> Result<StoredMedia
         || (parent.path != media.path
             && (!native || parent.path.with_extension("png") != media.path))
         || parent.sha256 != edit.parent_sha256
-        || hash(&directory.join(".edit-source"))? != parent.sha256
+        || hash(if directory.join(".edit-source").is_file() {
+            &directory.join(".edit-source")
+        } else {
+            &archive.path
+        })? != parent.sha256
         || archive.sha256 != parent.sha256
         || hash(&archive.path)? != parent.sha256
         || format!("{:x}", md5::Md5::digest(storage(fs::read(&archive.path))?)) != media.post.md5
@@ -1490,13 +1613,6 @@ impl SqliteCatalog {
                 .thumbnail(384, 384)
                 .save_with_format(&staged_thumbnail, ImageFormat::Png),
         )?;
-        let backup = directory.join(format!(
-            ".redownload-backup-{}-{}",
-            media.sha256.get(..16).unwrap_or("current"),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |duration| duration.as_secs())
-        ));
         let lock = self.media_lock.clone();
         let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
         let current = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
@@ -1508,8 +1624,11 @@ impl SqliteCatalog {
                 "图片在下载期间发生变化，请重新执行下载。".into(),
             ));
         }
-        if media.path.is_file() {
-            storage(fs::copy(&media.path, &backup))?;
+        if stored_bytes != storage(fs::read(&downloaded))? {
+            staged(
+                &directory.join(format!("downloaded-original.{}", media.post.file_ext)),
+                &storage(fs::read(&downloaded))?,
+            )?;
         }
         let replacement = storage(tempfile::NamedTempFile::new_in(directory))?;
         storage(fs::copy(&staged_image, replacement.path()))?;
@@ -1528,7 +1647,7 @@ impl SqliteCatalog {
         updated.path = restored_path;
         updated.edit = None;
         updated.sha256 = format!("{:x}", Sha256::digest(&stored_bytes));
-        updated.source_sha256 = source_sha256;
+        updated.source_sha256 = source_sha256.clone();
         let tx = storage(
             self.connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
@@ -1554,12 +1673,38 @@ impl SqliteCatalog {
         storage(tx.execute(
             "INSERT INTO audit_log(action,metadata) VALUES('original_redownload',?1)",
             [format!(
-                "media_id={};backup={}",
-                updated.id,
-                backup.display()
+                "media_id={};retention=original-and-current",
+                updated.id
             )],
         ))?;
         storage(tx.commit())?;
+        // Redownload intentionally replaces the current edit; do not retain its
+        // earlier result as another permanent image.
+        let mut obsolete = vec![(media.path.clone(), media.sha256.clone())];
+        if stored_bytes.as_slice() == storage(fs::read(&downloaded))?.as_slice() {
+            if let Some(archive) = media.edit.as_ref().and_then(|e| e.source_archive.as_ref()) {
+                obsolete.push((archive.path.clone(), archive.sha256.clone()));
+            }
+            obsolete.push((
+                directory.join(format!("downloaded-original.{}", media.post.file_ext)),
+                source_sha256.clone(),
+            ));
+        }
+        for (path, sha) in obsolete {
+            if path != updated.path
+                && path.parent() == Some(directory)
+                && path.is_file()
+                && hash(&path)? == sha
+            {
+                storage(fs::remove_file(path))?;
+            }
+        }
+        for name in [".edit-source", ".edit-parent.json"] {
+            let path = directory.join(name);
+            if path.is_file() {
+                storage(fs::remove_file(path))?;
+            }
+        }
         Ok(updated)
     }
 
@@ -1618,14 +1763,15 @@ impl SqliteCatalog {
         storage(image::load_from_memory(&bytes))?;
         let pending = directory.join(".repair-output");
         let thumbnail = directory.join(".repair-thumbnail");
-        let source = directory.join(".edit-source");
+        // Keep only the immutable full download and current PNG. Durable intent
+        // can recover a save without retaining another copy of its input.
+        let source = PathBuf::new();
         let mask = if preview.crop.is_some() {
             PathBuf::new()
         } else {
             directory.join(".repair-mask")
         };
         staged(&pending, &bytes)?;
-        staged(&source, &storage(fs::read(&media.path))?)?;
         let mut thumb_bytes = std::io::Cursor::new(Vec::new());
         storage(
             image
@@ -1763,7 +1909,10 @@ impl SqliteCatalog {
             (&journal.thumbnail, &media.thumbnail),
         ];
         let source_target = directory.join(".edit-source");
-        promotions.push((&journal.source, &source_target));
+        // Older journals may still contain a staged undo image.
+        if !journal.source.as_os_str().is_empty() {
+            promotions.push((&journal.source, &source_target));
+        }
         if record.operation == "inpainting" {
             promotions.push((&journal.mask, &record.mask));
         }
@@ -1844,23 +1993,85 @@ impl SqliteCatalog {
         if intent.is_file() {
             storage(fs::remove_file(intent))?;
         }
+        // A JPEG/WebP input has a separate filename from the new PNG. Once its
+        // immutable archive and the committed output are verified, remove that
+        // byte-identical extra working copy.
+        if let Some(archive) = &record.source_archive {
+            if input.path != media.path
+                && input.path != archive.path
+                && input.path.is_file()
+                && hash(&archive.path)? == archive.sha256
+                && hash(&input.path)? == archive.sha256
+            {
+                storage(fs::remove_file(&input.path))?;
+            }
+            if archive.downloaded_original && hash(&archive.path)? == archive.sha256 {
+                let obsolete_undo = directory.join(".edit-source");
+                if obsolete_undo.is_file() {
+                    storage(fs::remove_file(obsolete_undo))?;
+                }
+            }
+        }
         Ok(())
     }
 
     pub fn restore_last_edit(&mut self, id: i64) -> Result<StoredMedia, IngestError> {
+        self.restore_edit(id, false)
+    }
+
+    /// Two-image retention: restore the immutable download, not an accumulated
+    /// history of earlier crops or inpainting results.
+    pub fn restore_downloaded_original(&mut self, id: i64) -> Result<StoredMedia, IngestError> {
+        self.restore_edit(id, true)
+    }
+
+    fn restore_edit(&mut self, id: i64, original: bool) -> Result<StoredMedia, IngestError> {
         let lock = self.media_lock.clone();
         let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
         let mut media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
         let edit = media.edit.clone().ok_or(IngestError::InvalidMedia)?;
         let directory = media.path.parent().ok_or(IngestError::Storage)?.to_owned();
-        let source = directory.join(".edit-source");
-        if !source.is_file() || hash(&source)? != edit.parent_sha256 {
+        let archive = edit.source_archive.as_ref().ok_or(IngestError::Integrity)?;
+        if archive.path.parent() != Some(directory.as_path())
+            || hash(&archive.path)? != archive.sha256
+        {
             return Err(IngestError::Integrity);
         }
+        let undo = directory.join(".edit-source");
+        let source = if !original && undo.is_file() {
+            undo.clone()
+        } else {
+            archive.path.clone()
+        };
+        let expected_sha = if original {
+            archive.sha256.clone()
+        } else {
+            edit.parent_sha256.clone()
+        };
+        if !source.is_file() || hash(&source)? != expected_sha {
+            return Err(IngestError::StorageDetails(
+                "历史编辑副本不再保留，请使用恢复完整原图。".into(),
+            ));
+        }
         let bytes = storage(fs::read(&source))?;
+        if original
+            && (!archive.downloaded_original
+                || format!("{:x}", md5::Md5::digest(&bytes)) != media.post.md5)
+        {
+            return Err(IngestError::Integrity);
+        }
         let restored = storage(image::load_from_memory(&bytes))?;
         let parent_path = directory.join(".edit-parent.json");
-        let parent = if parent_path.is_file() {
+        let parent = if original {
+            if restored.dimensions() != (media.post.image_width, media.post.image_height) {
+                return Err(IngestError::Integrity);
+            }
+            let mut parent = media.clone();
+            parent.edit = None;
+            parent.path = media.path.with_extension(&media.post.file_ext);
+            parent.sha256 = expected_sha.clone();
+            Some(parent)
+        } else if parent_path.is_file() {
             let parent: StoredMedia =
                 storage(serde_json::from_slice(&storage(fs::read(&parent_path))?))?;
             if parent.id != media.id
@@ -1915,8 +2126,12 @@ impl SqliteCatalog {
         )?;
         storage(fs::remove_file(&pending))?;
         storage(fs::remove_file(&pending_thumbnail))?;
-        storage(fs::remove_file(&source))?;
-        media.sha256 = edit.parent_sha256;
+        if source == undo {
+            storage(fs::remove_file(&source))?;
+        }
+        media.sha256 = expected_sha;
+        let previous_path = media.path.clone();
+        let previous_sha = edit.output_sha256.clone();
         media.path = restored_path;
         media.edit = parent.and_then(|parent| parent.edit);
         if parent_path.is_file() {
@@ -1945,6 +2160,19 @@ impl SqliteCatalog {
             [format!("media_id={}", media.id)],
         ))?;
         storage(tx.commit())?;
+        if original {
+            for (path, sha) in [
+                (&previous_path, &previous_sha),
+                (&archive.path, &archive.sha256),
+            ] {
+                if path != &media.path && path.is_file() && hash(path)? == *sha {
+                    storage(fs::remove_file(path))?;
+                }
+            }
+            if undo.is_file() {
+                storage(fs::remove_file(undo))?;
+            }
+        }
         Ok(media)
     }
 

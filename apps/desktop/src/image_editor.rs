@@ -897,7 +897,7 @@ impl BdmApp {
         let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
         let media = bdm_infrastructure::catalog::SqliteCatalog::open(&path)
             .map_err(|e| e.to_string())?
-            .restore_last_edit(id as i64)
+            .restore_downloaded_original(id as i64)
             .map_err(|e| e.to_string())?;
         self.editor_apply_saved(ctx, media);
         Ok(())

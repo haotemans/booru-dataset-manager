@@ -520,7 +520,7 @@ impl BdmApp {
                     .get(&id)
                     .is_some_and(|stored| stored.edit.is_some())
                     && ui
-                        .add_enabled(!busy, egui::Button::new("恢复编辑前版本"))
+                        .add_enabled(!busy, egui::Button::new("恢复完整原图"))
                         .clicked()
                 {
                     if let Err(error) = self.restore_last_edit(ui.ctx(), id) {
