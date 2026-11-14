@@ -1,5 +1,6 @@
 use super::*;
 use bdm_ports::{CollectionRepository, IngestRepository};
+use sha2::Digest;
 use std::{collections::BTreeSet, fs, sync::atomic::AtomicBool};
 
 fn fixture() -> (
@@ -133,7 +134,7 @@ fn annotations_use_local_identity_format_preserve_source_manual_bytes_and_qualit
         "@artist, character, A colorful landscape with textured strokes."
     );
     let tags = fs::read_to_string(m.path.with_extension("tags.txt")).unwrap();
-    assert_eq!(tags, "@artist, character, scenery");
+    assert_eq!(tags, "@artist, character, special term, scenery");
     let score: f64 = f
         .repo
         .connection

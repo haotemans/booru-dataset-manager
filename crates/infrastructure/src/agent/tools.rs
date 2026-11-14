@@ -7,7 +7,7 @@ use image::{DynamicImage, GenericImageView, ImageFormat};
 use rmcp::model::{CallToolResult, ContentBlock};
 use rusqlite::params;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 use std::{
     collections::BTreeSet,
     fs,
@@ -153,7 +153,12 @@ pub(super) fn collections(
                 .iter()
                 .filter(|m| m.collections.contains(&c.id))
                 .count();
-            json!({"id":c.id,"tag":c.name,"kind":c.kind,"provider":c.provider,"images":count})
+            let kind = match c.kind {
+                bdm_domain::catalog::CollectionKind::Artist => "artist",
+                bdm_domain::catalog::CollectionKind::Character => "character",
+                bdm_domain::catalog::CollectionKind::Query => "query",
+            };
+            json!({"id":c.id,"tag":c.name,"kind":kind,"provider":c.provider,"images":count})
         })
         .collect::<Vec<_>>();
     Ok(result(json!({"collections":rows})))
