@@ -221,7 +221,8 @@ impl SqliteCatalog {
     ) -> Result<(), IngestError> {
         let json = storage(serde_json::to_string(details))?;
         storage(self.connection.execute(
-            "INSERT OR REPLACE INTO media_quality(media_id,aesthetic,watermark_free,provenance) VALUES(?1,NULL,NULL,?2)",
+            "INSERT INTO media_quality(media_id,aesthetic,watermark_free,provenance) VALUES(?1,NULL,NULL,?2)
+             ON CONFLICT(media_id) DO UPDATE SET provenance=excluded.provenance",
             params![media_id, json],
         ))?;
         Ok(())
@@ -254,7 +255,7 @@ impl SqliteCatalog {
         Ok(out)
     }
 
-    fn write_artifact_locked(
+    pub(crate) fn write_artifact_locked(
         &mut self,
         media: &StoredMedia,
         kind: &str,
@@ -596,7 +597,7 @@ impl SqliteCatalog {
         storage(tx.commit())
     }
 
-    fn delete_media_locked(
+    pub(crate) fn delete_media_locked(
         &mut self,
         ids: &BTreeSet<i64>,
         survivor: Option<i64>,

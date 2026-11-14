@@ -14,7 +14,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-mod identity;
+pub(crate) mod identity;
 mod images;
 mod protocol;
 #[cfg(test)]

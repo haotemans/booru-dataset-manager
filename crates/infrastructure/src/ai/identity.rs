@@ -36,7 +36,7 @@ pub(super) fn generic_metadata_prior(
 /// The model cannot designate new identity tags or reclassify unknown tags.
 /// Only tags already verified as Danbooru general (category 0) are accepted,
 /// and all returned training/display tags use spaces instead of underscores.
-pub(super) fn verified_visual_tags(tags: &[String], rules: &TagRules) -> Vec<String> {
+pub(crate) fn verified_visual_tags(tags: &[String], rules: &TagRules) -> Vec<String> {
     let mut seen = BTreeSet::new();
     tags.iter()
         .filter_map(|tag| {
@@ -82,7 +82,7 @@ fn identity_key(name: &str) -> String {
 /// Prevent *known* local identities from being repeated in AI prose.
 /// Unknown visual identities cannot be identified reliably without an
 /// authoritative identity catalogue; all captions still need review.
-pub(super) fn caption_mentions_identity(
+pub(crate) fn caption_mentions_identity(
     caption: &str,
     names: &NormalizedTags,
     rules: &TagRules,

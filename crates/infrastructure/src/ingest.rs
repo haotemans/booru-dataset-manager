@@ -231,13 +231,20 @@ impl SqliteCatalog {
     }
 
     pub fn set_media_keep(&mut self, id: i64, keep: bool) -> Result<(), IngestError> {
-        if storage(
-            self.connection
-                .execute("UPDATE media SET keep=?2 WHERE id=?1", params![id, keep]),
-        )? != 1
-        {
+        let lock = self.media_lock.clone();
+        let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
+        let tx = storage(self.connection.transaction())?;
+        if storage(tx.execute("UPDATE media SET keep=?2 WHERE id=?1", params![id, keep]))? != 1 {
             return Err(IngestError::Storage);
         }
+        let changed=storage(tx.execute("UPDATE agent_reviews SET decision=?2,survivor_id=NULL,survivor_sha256=NULL WHERE media_id=?1",params![id,if keep{"keep"}else{"defer"}]))?;
+        if changed > 0 {
+            storage(tx.execute(
+                "INSERT INTO audit_log(action,metadata) VALUES('agent_review_override',?1)",
+                [id.to_string()],
+            ))?;
+        }
+        storage(tx.commit())?;
         Ok(())
     }
 

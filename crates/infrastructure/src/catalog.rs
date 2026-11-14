@@ -13,7 +13,7 @@ const SOURCE_MIGRATION: &str = include_str!("migrations/006_source_providers.sql
 
 pub struct SqliteCatalog {
     pub(crate) connection: Connection,
-    pub(crate) media_lock: std::sync::Arc<std::sync::Mutex<()>>,
+    pub(crate) media_lock: std::sync::Arc<crate::coordination::MediaLock>,
 }
 
 impl SqliteCatalog {
@@ -211,6 +211,19 @@ impl SqliteCatalog {
                 return Err(CatalogError::Schema);
             }
         }
+        // Additive agent state: no schema-version bump or database snapshot is
+        // needed. Image files and immutable source metadata are untouched.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_reviews (
+            media_id INTEGER PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+            image_sha256 TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            report TEXT NOT NULL,
+            survivor_id INTEGER,
+            survivor_sha256 TEXT
+        );",
+        )
+        .map_err(|_| CatalogError::Schema)?;
         let broken: bool = tx
             .prepare("PRAGMA foreign_key_check")
             .and_then(|mut query| Ok(query.query([])?.next()?.is_some()))

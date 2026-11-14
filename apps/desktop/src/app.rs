@@ -54,6 +54,7 @@ pub struct BdmApp {
     pub catalog: crate::catalog::CatalogSettings,
     pub ingest: crate::ingest::IngestSettings,
     pub workflows: crate::workflows::WorkflowSettings,
+    pub(crate) agent_sync: crate::agent_sync::AgentSync,
     pub notice: Option<(String, f64)>,
     capture_dir: Option<std::path::PathBuf>,
     capture_step: usize,
@@ -156,6 +157,7 @@ impl BdmApp {
             catalog: crate::catalog::CatalogSettings::default(),
             ingest: crate::ingest::IngestSettings::default(),
             workflows: crate::workflows::WorkflowSettings::default(),
+            agent_sync: crate::agent_sync::AgentSync::default(),
             notice: None,
             capture_dir,
             capture_step: 0,
@@ -1121,6 +1123,7 @@ impl eframe::App for BdmApp {
         self.poll_workflows(ctx);
         self.poll_similarity_review(ctx);
         self.editor_poll(ctx);
+        self.poll_agent_changes(ctx);
         self.capture(ctx);
         if self.capture_dir.is_some() {
             // Native snapshots represent idle pages, without accidental cursor hover/tooltips.

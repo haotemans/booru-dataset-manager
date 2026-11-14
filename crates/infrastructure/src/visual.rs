@@ -489,12 +489,12 @@ pub fn run(
                 if rejected {
                     continue;
                 }
-                if pair.dual_confirmed() {
+                if pair.dual_confirmed() && job.kind != "agent-dedup" {
                     if let (Some(a), Some(b)) = (repo.media_by_id(id)?, repo.media_by_id(other)?) {
                         let quality = |m: &bdm_domain::ingest::StoredMedia| -> Result<SurvivorQuality,IngestError> {
                             let values:Option<(Option<f64>,Option<bool>)>=storage(repo.connection.query_row("SELECT aesthetic,watermark_free FROM media_quality WHERE media_id=?1",[m.id],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
                             let (aesthetic,watermark_free)=values.unwrap_or_default();
-                            Ok(SurvivorQuality {pixels:u64::from(m.dimensions().0)*u64::from(m.dimensions().1),png:m.post.file_ext=="png",id:m.id,aesthetic,watermark_free})
+                            Ok(SurvivorQuality {pixels:u64::from(m.dimensions().0)*u64::from(m.dimensions().1),png:m.current_extension()=="png",id:m.id,aesthetic,watermark_free})
                         };
                         let (keep, remove) = if prefer_first(quality(&a)?, quality(&b)?) {
                             (a.id, b.id)

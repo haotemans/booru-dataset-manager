@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 //! Native credentials, collection SQLite persistence and Danbooru metadata lookup.
+pub mod agent;
 pub mod ai;
 pub mod catalog;
 mod coordination;

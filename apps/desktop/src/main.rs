@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_sync;
 mod api_profiles;
 mod app;
 mod catalog;
@@ -30,6 +31,28 @@ use eframe::egui;
 
 fn main() -> eframe::Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--mcp-server") {
+        let path_arg = |name: &str, fallback: std::path::PathBuf| {
+            args.iter()
+                .position(|arg| arg == name)
+                .and_then(|i| args.get(i + 1))
+                .map(std::path::PathBuf::from)
+                .unwrap_or(fallback)
+        };
+        let catalog = path_arg("--catalog", paths::data_directory().join("catalog.sqlite3"));
+        let project = path_arg("--project-root", paths::project_root());
+        let library = path_arg("--library-root", paths::library_directory());
+        let outcome = bdm_infrastructure::agent::serve_stdio(
+            &catalog,
+            &project,
+            &library,
+            args.iter().any(|arg| arg == "--allow-writes"),
+        );
+        if let Err(error) = &outcome {
+            eprintln!("MCP server failed: {error}");
+        }
+        std::process::exit(if outcome.is_ok() { 0 } else { 1 });
+    }
     if let Some(index) = args.iter().position(|arg| arg == "--repair-crops-png") {
         let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
             let backup =

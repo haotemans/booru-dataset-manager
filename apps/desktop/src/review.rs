@@ -61,6 +61,20 @@ impl BdmApp {
     }
 
     pub fn cancel_deletion(&mut self, return_media: Option<usize>) {
+        if !self.demo {
+            if let Some(path) = self.catalog.path.as_deref() {
+                let ids = self.pending_deletion.iter().map(|id| *id as i64).collect();
+                let outcome = bdm_infrastructure::catalog::SqliteCatalog::open(path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut repo| {
+                        repo.clear_agent_rejections(&ids).map_err(|e| e.to_string())
+                    });
+                if let Err(error) = outcome {
+                    self.form_error = error;
+                    return;
+                }
+            }
+        }
         self.pending_deletion.clear();
         self.dialog = return_media
             .filter(|id| self.library.media.iter().any(|m| m.id == *id))
@@ -79,7 +93,7 @@ impl BdmApp {
             let mut repo = bdm_infrastructure::catalog::SqliteCatalog::open(path)
                 .map_err(|_| "本地数据库未打开")?;
             let ids = self.pending_deletion.iter().map(|id| *id as i64).collect();
-            repo.delete_media(&ids, None, "human-confirmed review deletion")
+            repo.delete_review_scope(&ids)
                 .map_err(|_| "图片删除失败，请检查存储目录，重启后继续清理")?;
         }
         let removed: std::collections::BTreeSet<_> = self
