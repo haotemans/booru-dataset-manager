@@ -36,8 +36,8 @@ Legacy files without a verified original are never silently called restored.
 All approved images with the selected successful text artifact are eligible,
 regardless of their resolution tier. Each current image is copied byte for
 byte, alongside its matching TXT, into the same directory. Export performs no
-resizing, upscaling, tier filtering or tier-based folder splitting. Existing
-images and manually edited text retain integrity protection.
+resizing, upscaling, tier filtering or tier-based folder splitting. Manually
+modified images are protected, and existing text is preserved.
 
 Re-exporting into the same managed directory updates the owned current image,
 including a restored larger PNG with the same filename. Existing TXT files are
