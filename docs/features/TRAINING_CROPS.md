@@ -39,6 +39,17 @@ byte, alongside its matching TXT, into the same directory. Export performs no
 resizing, upscaling, tier filtering or tier-based folder splitting. Existing
 images and manually edited text retain integrity protection.
 
+Re-exporting into the same managed directory updates the owned current image,
+including a restored larger PNG with the same filename. Existing TXT files are
+kept byte for byte, including their encoding and line endings; only missing TXT
+files are created. This applies to flat, folder and multi-resolution layouts.
+Ownership is checked against the prior image/source/hash receipt before replacing
+an image. Manual image changes and unowned format collisions stop that item.
+Old image formats are removed after the new image is verified. No image `.bak`
+files are created, and matching hash-verified legacy export backups are removed.
+A temporary metadata intent allows interrupted updates to resume without an
+extra permanent image copy.
+
 `dataset.toml` is a **1024 training reference**, with `enable_bucket=true`,
 `bucket_no_upscale=true`, `bucket_reso_steps=32`, and random crop/flip/color
 augmentation disabled. The trainer may resize or trim larger/unaligned inputs
@@ -72,9 +83,9 @@ SQLite catalog and each replaced JPEG. Only direct crops with a hash-verified
 downloaded original, matching parent snapshot/bytes and an unchanged saved crop
 geometry are rebuilt. The PNG is regenerated from that original, never from the
 already recompressed JPEG. Unverifiable history is reported and left untouched.
-Flat re-export migrates an owned JPEG/WebP pair to PNG only after hash, source
-and text checks; the old image is retained as a `.bak` under the export metadata
-directory so recursive trainers do not see duplicate image files.
+Re-export migrates an owned JPEG/WebP pair to PNG after image hash and source
+checks. Existing text is preserved; the verified new image replaces the old
+format without retaining an image backup.
 
 For an explicit verified-original rebuild, add `--native-originals <directory>` to
 the offline repair command. Each `media_<id>/original.jpg` must match both the

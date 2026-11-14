@@ -2178,7 +2178,7 @@ fn mixed_resolution_flat_export_keeps_bytes_and_multires_is_explicit() {
 }
 
 #[test]
-fn flat_export_updates_only_owned_txt_and_rejects_modified_pairs() {
+fn flat_export_refreshes_owned_png_without_touching_existing_txt_or_manual_images() {
     let mut f = fixture();
     let cancel = AtomicBool::new(false);
     f.repo
@@ -2223,15 +2223,39 @@ fn flat_export_updates_only_owned_txt_and_rejects_modified_pairs() {
     crate::export::run(&mut f.repo, &mut job, &root, &cancel, |_| {}).unwrap();
     assert_eq!(
         std::fs::read_to_string(&txt_path).unwrap(),
-        "Better description."
+        "First description."
     );
     assert_eq!(std::fs::read(&img_path).unwrap(), original);
-    std::fs::write(&txt_path, "Manual edit").unwrap();
+    let manual_text = b"\xef\xbb\xbfManual edit\r\n\xff";
+    std::fs::write(&txt_path, manual_text).unwrap();
+    let crop = crate::editing::native_crop_preview(
+        &media,
+        bdm_domain::editing::CropRect {
+            x: 16,
+            y: 16,
+            width: 768,
+            height: 768,
+        },
+        &cancel,
+    )
+    .unwrap();
+    let cropped = f.repo.commit_repair(media.id, &crop).unwrap();
+    job.cursor = 0;
+    crate::export::run(&mut f.repo, &mut job, &root, &cancel, |_| {}).unwrap();
+    assert_eq!(std::fs::read(&txt_path).unwrap(), manual_text);
+    assert_eq!(
+        std::fs::read(&img_path).unwrap(),
+        std::fs::read(&cropped.path).unwrap()
+    );
+    assert!(!root.join(".bdm-manifests/replaced-images").exists());
+    std::fs::write(&img_path, b"Manually changed image").unwrap();
     job.cursor = 0;
     assert!(matches!(
         crate::export::run(&mut f.repo, &mut job, &root, &cancel, |_| {}),
         Err(IngestError::Integrity)
     ));
+    assert_eq!(std::fs::read(&img_path).unwrap(), b"Manually changed image");
+    assert_eq!(std::fs::read(&txt_path).unwrap(), manual_text);
 }
 
 #[test]

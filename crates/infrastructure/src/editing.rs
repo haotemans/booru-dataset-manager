@@ -709,12 +709,7 @@ mod tests {
             fs::read(export.join(format!("media_{}.png", legacy.id))).unwrap(),
             fs::read(&rebuilt.path).unwrap()
         );
-        assert_eq!(
-            fs::read_dir(export.join(".bdm-manifests/replaced-images"))
-                .unwrap()
-                .count(),
-            1
-        );
+        assert!(!export.join(".bdm-manifests/replaced-images").exists());
         assert!(f
             .repo
             .repair_jpeg_crops_as_png(&backup, false)

@@ -8,6 +8,9 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+#[cfg(test)]
+mod tests;
+
 pub fn run(
     repo: &mut SqliteCatalog,
     job: &mut WorkflowJob,
@@ -151,37 +154,17 @@ pub fn run(
                 report(job);
                 continue;
             }
-            if directory.exists() {
-                let existing = storage(fs::read(directory.join(&image_name)))?;
-                let existing_text =
-                    storage(fs::read_to_string(directory.join(format!("{base}.txt"))))?;
-                if format!("{:x}", Sha256::digest(existing)) != media.sha256
-                    || existing_text != content
-                {
-                    return Err(IngestError::Integrity);
-                }
-            } else {
-                let temp = storage(
-                    tempfile::Builder::new()
-                        .prefix(".export-")
-                        .tempdir_in(destination),
-                )?;
-                let files = [
-                    (image_name.clone(), original),
-                    (format!("{base}.txt"), content.as_bytes().to_vec()),
-                ];
-                for (name, bytes) in files {
-                    let mut file = storage(fs::File::create(temp.path().join(name)))?;
-                    storage(file.write_all(&bytes))?;
-                    storage(file.sync_all())?;
-                }
-                let manifest = serde_json::json!({"schema":"bdm-export-v1","media_id":id,"image":image_name,"sha256":media.sha256,"source":media.post,"current_dimensions":media.dimensions(),"edit":media.edit,"collections":media.collections,"review":"keep","text_kind":job.mode,"text_sha256":format!("{:x}",Sha256::digest(content.as_bytes()))});
-                let mut file = storage(fs::File::create(temp.path().join("manifest.json")))?;
-                storage(file.write_all(storage(serde_json::to_string(&manifest))?.as_bytes()))?;
-                storage(file.sync_all())?;
-                drop(file);
-                storage(fs::rename(temp.path(), &directory))?;
-            }
+            let manifest = serde_json::json!({"schema":"bdm-export-v1","media_id":id,"image":image_name,"sha256":media.sha256,"source":media.post,"current_dimensions":media.dimensions(),"edit":media.edit,"collections":media.collections,"review":"keep","text_kind":job.mode,"text_sha256":format!("{:x}",Sha256::digest(content.as_bytes()))});
+            storage(fs::create_dir_all(&directory))?;
+            write_managed_pair(
+                &directory,
+                &base,
+                &image_name,
+                &original,
+                &content,
+                &manifest,
+                &directory.join("manifest.json"),
+            )?;
             job.accepted.insert(id);
             job.cursor += 1;
             repo.save_workflow(job)?;
@@ -323,10 +306,7 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), IngestError> {
     Ok(())
 }
 
-/// Writes training-friendly flat image/TXT pairs. Metadata lives under a hidden
-/// directory so trainers see one matching .txt per image in the export root.
-/// A changed TXT is replaced only when the last manifest proves the current
-/// text was produced by us, so manual edits don't get silently overwritten.
+/// Flat exports contain one current image/TXT pair; existing text is immutable.
 fn write_flat_pair(
     root: &Path,
     base: &str,
@@ -335,107 +315,254 @@ fn write_flat_pair(
     content: &str,
     manifest: &serde_json::Value,
 ) -> Result<(), IngestError> {
-    let expected_image_sha = manifest["sha256"].as_str().ok_or(IngestError::Integrity)?;
-    let mode = manifest["text_kind"]
-        .as_str()
-        .ok_or(IngestError::Integrity)?;
-    let image_path = root.join(image_name);
-    let text_path = root.join(format!("{base}.txt"));
     let manifest_dir = root.join(".bdm-manifests");
     storage(fs::create_dir_all(&manifest_dir))?;
-    let manifest_path = manifest_dir.join(format!("{base}.json"));
+    write_managed_pair(
+        root,
+        base,
+        image_name,
+        image_bytes,
+        content,
+        manifest,
+        &manifest_dir.join(format!("{base}.json")),
+    )
+}
 
+fn valid_image_name(base: &str, name: &str) -> bool {
+    ["png", "jpg", "jpeg", "webp"]
+        .into_iter()
+        .any(|ext| name == format!("{base}.{ext}"))
+}
+
+fn file_sha(path: &Path) -> Result<String, IngestError> {
+    Ok(format!("{:x}", Sha256::digest(storage(fs::read(path))?)))
+}
+
+fn cleanup_export_images(
+    root: &Path,
+    base: &str,
+    previous: Option<&serde_json::Value>,
+    next: &serde_json::Value,
+) -> Result<(), IngestError> {
+    let name = next["image"].as_str().ok_or(IngestError::Integrity)?;
+    if !valid_image_name(base, name)
+        || file_sha(&root.join(name))? != next["sha256"].as_str().ok_or(IngestError::Integrity)?
+    {
+        return Err(IngestError::Integrity);
+    }
+    if let Some(old) = previous {
+        let old_name = old["image"].as_str().ok_or(IngestError::Integrity)?;
+        if !valid_image_name(base, old_name)
+            || old["media_id"] != next["media_id"]
+            || old["source"] != next["source"]
+        {
+            return Err(IngestError::Integrity);
+        }
+        let old_path = root.join(old_name);
+        if old_name != name && old_path.is_file() {
+            if file_sha(&old_path)? != old["sha256"].as_str().ok_or(IngestError::Integrity)? {
+                return Err(IngestError::Integrity);
+            }
+            storage(fs::remove_file(old_path))?;
+        }
+    }
+    // Legacy backups are read only as cleanup evidence. Never create new ones.
+    let backups = root.join(".bdm-manifests/replaced-images");
+    if backups.is_dir() {
+        for entry in storage(fs::read_dir(&backups))? {
+            let entry = storage(entry)?;
+            if !storage(entry.file_type())?.is_file() {
+                continue;
+            }
+            let filename = entry.file_name();
+            let Some((sha, image)) = filename.to_str().and_then(|v| v.split_once('-')) else {
+                continue;
+            };
+            let Some(image) = image.strip_suffix(".bak") else {
+                continue;
+            };
+            if sha.len() == 64
+                && sha.bytes().all(|v| v.is_ascii_hexdigit())
+                && valid_image_name(base, image)
+            {
+                if file_sha(&entry.path())? != sha {
+                    return Err(IngestError::Integrity);
+                }
+                storage(fs::remove_file(entry.path()))?;
+            }
+        }
+        if storage(fs::read_dir(&backups))?.next().is_none() {
+            storage(fs::remove_dir(backups))?;
+        }
+    }
+    Ok(())
+}
+
+/// A metadata intent makes image replacement restartable without storing old
+/// image bytes. It covers both same-name PNG updates and JPEG->PNG migration.
+fn recover_export_update(
+    root: &Path,
+    base: &str,
+    manifest_path: &Path,
+    intent: &Path,
+) -> Result<(), IngestError> {
+    if !intent.is_file() {
+        return Ok(());
+    }
+    let pending: serde_json::Value = storage(serde_json::from_slice(&storage(fs::read(intent))?))?;
+    let old = &pending["previous"];
+    let mut next = pending["next"].clone();
+    let old_name = old["image"].as_str().ok_or(IngestError::Integrity)?;
+    let next_name = next["image"].as_str().ok_or(IngestError::Integrity)?;
+    if !valid_image_name(base, old_name)
+        || !valid_image_name(base, next_name)
+        || old["media_id"] != next["media_id"]
+        || old["source"] != next["source"]
+    {
+        return Err(IngestError::Integrity);
+    }
+    let existing: serde_json::Value =
+        storage(serde_json::from_slice(&storage(fs::read(manifest_path))?))?;
+    let same_image = |receipt: &serde_json::Value| {
+        ["media_id", "source", "image", "sha256"]
+            .into_iter()
+            .all(|key| existing[key] == receipt[key])
+    };
+    if !same_image(old) && !same_image(&next) {
+        return Err(IngestError::Integrity);
+    }
+    let new_path = root.join(next_name);
+    if new_path.is_file()
+        && file_sha(&new_path)? == next["sha256"].as_str().ok_or(IngestError::Integrity)?
+    {
+        cleanup_export_images(root, base, Some(old), &next)?;
+        let text = root.join(format!("{base}.txt"));
+        if text.is_file() {
+            next["text_sha256"] = file_sha(&text)?.into();
+        }
+        atomic_write(manifest_path, &storage(serde_json::to_vec(&next))?)?;
+    } else {
+        // No image promotion occurred: discard only metadata and retry.
+        if file_sha(&root.join(old_name))?
+            != old["sha256"].as_str().ok_or(IngestError::Integrity)?
+            || (old_name != next_name && new_path.exists())
+        {
+            return Err(IngestError::Integrity);
+        }
+    }
+    storage(fs::remove_file(intent))?;
+    Ok(())
+}
+
+fn write_managed_pair(
+    root: &Path,
+    base: &str,
+    image_name: &str,
+    image_bytes: &[u8],
+    content: &str,
+    manifest: &serde_json::Value,
+    manifest_path: &Path,
+) -> Result<(), IngestError> {
+    let expected_image_sha = manifest["sha256"].as_str().ok_or(IngestError::Integrity)?;
+    if !valid_image_name(base, image_name)
+        || format!("{:x}", Sha256::digest(image_bytes)) != expected_image_sha
+    {
+        return Err(IngestError::Integrity);
+    }
+    let metadata_dir = root.join(".bdm-manifests");
+    storage(fs::create_dir_all(&metadata_dir))?;
+    let intent = metadata_dir.join(format!("{base}.image-update.json"));
+    recover_export_update(root, base, manifest_path, &intent)?;
+    let image_path = root.join(image_name);
+    let text_path = root.join(format!("{base}.txt"));
     let prior_manifest = if manifest_path.is_file() {
         Some(storage(serde_json::from_slice::<serde_json::Value>(
-            &storage(fs::read(&manifest_path))?,
+            &storage(fs::read(manifest_path))?,
         ))?)
     } else {
         None
     };
-    let mut replaced = None;
     if let Some(previous) = &prior_manifest {
         let old_name = previous["image"].as_str().ok_or(IngestError::Integrity)?;
-        if old_name != image_name {
-            if image_name != format!("{base}.png")
-                || !["jpg", "jpeg", "webp"]
-                    .into_iter()
-                    .any(|ext| old_name == format!("{base}.{ext}"))
-                || previous["media_id"] != manifest["media_id"]
-                || previous["source"] != manifest["source"]
-            {
-                return Err(IngestError::Integrity);
-            }
-            let old_sha = previous["sha256"].as_str().ok_or(IngestError::Integrity)?;
-            if old_sha.len() != 64 || !old_sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(IngestError::Integrity);
-            }
-            // The backup suffix is deliberately not an image extension: recursive
-            // trainers must not pick up the superseded lossy training image.
-            let backup_dir = manifest_dir.join("replaced-images");
-            let backup = backup_dir.join(format!("{old_sha}-{old_name}.bak"));
-            let old_path = root.join(old_name);
-            let evidence = if old_path.is_file() {
-                &old_path
-            } else {
-                &backup
-            };
-            if format!("{:x}", Sha256::digest(storage(fs::read(evidence))?)) != old_sha {
-                return Err(IngestError::Integrity);
-            }
-            replaced = Some((old_path, backup_dir, backup, old_sha.to_owned()));
+        if !valid_image_name(base, old_name)
+            || previous["media_id"] != manifest["media_id"]
+            || previous["source"] != manifest["source"]
+        {
+            return Err(IngestError::Integrity);
+        }
+        if old_name != image_name
+            && root.join(old_name).is_file()
+            && file_sha(&root.join(old_name))?
+                != previous["sha256"].as_str().ok_or(IngestError::Integrity)?
+        {
+            return Err(IngestError::Integrity);
         }
     }
-    if image_path.exists()
-        && format!("{:x}", Sha256::digest(storage(fs::read(&image_path))?)) != expected_image_sha
-    {
-        return Err(IngestError::Integrity);
+    for ext in ["png", "jpg", "jpeg", "webp"] {
+        let name = format!("{base}.{ext}");
+        if name != image_name
+            && root.join(&name).exists()
+            && !prior_manifest
+                .as_ref()
+                .is_some_and(|p| p["image"].as_str() == Some(name.as_str()))
+        {
+            return Err(IngestError::Integrity);
+        }
     }
-    let update_text = if text_path.exists() {
-        let old_text = storage(fs::read_to_string(&text_path))?;
-        if old_text != content {
-            let old_sha = format!("{:x}", Sha256::digest(old_text.as_bytes()));
-            let trusted = prior_manifest.as_ref().is_some_and(|previous| {
-                previous["text_sha256"].as_str() == Some(old_sha.as_str())
-                    && previous["text_kind"].as_str() == Some(mode)
-                    && (replaced.is_some()
-                        || (previous["image"].as_str() == Some(image_name)
-                            && previous["sha256"].as_str() == Some(expected_image_sha)))
-            });
-            if !trusted {
-                return Err(IngestError::Integrity);
-            }
-            true
-        } else {
-            false
+    let existing_sha = if image_path.is_file() {
+        Some(file_sha(&image_path)?)
+    } else {
+        None
+    };
+    if let Some(sha) = &existing_sha {
+        if sha != expected_image_sha
+            && !prior_manifest.as_ref().is_some_and(|p| {
+                p["image"].as_str() == Some(image_name)
+                    && p["sha256"].as_str() == Some(sha.as_str())
+            })
+        {
+            return Err(IngestError::Integrity);
+        }
+    }
+    let mut next = manifest.clone();
+    if text_path.exists() {
+        next["text_sha256"] = file_sha(&text_path)?.into();
+        next["text_preserved"] = true.into();
+        if let Some(prior) = &prior_manifest {
+            next["text_kind"] = prior["text_kind"].clone();
         }
     } else {
-        true
-    };
-    if !image_path.exists() {
+        atomic_write(&text_path, content.as_bytes())?;
+    }
+    if let Some(previous) = &prior_manifest {
+        atomic_write(
+            &intent,
+            &storage(serde_json::to_vec(
+                &serde_json::json!({"previous":previous,"next":next}),
+            ))?,
+        )?;
+    }
+    if existing_sha.as_deref() != Some(expected_image_sha) {
         let mut temp = storage(tempfile::NamedTempFile::new_in(root))?;
         storage(temp.write_all(image_bytes))?;
         storage(temp.as_file().sync_all())?;
-        storage(temp.persist_noclobber(&image_path))?;
-    }
-    if update_text {
-        atomic_write(&text_path, content.as_bytes())?;
-    }
-    if let Some((old_path, backup_dir, backup, old_sha)) = replaced {
-        storage(fs::create_dir_all(backup_dir))?;
-        if backup.exists() {
-            if format!("{:x}", Sha256::digest(storage(fs::read(&backup))?)) != old_sha {
+        if existing_sha.is_some() {
+            if file_sha(&image_path)?.as_str()
+                != existing_sha.as_deref().ok_or(IngestError::Integrity)?
+            {
                 return Err(IngestError::Integrity);
             }
-            if old_path.is_file() {
-                storage(fs::remove_file(old_path))?;
-            }
-        } else if old_path.is_file() {
-            storage(fs::rename(old_path, backup))?;
+            storage(temp.persist(&image_path).map_err(|e| e.error))?;
+        } else {
+            storage(temp.persist_noclobber(&image_path).map_err(|e| e.error))?;
         }
     }
-    let manifest_bytes = storage(serde_json::to_vec(manifest))?;
-    if prior_manifest.as_ref() != Some(manifest) {
-        atomic_write(&manifest_path, &manifest_bytes)?;
+    cleanup_export_images(root, base, prior_manifest.as_ref(), &next)?;
+    if prior_manifest.as_ref() != Some(&next) {
+        atomic_write(manifest_path, &storage(serde_json::to_vec(&next))?)?;
+    }
+    if intent.is_file() {
+        storage(fs::remove_file(intent))?;
     }
     Ok(())
 }
