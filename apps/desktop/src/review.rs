@@ -81,6 +81,24 @@ impl BdmApp {
             .map(Dialog::Media);
     }
 
+    fn remove_pending_deletion(&mut self, id: usize) {
+        if !self.demo {
+            if let Some(path) = self.catalog.path.as_deref() {
+                let result = bdm_infrastructure::catalog::SqliteCatalog::open(path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut repo| {
+                        repo.clear_agent_rejections(&std::collections::BTreeSet::from([id as i64]))
+                            .map_err(|e| e.to_string())
+                    });
+                if let Err(error) = result {
+                    self.form_error = error;
+                    return;
+                }
+            }
+        }
+        self.pending_deletion.remove(&id);
+    }
+
     pub fn confirm_sample_deletion(
         &mut self,
         return_media: Option<usize>,
@@ -186,7 +204,7 @@ impl BdmApp {
                                     if icon_button(ui, "close", "从清单移除，保留图片", false)
                                         .clicked()
                                     {
-                                        self.pending_deletion.remove(&id);
+                                        self.remove_pending_deletion(id);
                                     }
                                 },
                             );
