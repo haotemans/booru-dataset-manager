@@ -335,6 +335,33 @@ impl BdmApp {
         if self.demo || self.is_capture() || !self.ingest.stored.contains_key(&id) {
             return;
         }
+        // A native PNG edit in another process can replace the cached JPEG path.
+        // Retry against current catalog metadata instead of repeatedly decoding
+        // a filename that no longer exists. Leave an active local edit alone.
+        let stale_or_failed = self
+            .ingest
+            .stored
+            .get(&id)
+            .is_some_and(|m| !m.path.is_file())
+            || self
+                .ingest
+                .detail_error
+                .as_ref()
+                .is_some_and(|(failed, _)| *failed == id);
+        if stale_or_failed
+            && self.catalog.path.is_some()
+            && !self.ingest_active()
+            && !self.workflow_active()
+            && !self.image_editor.active()
+            && !self.image_editor.visible
+        {
+            if let Err(error) = self.reload_media() {
+                self.clear_review_original();
+                self.ingest.detail_requested = Some(id);
+                self.ingest.detail_error = Some((id, format!("无法刷新图片路径：{error}")));
+                return;
+            }
+        }
         self.clear_review_original();
         self.ingest.detail_requested = Some(id);
         self.review_texture(ctx, id);
@@ -358,8 +385,8 @@ impl BdmApp {
             return Ok(());
         }
         let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
-        let repo =
-            bdm_infrastructure::catalog::SqliteCatalog::open(&path).map_err(|e| e.to_string())?;
+        let repo = bdm_infrastructure::catalog::SqliteCatalog::connect_existing(&path, true)
+            .map_err(|e| e.to_string())?;
         let stored = repo.list_media().map_err(|e| e.to_string())?;
         let records = bdm_ports::CollectionRepository::list(&repo).map_err(|e| e.to_string())?;
         self.refresh_collection_records(records)

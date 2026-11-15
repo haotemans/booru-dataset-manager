@@ -19,7 +19,10 @@ pub fn snapshot(path: &Path) -> Result<AgentSnapshot, IngestError> {
     ))?;
     storage(connection.busy_timeout(Duration::from_millis(100)))?;
     let revision = storage(connection.query_row(
-        "SELECT coalesce(max(id),0) FROM audit_log WHERE action LIKE 'agent_%'",
+        // Native edits can be performed by the CLI or another local process.
+        // Watch committed catalog events, not only calls through the MCP adapter.
+        // An intent alone must not publish a half-promoted file to the desktop.
+        "SELECT coalesce(max(id),0) FROM audit_log WHERE action NOT GLOB '*_pending' AND action NOT GLOB '*_intent'",
         [],
         |r| r.get(0),
     ))?;
