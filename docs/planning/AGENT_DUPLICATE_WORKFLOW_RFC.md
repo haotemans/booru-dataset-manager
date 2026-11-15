@@ -1,6 +1,6 @@
 # ADR-006 / W05 draft: Duplicate detection, visual relations, survivor decisions and review routing
 
-**Status:** PARTIALLY ACCEPTED — owner selected **retain the aesthetically best eligible image as the representative/survivor of each true duplicate group** on 2026-11-15. Definitions of qualifying groups, scoring/ranking machinery, and physical deletion policy below remain proposals pending review. PR #11 is design-only; no executable changes. Decisions in ADR-001 (independent daemon) and ADR-002 (Agent-pull work allocation) apply.
+**Status:** PARTIALLY ACCEPTED (2026-11-15). **P1 ACCEPTED:** for each verified interchangeable duplicate group, retain the aesthetically strongest eligible image; all other members enter the **existing pending-deletion review collection**; the user makes the **final batch deletion confirmation**. Exact-byte matches are coalesced at import. Group eligibility, ranking uncertainty and queue UI details remain proposals. PR #11 is documentation-only; no runtime behavior changes.
 **Dependencies:** [ADR-003 node catalog](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-004 aesthetics](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md), [ADR-005 comic review](COMIC_PAGE_EXCLUSION_AND_OPTIONAL_LABELING.md), [existing DINOv3 design](../features/DINOV3_VISUAL_IDENTITY.md).
 
 ## 1. Verified current code (main: 2026-11-15)
@@ -10,14 +10,14 @@
 - `crates/infrastructure/src/agent/tools.rs` exposes `bdm_scan_duplicates` (at most 64 explicit media IDs; visual job invoked synchronously) and `bdm_resolve_duplicates`. It holds a shared media lock during scan computation, and uses a global catalog mutex through the Agent server adapter.
 - `crates/infrastructure/src/agent/state.rs` provides Agent review results and a GUI-confirmed deletion mechanism, including validation against current SHA, plus human cancel/defer.
 - Existing product design preserves distinct alternate poses, clothing, expressions, scene changes, composition variants, and source associations. DINO similarity is not enough to declare them interchangeable.
-- These are **code/doc observations**, not a new policy adoption. A key design question is whether to preserve the normal ingestion auto-deletion path or route **all non-exact** deletion candidates through the same existing deletion-review collection used for comics and Agent rejects. Do not silently change that policy.
+- These are **code/doc observations**, not a new policy adoption. **Target accepted behavior:** route **all non-exact visual duplicate removals** through the existing pending-deletion collection; current normal-ingest strict automatic deletion remains in main until separately implemented and verified.
 
 ## 2. Distinct relation classes
 
 | Type | Example | Local evidence | Default suggested action |
 | --- | --- | --- | --- |
 | `exact_file` | identical SHA/MD5-verified source bytes | cryptographic equality + file verification | one managed asset, merge valid source/collection associations during import; no redundant physical copy |
-| `visually_same` | resized/recompressed same composition | pHash+compatible DINO candidates, visual confirmation for ambiguous | policy-controlled reviewed/automatic handling; preserve valid higher-quality source |
+| `visually_same` | resized/recompressed same composition | pHash+compatible DINO candidates, visual confirmation for ambiguous | **retain aesthetically best eligible group member; queue others for batch confirmation** |
 | `crop_or_color_variant` | same illustration, different crop/filter/text overlay | pHash/DINO plus Agent/human comparison | keep relationship and report; not automatically interchangeable |
 | `difference_set` | same work, changed expression, costume, censorship, elements | provider-confirmed relation where available or visual/human review | retain variants; group, then optional representative selection for eligible export |
 | `same_subject_different_art` | same character with different pose/background | semantic similarity only | preserve both; do not class as near duplicate |
@@ -35,7 +35,7 @@
 | D03 `dedup.candidates` | Rust | compatible feature index, scope, search threshold/profile | bounded, paged scored pairs | search index, no O(N^2) per-pair model calls |
 | D04 `dedup.relation_classify` | Agent-pull | candidate pair IDs, both current SHAs, full-image views | typed relation + confidence/evidence | batch pair metadata; show side-by-side pixels only as needed |
 | D05 `dedup.select_survivor` | Agent/policy/user | verified **true duplicate group** with complete candidate images + comparable aesthetic evidence | **one aesthetically strongest eligible survivor** (or explicit unresolved) + ranked candidates and reasons | **accepted selection objective**; aesthetic primary, technical validity a gate, human overrides win; meaningful variants remain separate |
-| D06 `review.route` | Rust | validated pair/current SHAs/reason/policy + lease | existing pending deletion-review entry or stable group decision | human overrides prevail; no immediate file removal unless owner explicitly selects legacy auto policy |
+| D06 `review.route` | Rust | validated group, winner, all member SHA/revisions and lease | **all verified nonwinners added to existing pending-deletion review** | group-revision CAS, atomic queue update, human overrides; no immediate delete |
 | D07 `review.confirm_delete` | Human GUI | current pending review and full reference scope | audited physical deletion or cancellation | existing confirmed deletion service only; check all associations and stale hashes |
 | D08 `dedup.reconcile` | Rust | workflow/candidate/feature cursor | durable status, reused cache, stale/failed pairs | skip already adjudicated pairs, retain human decisions |
 
@@ -92,14 +92,14 @@ The model's `relation`, `confidence`, and `survivor` are **proposals subject to 
 
 ### Scope and selection rules
 
-**Accepted owner requirement:** for a **verified group of interchangeable duplicate images**, keep the aesthetically strongest eligible member as the **survivor / canonical representative**. Other members are removal candidates according to the separately chosen deletion-routing policy; no automatic physical deletion has been authorized merely by selecting a winner.
+**Accepted owner requirement:** for a **verified group of interchangeable duplicate images**, keep the aesthetically strongest eligible member as the **survivor / canonical representative**. All verified nonwinners enter the existing pending-deletion collection; final physical deletion requires the user's batch confirmation.
 
 1. **Group identity comes first.** pHash/DINO features retrieve candidates, but only same-work copies or functionally interchangeable near-identical variants belong to a *deletion-eligible duplicate group*. A collection of the same character, same artist, similar composition, or meaningful expression/costume/pose/crop differences is *not* itself a deletion-eligible group. Source-declared difference sets can remain a separate relation group; any representative there governs **export preference**, not automatic removal of distinct art.
 2. **Eligibility gate first, aesthetics rank second.** A candidate with broken bytes, missing verified source, insufficient dimensions for the chosen training scope, unsafe edit state, or known integrity failure cannot be the active training survivor merely due to a high subjective score. Report eligible members separately from technically ineligible/unknown ones. Avoid "more pixels always wins": native dimensions/PNG are **tie-breakers**, not proxies for beauty.
 3. **Primary criterion: visual aesthetics** on the current complete image with an agreed, versioned aesthetic Profile. Evaluate composition completeness, harmonious lighting/color, detail/line quality appropriate to style, visible defects/watermarks, and expressive impact. Prefer an **explicit relative comparison within the group** when absolute scores are too close or not calibrated; the output includes why the winner is preferable.
 4. **Avoid silent numeric ranking across profiles.** Existing aesthetic reports can be reused only when current SHA, Profile/model/prompt version, evaluation conditions and comparability are valid. Where reports conflict or are absent, Agent gets a bounded ranked-group review lease; it may read full current images side-by-side and submit a comparative winner and confidence. Low-confidence or tied candidates go to `unresolved` / review, not an arbitrary numeric sort.
 5. **Tie rules proposed:** if genuinely indistinguishable aesthetically, prefer better preserved full composition / fewer accidental artifacts; then suitable native detail and fidelity; then verified source integrity and lossless format when meaningful; finally deterministic stable ID **only for technically equivalent content and with an audit note**. Do not discard a distinct composition merely because a deterministic tie-break exists.
-6. **Survivor and non-survivors:** record the winning media ID, all members and revisions, aesthetic evidence and comparison Profile; **retain/merge valid collection/source associations when deleting**. Non-winners may be queued into the existing deletion-review collection with `duplicate_group_non_survivor` reason, and the final user-confirmed deletion service validates current SHA and shared references. The *policy* of whether strict dual-signal duplicates may bypass the review is **still open (P1/P2/P3 below)** and must not be silently changed by this choice.
+6. **Survivor and non-survivors:** record the winning media ID, all members and revisions, aesthetic evidence and comparison Profile; **retain/merge valid collection/source associations when deleting**. **All verified nonwinners are queued into the existing pending-deletion collection** with reason `duplicate_group_non_survivor`, group ID and winner ID. Final user batch confirmation validates group revision, current SHAs, protected winner and all source references. **There is no strict automatic physical-deletion bypass under the accepted policy.**
 7. **Human override:** a user-selected survivor or "keep both" decision has priority over an Agent rerank. Re-evaluation after a new image, edit or Profile version change should not replace human choices without an explicit reset. Other existing queue reasons (e.g. comic) must not be overwritten; aggregate multiple reasons for the same pending media without duplicate cards.
 8. **Result and failure:** one valid survivor per confirmed eligible group; zero if unresolved or all items invalid. Group-level compare-and-swap checks every member ID/revision before recording a new winner or queueing removals. Snapshot membership changes invalidate stale ranking. Do not make the group selection transaction wait for model inference.
 
@@ -125,7 +125,7 @@ The model's `relation`, `confidence`, and `survivor` are **proposals subject to 
 }
 ~~~
 
-This example score is synthetic. `next_action` is a **proposed review-routing default**, not an owner-approved answer to the separate P1/P2/P3 deletion policy question.
+This example score is synthetic. `next_action=queue_for_deletion_review` is **accepted** for verified nonwinners; it does not delete bytes.
 
 ### Agent throughput and test plan
 
@@ -134,16 +134,16 @@ This example score is synthetic. `next_action` is a **proposed review-routing de
 - Persist ranked scores and relation evidence independently from delete queue state; only rerank if image/group/Profile/model change materially invalidates evidence.
 - Acceptance: a group with A=8.3/B=9.1/C=8.6 picks B; group with distinct scene/pose is split rather than losing meaningful images; technically invalid highest-score image is excluded from survivor selection; low-confidence/ties remain unresolved; user override persists; no revision-stale survivor; correct source/collection association transfer; no file deletion solely by this Agent result.
 
-## 6. Explicit policy choice required before implementation
+## 6. ACCEPTED P1: review all non-exact duplicate removals before physical deletion
 
-**P1 — Recommended for safety/consistency:** Import performs exact-byte dedupe by reusing canonical managed assets and merging associations. *All non-exact visual deletions*, even `dual_confirmed`, are queued into the **existing pending deletion review**; no physical deletion until user confirmation. AI can still automatically classify pairs and choose a **proposed** survivor, so no manual pair-by-pair pre-screen is needed. This changes current normal ingestion semantics.
+1. **Exact bytes**: do not store the same content twice. Reuse one canonical managed object and preserve every valid source and collection association, with no subjective comparison.
+2. **Verified interchangeable visual group**: choose one aesthetically best **technically eligible** winner. Queue *all* verified nonwinners into the **existing GUI pending-deletion collection**, with their SHA, group ID, winner ID, reason `duplicate_group_non_survivor`, Agent evidence and version.
+3. **Final user step**: the user may batch-confirm or cancel. Confirm revalidates winner survival, group membership, current SHA and all shared references. Partial batch confirmation is safe; a pending review is not a physical deletion.
+4. **Meaningful differences and uncertain relations**: split into distinct sets, retain them, or defer; never queue them merely due to similarity.
+5. **Manual overrides**: user Keep, choose-winner, keep-both and cancellation override Agent rankings across scans, restarts and model upgrades.
+6. **Required implementation migration**: current `crates/infrastructure/src/visual.rs` can call `repo.delete_media` directly for strict dual-signal matches in non-Agent jobs (pHash<=2 and compatible DINO cosine>=0.997). The future implementation must route these through the review queue; test both normal ingestion and Agent paths. **This documentation-only PR has not changed the running code.**
 
-**P2 — Preserve legacy dual-signal auto-delete:** Retain current automatic physical removal where pHash<=2 and DINO cosine>=0.997 (known valid model) for the existing `dedup-auto` path, with survivor/association rules and audit. Keep the Agent-initiated review path non-destructive and route other candidates to review. This maintains today's behavior but risks deleting meaningful variants if the threshold is miscalibrated.
-
-**P3 — Configurable per immutable job policy:** Explicit `review_all` vs `legacy_strict_auto` snapshot, with `review_all` as a proposed safe default. This allows controlled opt-in to prior behavior, but requires policy migration and a UI/CLI warning. No automatic selection of the destructive mode from legacy settings without documented compatibility.
-
-Do **not** interpret the prior decision about *comic candidates entering review* as a decision about *dual-signal duplicate auto-deletion*. It is independent. Owner must select P1, P2 or P3.
-
+**Rejected for target W05:** old P2 (retain strict automatic physical deletion) and P3 (allow an automatic physical-deletion mode). The accepted policy is P1. Do not interpret similarity thresholds as permission to delete.
 ## 7. Tests and performance gates
 
 1. Import same exact bytes twice from different collections -> one canonical physical asset, valid multi-source associations.
@@ -160,3 +160,73 @@ Do **not** interpret the prior decision about *comic candidates entering review*
 
 ### Conversation checkpoint
 **Accepted:** in true interchangeable duplicate groups choose the best eligible image by aesthetic judgement (with technical eligibility and human overrides). **Next open policy:** whether strict existing auto-delete should remain (P2), be replaced by common review routing (P1), or be a policy switch (P3). No implementation has started.
+
+## 8. Group eligibility and difference-set protection (implementation proposal)
+
+- pHash/DINOv3 **retrieve candidates**, not proof of an interchangeable duplicate. A~B and B~C do **not** imply A~C: connected components/union-find alone must never drive a deletion group. Require positive, versioned equivalence evidence for each group's members and check contradictions; split incompatible branches.
+- Record pair relation kinds separately: `exact_byte`, `reencoded_or_resized`, `same_artwork_equivalent`, `minor_nonsemantic_edit`, `meaningful_difference`, `same_character_new_art`, `similar_style_only`, `uncertain`.
+- **Meaningful difference sets stay out of deletion groups:** changed facial expression, pose, outfit, characters, censorship state, substantive crop, background/scene and artist-intended composition. May choose an export-preferred representative only **without deleting alternate art**.
+- One image cannot simultaneously be a nonwinner in overlapping active deletion groups. Persist `group_id`, `group_revision`, group type, every media ID/current SHA, edge evidence and preserved human exclusions. Resolve overlaps *before* winner selection.
+- Quality **eligibility gate**: corrupt/missing source, invalid image state, below configured training floor must not win by aesthetic score alone. Treat technical failures as technical state, not aesthetic zero. Keep immutable originals and user-reviewed text intact.
+- Existing W16 scores can be reused only for matching current SHA, aesthetic Profile, rubric, model/prompt/calibration. Compare actual visuals **within the group** when scores are missing, incompatible or close; ranking reasons matter more than small numeric differences.
+- A tie or low-confidence relation is `unresolved`. Do not queue members of an incompletely validated group. If aesthetically indistinguishable but same valid artwork, propose fidelity/completeness and compression/artifact tie-breaks, followed by verified native detail. No automatic removal of meaningful content based on file size or stable ID alone.
+
+## 9. Group Work Lease and throughput (implementation proposal)
+
+Stages:
+
+    exact_lookup (local)
+       -> feature_extract (local CPU, versioned cache)
+       -> candidate_search (local index)
+       -> relation_classify (Agent only where needed)
+       -> close_interchangeable_group (local validation)
+       -> aesthetic_group_rank (Agent pull or comparable cached W16)
+       -> select_winner + route_nonwinners (short atomic DB/journal)
+       -> existing pending-deletion GUI (awaiting_user)
+       -> confirmed batch delete or cancel (human only)
+
+- The unit of Agent ranking is **one duplicate group**, extending the ordinary single-image/pair leases. Lease carries `group_id`, `group_revision`, full media ID/SHA/revision set, generation/fencing, Profile/version and image handles. A competing Agent cannot simultaneously commit to any overlapping group.
+- Prefer **one group ranking pass** instead of N*(N-1)/2 independent pair calls. Contact sheets are only triage; show bounded **full current images** of all candidates before proposing their removal. Large groups can compare in chunks, then reconcile a global winner; choose batch limits using actual token/image/RAM benchmarks, not hardcoded constants.
+- No global lock across DINO inference, contact sheet, external Agent reasoning or image decoding. Persist short group-CAS and review-route transactions. In a single logical commit, validate closed membership and current hashes, protect winner, and queue **every** nonwinner with its reason (or fail with no partial group intent). Idempotency prevents duplicate review cards.
+- Late-arriving candidates, GUI edits, changed group membership or changed evaluation Profile invalidate stale ranking and **stale pending-deletion intents** until reranked; never approve an outdated group winner.
+- Reuse cached pHash/DINO and W16 aesthetic results; do not rescore unchanged media or require aesthetic calls for identical bytes. Source data and manually protected alternate variants survive rescans. DINO remains CPU-only under current product policy.
+- Existing review storage has one `agent_reviews` decision per media ID. **Implementation must merge multiple pending reasons (comic/duplicate/quality) without overwriting user cancellation or inventing duplicate cards**, with a tested migration if necessary. This is not implemented in the current DB.
+- Key progress counts: candidate pairs, confirmed comparable groups, groups ranked, nonwinner pending review, user-confirmed physical deletions, unresolved/retained difference sets; a queued deletion is not a completed physical deletion.
+
+## 10. Agent CLI/MCP and review UX contract (implementation proposal)
+
+| Operation | CLI proposal | MCP proposal | Requirements |
+| --- | --- | --- | --- |
+| Start W05 | `bdm workflow run --profile dedup-review --input @-` | `bdm_workflow_run` | durable job ID / immutable deletion-review policy |
+| Only fetch candidate edges | `bdm node run dedup.candidates --input @-` | `bdm_node_run` | bounded pairs, relation hints, no pixel payload in list |
+| Claim one group | `bdm work lease --job JOB_ID --capabilities group-rank` | `bdm_work_lease` | group snapshot and fencing revision |
+| View full group | `bdm work view-group --lease L --work W` | `bdm_work_view_group` or generic multi-image tool | stable ID/image mapping and full-image view receipts |
+| Submit relation/ranking | `bdm work submit --input @-` | `bdm_work_submit` | typed relation, proposed winner, evidence, confidence, all member SHA and idempotency |
+| Route all nonwinners | `bdm node run review.route --input @-` | `bdm_node_run` | existing pending-deletion collection, group-atomic short commit |
+| Status/events | `bdm jobs status/events --jsonl` | `bdm_job_status` | group and deletion counts with errors/retry cursor |
+
+Suggested JSON result (not implemented):
+
+~~~json
+{
+  "group_id": "dup-42",
+  "group_revision": 3,
+  "relation": "interchangeable_same_artwork",
+  "member_sha256": {"123": "sha-a", "124": "sha-b", "125": "sha-c"},
+  "aesthetic_profile": "general-illustration@1",
+  "ranked_media_ids": [124, 125, 123],
+  "selected_survivor_id": 124,
+  "non_survivor_ids": [125, 123],
+  "confidence": "high",
+  "next_action": "existing_pending_deletion_review",
+  "files_deleted": 0
+}
+~~~
+
+CLI/MCP result submission also requires authenticated caller, `lease_id`, generation, expected group revision, per-member current SHA, idempotency key, and complete evidence receipts. Daemon revalidates all before persisting the selected winner and queue. Server-side rights and human final approval cannot be faked by a model label.
+
+**GUI:** reuse existing pending-delete list, add grouped presentation (winner visibly protected; nonwinner thumbnails, group comparison/rationale, batch confirm/cancel). Allow opening images, overriding winner, keeping a meaningful variant, cancelling a group, and checking shared collection references. Final deletion must preserve/transfer valid provenance and source relationships, never blindly merge distinct raw sidecar texts.
+
+**Acceptance tests:** A 8.3/B 9.1/C 8.6 picks B and queues A+C; meaningful expression alternate is split and kept; A~B~C non-transitive chain does not cause mass deletion; human Keep survives rescan; new candidate joining a pending group invalidates stale selection; batch confirm rechecks winner/current SHAs/associations; duplicate reasons merge with comic reasons; CLI/MCP parity; daemon restart recovery; no normal ingest auto-delete after migration; performance p50/p95, peak RAM and Agent image-token cost measured.
+
+**Remaining to discuss:** how to treat subtle color/filter/crop changes, what quality tie-break to use in genuinely interchangeable versions, and the default grouped card behavior in the existing review UI.
