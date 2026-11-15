@@ -1,6 +1,6 @@
 # ADR-004: Aesthetic evaluation as a first-class independent Agent workflow
 
-**Status:** PARTIALLY ACCEPTED. The owner approved **shared aesthetic dimensions + style-specific, versioned Profile extensions** on 2026-11-15. Concrete scoring calibration, profile auto-selection, execution defaults and review decisions are still **proposals pending discussion**.
+**Status:** PARTIALLY ACCEPTED. The owner approved **shared aesthetic dimensions + style-specific, versioned Profile extensions** and decided **to defer comic/manga aesthetic assessment** on 2026-11-15. Concrete scoring calibration, profile auto-selection, execution defaults and review decisions are still **proposals pending discussion**.
 **PR:** #11, draft / docs only; no runtime or existing review decisions changed.
 **Related:** [ADR-003: composable workflow and node catalog](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-002: Agent-pull leases](AGENT_PULL_LEASE_PROTOCOL.md), [existing visual identity design](../features/DINOV3_VISUAL_IDENTITY.md).
 
@@ -153,7 +153,10 @@ Existing `bdm_assess` in `crates/infrastructure/src/agent/{params.rs,tools.rs}` 
 
 Existing `docs/features/DINOV3_VISUAL_IDENTITY.md` establishes aesthetic appeal/completeness as primary representative-selection criteria, with human override and careful separation from similarity and group eligibility. It also documents a legacy strict two-signal auto-dedup deletion path. The new Agent workflow must not implicitly call that destructive path: policy compatibility requires explicit design.
 
-## 9. Decisions still to settle with owner
+## 9. Decisions already accepted and still to settle
+
+- **ACCEPTED:** defer automated comic/manga aesthetics in v1; see section 11 for guardrails.
+
 
 1. **ACCEPTED: common base rubric + style-specific versioned Profiles.** Pending: exact bundled Profile definitions, default-selection policy and calibrated weights.
 2. Assessment behavior: score-only as default (recommended); whether to optionally emit non-binding keep/defer/review recommendations.
@@ -259,3 +262,41 @@ Numbers/observations above are **illustrative placeholders**, not image-specific
 - No automatic rejection, deletion or representative policy is enabled merely by configuring a Profile.
 
 **Still open for further owner review:** exact Profile prompt/rubric contents, whether to support custom Profile authoring in v1, how to collect human calibration labels, and whether aesthetic assessments should offer a separate *non-binding* curation recommendation.
+
+## 11. Deferred comic/manga aesthetic assessment (accepted scope limit)
+
+**Decision:** Comic/manga aesthetics are **not** an initial W16 supported evaluation Profile. A manga/comic page often depends on narrative continuity, panel transitions, visual hierarchy across pages, lettering and pacing; a single-image generic illustration score would incorrectly reward or penalize editorial choices. Avoid creating or improvising a scoring rubric until a separate, calibrated multi-panel/page-context flow is explicitly approved.
+
+### 11.1 Applicability rules (v1 proposal for implementing the accepted exclusion)
+
+- Known comic pages, manga story pages, multi-panel strips, sequential storyboards or related narrative-page images: `aesthetic.evaluate` returns `skipped` with `reason_code: "UNSUPPORTED_AESTHETIC_FORMAT"`, `aesthetic_score: null` and `format_hint: "comic_or_manga"`. **Skipped is not low quality, bad training data, or rejected.**
+- For style-only manga/anime-looking **single standalone illustration**, it is permissible to select the general-illustration Profile **when the asset is actually a standalone illustration**, not a story page. Do not assume any black-and-white drawing is a manga page.
+- When image content is ambiguous, return `needs_classification` / `deferred` without inventing an aesthetic score; optional human classification can unlock the appropriate existing non-comic Profile. Do not silently force the generic Profile onto uncertain manga pages.
+- The format gate can use source metadata and available visual observations; source tags alone are fallible. It must not invoke an extra hosted vision call merely to resolve exclusion without explicit scope/consent.
+- This exclusion is **only** for the aesthetic evaluation workflow W16/N23. It must not automatically prevent collection metadata, technically supported imports, hash/integrity checks, user-requested caption/tag extraction, or independent duplicate analysis. Existing media-type restrictions (e.g. animated assets) are unchanged.
+- Do **not** add manga content to automatic aesthetic rankings, representative selection, Keep/Reject, pruning, export eligibility or deletion based on a missing aesthetic score. Human decisions stay authoritative.
+- If W16 is one step inside a larger workflow, record `skipped` for W16 on manga pages and allow other **independently eligible** nodes to proceed. Do not stop the entire job or count unsupported aesthetics as a stage error.
+- Keep future manga scoring as a separate proposed flow requiring explicit context-aware criteria (panel flow, page narrative, lettering and sequential readability), dedicated human reference labels, and a specific owner decision.
+
+### 11.2 Contract example (illustrative only)
+
+~~~json
+{
+  "media_id": 123,
+  "node_type": "aesthetic.evaluate",
+  "state": "skipped",
+  "reason_code": "UNSUPPORTED_AESTHETIC_FORMAT",
+  "format_hint": "comic_or_manga",
+  "overall_aesthetic": null,
+  "review_decision": null,
+  "source_unchanged": true
+}
+~~~
+
+### 11.3 Acceptance tests
+
+1. A verified manga page receives no aesthetic score, no fallback generic score and no Keep/Reject/deletion side effect.
+2. A black-and-white standalone illustration is not auto-excluded solely because of monochrome rendering.
+3. An uncertain panel/page detection is marked uncertain/deferred and preserves the source.
+4. Full workflow execution correctly counts manga-aesthetic skips while continuing eligible technical/annotation work.
+5. No standard Profile comparative ranking includes skipped comic pages as if `null` meant zero.
