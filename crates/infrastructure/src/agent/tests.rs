@@ -178,6 +178,46 @@ fn two_clients_cannot_claim_same_image_and_expiry_reissues_fenced_generation() {
 }
 
 #[test]
+fn a_new_owner_must_inspect_again_even_if_prior_owner_finished_while_pausing() {
+    let (f, _, m) = fixture();
+    let (s, item, job) = start_work(&f, m.id, "annotate");
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    // Models the idle handoff after an in-flight write finished under pause:
+    // its token is cleared but its old view receipt still exists in storage.
+    f.repo
+        .connection
+        .execute(
+            "UPDATE agent_work SET lease=NULL,owner=NULL WHERE id=?1",
+            [item["work_id"].as_i64().unwrap()],
+        )
+        .unwrap();
+    let next = ok(&s, "work_claim", json!({"owner":"new-owner","job_id":job}))["items"][0].clone();
+    let response = s.execute(
+        "work_annotate",
+        leased_input(
+            &next,
+            "save",
+            json!({"caption":"Uninspected suggestion.","reason":"Test","model":"test"}),
+        ),
+    );
+    assert_eq!(response.metadata["code"], "inspection_required");
+    assert_eq!(
+        s.execute("work_release", item).metadata["code"],
+        "lease_lost"
+    );
+    ok(&s, "work_view", leased_input(&next, "v", json!({})));
+    ok(
+        &s,
+        "work_annotate",
+        leased_input(
+            &next,
+            "save",
+            json!({"caption":"A blue square.","reason":"Inspected current image","model":"test"}),
+        ),
+    );
+}
+
+#[test]
 fn task_plan_prevents_skipping_curation_or_overwriting_unselected_outputs() {
     let (f, _, m) = fixture();
     let (s, item, _) = start_work(&f, m.id, "curate");

@@ -530,7 +530,7 @@ fn claim(repo: &mut SqliteCatalog, input: &Value) -> Result<ServiceReply, Ingest
     drop(q);
     let mut items = Vec::new();
     for id in ids {
-        let changed=tx.execute("UPDATE agent_work SET lease=lower(hex(randomblob(32))),owner=?2,expires=?3,generation=generation+1 WHERE id=?1 AND lease IS NULL",params![id,owner,at+ttl]);
+        let changed=tx.execute("UPDATE agent_work SET lease=lower(hex(randomblob(32))),owner=?2,expires=?3,generation=generation+1,viewed=NULL,preview=NULL WHERE id=?1 AND lease IS NULL",params![id,owner,at+ttl]);
         match changed {
             Ok(1) => {}
             Ok(_) => continue,
@@ -633,17 +633,17 @@ fn work(
         ));
     }
     if action == "heartbeat" {
-        storage(repo.connection.execute(
-            "UPDATE agent_work SET expires=?2 WHERE id=?1",
-            params![id, at + 600],
-        ))?;
+        let changed=storage(repo.connection.execute("UPDATE agent_work SET expires=?5 WHERE id=?1 AND lease=?2 AND generation=?3 AND expires>?4 AND EXISTS(SELECT 1 FROM agent_jobs WHERE id=job_id AND state='running')",params![id,token,generation,now(),now()+600]))?;
+        if changed != 1 {
+            return Err(error("lease_lost", "Ownership changed before heartbeat"));
+        }
         return Ok(ServiceReply::success(json!({"expires":at+600})));
     }
     if action == "release" {
-        storage(repo.connection.execute(
-            "UPDATE agent_work SET lease=NULL,owner=NULL,viewed=NULL,preview=NULL WHERE id=?1",
-            [id],
-        ))?;
+        let changed=storage(repo.connection.execute("UPDATE agent_work SET lease=NULL,owner=NULL,viewed=NULL,preview=NULL WHERE id=?1 AND lease=?2 AND generation=?3 AND expires>?4 AND EXISTS(SELECT 1 FROM agent_jobs WHERE id=job_id AND state='running')",params![id,token,generation,now()]))?;
+        if changed != 1 {
+            return Err(error("lease_lost", "Ownership changed before release"));
+        }
         return Ok(ServiceReply::success(json!({"released":true})));
     }
     let media = repo
@@ -684,10 +684,13 @@ fn work(
         let full = !args.original && args.bbox_1000_xyxy.is_none();
         let mut result = tools::view(repo, &settings, args)?;
         if full {
-            storage(repo.connection.execute(
-                "UPDATE agent_work SET viewed=?2,expires=?3 WHERE id=?1",
-                params![id, sha, at + 600],
-            ))?;
+            let changed=storage(repo.connection.execute("UPDATE agent_work SET viewed=?5,expires=?6 WHERE id=?1 AND lease=?2 AND generation=?3 AND expires>?4 AND EXISTS(SELECT 1 FROM agent_jobs WHERE id=job_id AND state='running')",params![id,token,generation,now(),sha,now()+600]))?;
+            if changed != 1 {
+                return Err(error(
+                    "lease_lost",
+                    "Ownership changed while image was being delivered",
+                ));
+            }
         }
         route(
             &mut result,
@@ -728,10 +731,10 @@ fn work(
             )
         })?;
         let mut result = tools::crop(repo, &settings, args)?;
-        storage(repo.connection.execute(
-            "UPDATE agent_work SET preview=?2,expires=?3 WHERE id=?1",
-            params![id, payload.to_string(), at + 600],
-        ))?;
+        let changed=storage(repo.connection.execute("UPDATE agent_work SET preview=?5,expires=?6 WHERE id=?1 AND lease=?2 AND generation=?3 AND expires>?4 AND EXISTS(SELECT 1 FROM agent_jobs WHERE id=job_id AND state='running')",params![id,token,generation,now(),payload.to_string(),now()+600]))?;
+        if changed != 1 {
+            return Err(error("lease_lost", "Ownership changed during preview"));
+        }
         route(&mut result, id, &stage, "work_apply");
         return Ok(result);
     }
