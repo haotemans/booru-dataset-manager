@@ -1,150 +1,104 @@
-# ADR-005: Exclude sequential comic pages from the illustration dataset; optional future structured comic labeling
+# ADR-005: Comic-page detection routes managed images to the normal deletion-review collection
 
-**Status:** Partially accepted design direction (2026-11-15): for the current **illustration-oriented dataset**, comic/manga **story pages** need not be collected, aesthetically rated or exported. The owner raised a conditional alternative—if a useful, reliable comic-specific aesthetic+annotation pipeline can be designed, consider that separately. **No runtime behavior or destructive cleanup has been authorized.**
-**PR:** #11, draft; architecture and contract design only.
-**Related:** [ADR-003](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-004](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md), [existing ingestion](../features/INGEST_PIPELINE.md), [caption/tag preservation](../features/CAPTIONS_AND_TAGS.md).
+**Status:** PARTIALLY ACCEPTED (2026-11-15). Comic/story pages are out of scope for the illustration dataset, and the owner explicitly requires **recognized comics already held in the managed library to enter the existing deletion-review collection**, rather than merely being excluded from exports. Automatic final deletion is **not** implied; it follows the existing GUI confirmation and cancellation workflow. Source-only records with no downloaded media must not masquerade as deletable library media. This is a design-only Draft PR, **not yet implemented**.
+**PR:** #11.
+**Related:** [ADR-003 workflow/node catalog](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-004 aesthetics](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md), [existing ingestion](../features/INGEST_PIPELINE.md), [existing Agent review implementation](../../crates/infrastructure/src/agent/state.rs).
 
-## 1. Target distinction
+## 1. Final intended pipeline semantics
 
-This policy is about the **content form of a narrative comic/manga page**, not an artist identity, monochrome palette or manga/anime drawing style.
+The new illustration-curation pipeline must distinguish *source filtering*, *comic classification*, *review-queue routing*, and *confirmed physical deletion*. They are not interchangeable.
 
-| Detected category | Illustration dataset default | Rationale |
-| --- | --- | --- |
-| `standalone_illustration` | eligible | An anime/manga-styled single artwork is still an illustration |
-| `narrative_comic_page` | **exclude** | May have multiple panels, balloons, captions, reading order and sequential context; no general-image aesthetic score |
-| `storyboard_or_comic_strip` | **exclude** | Sequential narrative layout is unsuitable for the default single-illustration target |
-| `uncertain_or_mixed` | **auto-quarantine for illustration export; optional human review** | No silent hard-delete or ungrounded aesthetic score; normal batch processing must not require manual triage |
+| Where detected | Action | Review/deletion collection? | Physical file deletion |
+| --- | --- | --- | --- |
+| Source post with exact \`comic\` tag **before download** | Skip acquisition, persist source skip reason \`COMIC_TAG_EXCLUDED\` | **No media deletion entry:** nothing was imported; optional read-only skipped-source history in GUI | None |
+| Image **already imported** and source tag \`comic\` recognized | Queue existing media ID for ordinary **pending deletion review** with reason \`comic_tag\` and current SHA | **Yes**, in the same collection/interface as other Agent-rejected images | Only after existing user confirmation |
+| Imported image classified as sequential comic by Agent vision | Queue existing media ID for ordinary **pending deletion review** with reason \`comic_visual\`, classification confidence and evidence | **Yes**, normal deletion-review collection | Only after existing user confirmation |
+| Downloaded but **not yet imported** temporary file classified as comic | Do not import. Drop verified temporary bytes safely and persist source exclusion record | No managed media ID; no fake deletion candidate | Delete temporary uncommitted file only |
+| Uncertain page / uncertain single illustration | Hold out of automatic illustration export, retry or optional review; do **not** queue deletion as confirmed comic | Not a comic-reject entry | None |
+| Standalone illustration in manga/anime style, manga cover, single-page illustration | Eligible for normal curation | No comic-based deletion | None |
 
-One speech bubble, text overlay, monochrome drawing or more than one character **alone** is not conclusive comic evidence. Source tags (`comic`, `4koma`, `manga`, `multiple_panels`, etc.) are fallible hints and can be missing or misleading; verify the **content form** when uncertain.
+**Scope:** narrative comic/manga story pages, 4-koma, sequential strips and storyboards; not monochrome art, a single caption bubble, an anime/manga look or a specific artist. Danbooru general tag \`comic\` is an inexpensive early hint but is neither complete nor infallible; run an existing Agent vision pass for untagged images when selected by the workflow.
 
-## 2. Proposed default `exclude_comic_pages` policy for illustration curation
+## 2. Existing deletion-review implementation is the compatibility target
 
-Apply a **content-scope gate** as early as reasonably reliable, distinct from format/animation filters, quality scores, keep/reject decisions and duplicate logic:
+Existing MCP \`bdm_assess\` with \`decision=reject\` saves a review in \`agent_reviews\`, reports \`queued_for_deletion=true\`, and does **not** delete files. GUI snapshot uses \`decision='reject'\` plus current image SHA to list review items. Final UI confirmation uses \`delete_review_scope\`, revalidates current SHA and optionally resolves duplicate survivor associations. GUI cancellation calls \`clear_agent_rejections\` and persists a \`defer\` decision.
 
-1. **Discovery prefilter:** if source metadata clearly and reliably identifies a sequential comic page under a calibrated policy, return a `source_excluded` receipt with reason `COMIC_PAGE_OUT_OF_SCOPE`; **do not download** or invoke costly Agent analysis.
-2. **Ambiguous content:** query a size-bounded approved preview/classifier when available; if uncertain, record `needs_classification` and avoid an irreversible decision. Image transmission to an external model still requires explicit permission; do not create a hidden API charge. A human review can settle ambiguous cases.
-3. **Post-fetch pre-import:** if a valid supported static image was temporarily downloaded and is confirmed comic content before import, record the excluded source reference and safely delete the **uncommitted temporary download**, not an existing managed original. Distinguish this from a fetch or file integrity failure.
-4. **Existing managed media:** for an illustration-scope job, mark a **dataset-scope exclusion** in the plan/result and omit from subsequent illustration aesthetic analysis, caption work **for that scope**, training export, and representative ranking. Do **not** convert exclusion into `media.keep=false`, duplicate rejection, deletion queue entry or global metadata mutation. It may remain needed by other collections/workflows.
-5. **Cleanup is separate:** an explicitly requested library-space cleanup can enumerate confirmed comic-only, unreferenced managed images with a dry-run showing shared associations, prior reviewed text, other jobs, originals and bytes saved. **Physical deletion requires separate explicit user confirmation and existing audited deletion protections.** Never delete shared media or silently delete based on text tags.
-6. **Accounting:** report `excluded_comic`, `uncertain`, `eligible_illustration`, and `failed` separately. Excluded is neither a failed download nor a low aesthetic score; source API total counts remain the source's totals. Do not keep re-processing known reliable exclusions.
+**New comic path must reuse the same deletion-review collection/UX and final confirmation**, not create a disconnected quarantine page or a parallel deletion subsystem. Proposed review report fields: \`reason_code=COMIC_CONTENT\`, \`reason_detail=comic_tag|comic_visual\`, \`content_form=sequential_comic\`, \`confidence\`, \`evidence\`, \`model_or_policy_version\`, \`media_id\`, \`image_sha256\`, \`workflow_job_id\`, \`actor_id\`, \`created_at\`. Keep the source raw tags intact.
 
-Proposed fast paths: free deterministic metadata checks first; local layout heuristics (panels/bubbles) as supporting signals second; **Agent vision should resolve remaining uncertain cases automatically, with no routine manual triage step**. If vision is unavailable or still uncertain, the image remains held out of the illustration export and separately reported for optional review. Record whether the decision was metadata-, image-, or human-verified; attach classifier/model version, current SHA, policy version and reason. Avoid guaranteeing comic detection accuracy without a labeled evaluation set, and optimize for very low false positives when discarding downloads.
+To avoid conflating aesthetics with deletion, the new workflow executes **\`content.classify\`** and **\`review.route\`** as distinct logical nodes. The former returns a typed classification. The latter, when part of the owner's requested illustration-curation workflow and authorized to write, routes eligible comic verdicts into the normal review collection. **W16 score-only aesthetics remains non-destructive and never enqueues rejection as a side effect.**
 
-For standalone `node.run aesthetic.evaluate`, do **not** assume an entire ingestion workflow: an existing confirmed comic receives `skipped / UNSUPPORTED_AESTHETIC_FORMAT`. A composite illustration workflow can use this exclusion gate upstream. No new implicit model call or dataset deletion is allowed from a single-node command.
+Do not reuse \`bdm_assess\` with a fabricated low aesthetic score to force \`reject\`: comic exclusion is an **out-of-scope content decision**, not an aesthetic failure.
 
-### Illustrative exclusion receipt (not implemented)
+**Already reviewed by a human:** do not overwrite a persistent Keep/cancel/manual override with a new automated comic verdict. Expose a conflict/needs-review event if the policy requires revisiting it. Retries are idempotent; only one active pending review per image revision and reason, no duplicate cards.
 
-~~~json
-{
-  "source_ref": {"provider": "danbooru", "post_id": "opaque-id"},
-  "media_id": null,
-  "category": "narrative_comic_page",
-  "decision": "exclude_from_illustration_dataset",
-  "reason_code": "COMIC_PAGE_OUT_OF_SCOPE",
-  "confidence": "high",
-  "evidence_source": "verified_content_or_metadata",
-  "aesthetic_score": null,
-  "permanently_deleted": false
-}
-~~~
+## 3. End-to-end workflows and single-node behavior
 
-## 2A. Automatic comic filtering without routine human screening (revised proposal)
+### W02 source discovery / pre-download gate
 
-**Product correction:** Exact Danbooru tag \`comic\` is a **cheap first-stage filter, not a reliable complete filter**: user uploads may omit or misuse the tag. The owner does not want to manually screen normal ingestion batches. The scheduler therefore needs a **conditional automatic content inspection** in addition to tag filtering, while still protecting valuable standalone illustrations from false-positive deletion.
+1. Prefer supported provider query \`-comic\` where verified, but also inspect exact whitespace-delimited \`tag_string_general\` (or complete raw tags when appropriately categorized) for \`comic\`; record skipped-source ID and reason.
+2. If the post is not downloaded, there is no \`media_id\`: do not fabricate an entry in the **media deletion queue**. Optional GUI source history may show excluded posts without a Delete action.
+3. For uncategorized/untagged posts, normal static-media download/verification proceeds according to scope. A separate **strict preview mode** may classify before import where preview/vision access and consent are available, at additional cost.
 
-**Fastest default illustration curation:**
-1. Apply source query exclusions where supported (e.g. \`-comic\`) and verify the raw/general tag token list locally using exact match. Persist reason \`COMIC_TAG_EXCLUDED\`; no Agent call or file download for definite tag hits. Tag aliases/implications must not be assumed to be available unless verified from the source.
-2. For non-tagged media that **already undergo Agent vision for aesthetics/caption**, include a concise required field in the **same image understanding pass**: \`content_form = standalone_illustration | sequential_comic | uncertain\`, \`confidence\`, and a short \`evidence\`. **This avoids a second model call** for the common full-curation workflow.
-3. Any confident \`sequential_comic\` result is marked \`COMIC_PAGE_OUT_OF_SCOPE\` and excluded from aesthetic ranking, annotation *for the illustration dataset* and export; never auto-delete the managed source.
-4. If a **download-only** job must also avoid downloading untagged comics, image content cannot be inferred from tags alone. The optional \`strict_pre_download_comic_filter\` uses an available permitted remote thumbnail/preview and a vision classifier before original download. If no usable preview exists, either (a) download to a bounded temporary file and classify before import, or (b) defer visual classification until the next vision curation stage. This is a configurable cost/coverage trade-off, not a free guarantee.
-5. An inconclusive visual result is \`uncertain\`. **Do not ask a person to inspect every uncertain item by default**. Keep the image in a review/quarantine set and exclude it from automatic illustration export until a later Agent re-check or optional user review. No quality-zero score, Keep/Reject change or permanent deletion. Avoid unbounded repeated reclassification.
-6. A single panel-styled illustration, manga cover or monochrome standalone art remains eligible. Classify **sequential narrative content form**, not black/white palette or artist style.
+### W14 illustration curation / existing-library cleanup
 
-**Default and optional modes (proposed):**
-- \`curation_auto\` (recommended): tag early; fuse automatic image-form classification with existing Agent aesthetic/caption reasoning; no routine human review; hold out uncertain records from export. May temporarily import untagged comics before classification; that is a throughput/storage trade-off.
-- \`download_fast\`: tag early only; very fast, but **does not claim complete comic exclusion**. Pending images have \`content_form=unverified\` and must be checked before strict illustration export.
-- \`download_strict\`: tag early + visual preview classifier before retaining original; more compute/vision calls and consent required; minimizes downloading obvious untagged comics but cannot guarantee perfect classification.
-- \`human_review\`: optional corrections and threshold calibration, **not a mandatory normal processing step**.
+1. Cheap exact source tag check and prior valid content-classification cache.
+2. For media that already reaches Agent visual reasoning, include \`content_form=standalone_illustration|sequential_comic|uncertain\` and confidence/evidence in the **same visual analysis pass** as caption/aesthetic when possible; no second model call solely for this classification.
+3. On confirmed \`sequential_comic\`, call \`review.route\` with \`decision=reject\`, \`reason_code=COMIC_CONTENT\`, current media revision, idempotency key and lease ownership. Save the pending review into the **existing review list**, not into a separate export-only filter.
+4. Suppress downstream aesthetic/caption/illustration export work for the rejected image within the active workflow. Do not overwrite caption/tags/source files to force this state.
+5. GUI displays the ordinary pending-review card, reason, source of verdict and original/current preview. User may confirm or cancel; both are audited and preserved across restart.
+6. On actual user confirmation, recheck current image SHA, shared collection references, file ownership and review state before physical deletion. Follow the existing deletion service and recovery journal.
 
-**Suggested fused Agent output (illustrative):**
+### Standalone nodes
+
+- \`node.run content.classify\` by default performs **classification only**, so an Agent can inspect an image without unexpected changes.
+- \`node.run review.route\` takes an explicit reviewed verdict and authorized route policy; it can **only queue pending review**, never perform physical deletion.
+- \`workflow.run --profile illustration-curation\` explicitly composes classification -> conditional \`review.route\` for confirmed comics -> skip remaining image-specific illustration nodes. The workflow's declared side effects must appear in \`workflow.plan\`.
+- \`node.run aesthetic.evaluate\` on comic content returns \`skipped / UNSUPPORTED_AESTHETIC_FORMAT\` and does **not** itself enqueue a rejection; callers who want deletion review must use the routing node/composite workflow.
+
+### Proposed structured result (illustrative, not implemented)
+
 ~~~json
 {
   "media_id": 123,
+  "expected_sha256": "actual-current-image-sha",
   "content_form": "sequential_comic",
   "confidence": "high",
-  "evidence": ["multiple ordered narrative panels", "dialogue balloons across panels"],
-  "illustration_dataset_eligible": false,
-  "decision_source": "agent_visual",
-  "aesthetic_score": null,
-  "physical_delete": false
+  "evidence": ["multiple ordered narrative panels"],
+  "route": {
+    "collection": "existing_deletion_review",
+    "status": "pending_review",
+    "reason_code": "COMIC_CONTENT",
+    "source": "agent_visual"
+  },
+  "files_deleted": 0
 }
 ~~~
 
-**Acceptance gates:** Measure false-positive comic exclusions with manga-style *standalone* illustrations, covers, monochrome scenes, character sheets and comics deliberately missing \`comic\` tags. Compare automatic classification field added to existing Agent pass against a separate classifier in model calls, image tokens, accepted throughput, and residual comics in exports. A system without vision execution must honestly mark unverified records rather than claiming full filtering. Automatic classification remains advisory for metadata; it can deterministically exclude from the selected illustration export, but **never** authorize permanent library deletion.
+## 4. Performance, scheduling, accounting
 
-## 3. Comic labeling **is feasible** but is a different target and should not be bundled with v1 illustration curation
+- Exact \`comic\` tagging in remote metadata is checked **before original download** to avoid network costs when possible. If no media exists, there can be no deletion of library bytes and no normal media review item.
+- Image-form classification piggybacks on **Agent visual curation**. Do not require an extra model round trip where the image is already presented. A download-only workflow can choose fast tag-only or strict visual-preview screening, with explicit cost/consent.
+- No routine manual comic pre-screening. Human involvement remains the **existing final deletion approval**, not an extra classifier phase.
+- Per-item review routing is atomic, protected by the current image SHA, lease fencing and idempotency key. A GUI manual cancel or Keep has higher priority than an old Agent result.
+- Record \`source_comic_skipped\`, \`media_comic_pending_review\`, \`media_comic_review_cancelled\`, \`media_comic_deleted_by_confirmation\`, \`media_comic_uncertain\` separately; never report pending as physically deleted.
+- Source exclusions are not failed downloads; comic review/reject is not the same as duplicate review or low aesthetic score.
+- Existing source originals and human changes are preserved until confirmed deletion. Follow multi-collection association integrity rules; never blindly delete a shared asset solely because one illustration workflow excludes it.
 
-A specialized comic flow would use page-and-panel structure rather than one single whole-image caption:
+## 5. Tests before merging implementation
 
-1. **Page layout detection:** identify panel regions, page borders, separators and reading direction; associate overlapping/inset panels.
-2. **Reading order:** infer panel order and document ambiguity (for manga commonly right-to-left; for other comics often left-to-right; artistic layouts can override both).
-3. **Text detection and attribution:** detect text/bubbles, narrator boxes, captions and sound effects; OCR or transcribe only legible text; associate balloon tails with speakers only if supported. Do not invent unreadable dialogue.
-4. **Per-panel visual grounding:** caption subjects, visible poses/actions, environment, expressions, interactions and changes; maintain consistent character references **where actually supported**.
-5. **Cross-panel events:** optional short page-level sequence summary based on evidence in visible panels only. Avoid inventing unseen before/after plot events; neighboring-page context is necessary for richer storytelling interpretation.
-6. **Structured tags:** page-level `monochrome/color`, `panel_count`, `reading_direction`, `speech_bubbles`, `narration_boxes`, `onomatopoeia`, `screen_tone`, `panel_layout`, `genre` (only if supported), plus **per-panel** entities/actions/scenes. Artist/character identity categories remain protected and source-verified.
-7. **Separate comic-specific quality:** technical readability, panel composition, visual continuity, line/screentone treatment, bubble placement/readability, storytelling clarity and visual pacing, each with calibrated human references. Do not import the illustration 0-10 score as a universal comparison. Narrative aesthetics ideally evaluate a page sequence, not a single isolated page.
+1. \`comic\` source tag on never-downloaded post -> skipped source, **not** fake media review entry.
+2. Imported post with \`comic\` tag -> appears in the **existing GUI deletion-review collection** with source, reason and current hash; file still exists.
+3. Imported untagged comic recognized by Agent -> same existing deletion-review collection; caption/aesthetic/illustration export skipped for that item.
+4. Manga-style illustration, cover and monochrome artwork -> not rejected as comic merely by style.
+5. Uncertain classification -> held out of export but not added as confirmed comic rejection.
+6. Repeated Agent submission, lease expiry and stale SHA -> no duplicate card or stale overwrite.
+7. Human cancellation/Keep -> persists and wins over retry, restart and rescan.
+8. Confirmed final deletion -> operates only after explicit existing review confirmation and proper shared-reference checks; cancel deletes no bytes.
+9. W16 score-only aesthetic -> no \`agent_reviews\` reject write or \`media.keep\` side effect.
+10. Source/managed review progress counts and audit match real outcomes across daemon restart.
 
-Example **annotation-only** shape:
+## 6. Optional future comic-specific labeling (out of scope)
 
-~~~json
-{
-  "format": "comic_page",
-  "reading_direction": "right_to_left",
-  "panels": [
-    {
-      "panel_id": 1,
-      "bbox_1000_xyxy": [510, 20, 970, 480],
-      "reading_order": 1,
-      "caption": "A character stands beside a window, looking outside.",
-      "visible_tags": ["window", "standing", "side view"],
-      "speech_bubbles": [
-        {"bbox_1000_xyxy": [720, 40, 920, 170], "text": null, "legible": false}
-      ]
-    }
-  ],
-  "page_summary": "The visible sequence opens with a character near a window.",
-  "aesthetic_score": null
-}
-~~~
+A specialized future dataset may store page-level panel boxes, reading order, dialogue bubbles/legible text, per-panel captions/tags, cross-panel continuity and story-flow assessment. **Do not implement a manga aesthetic Profile or comic-only OCR/segmentation pipeline in PR #11**. Focus on correct exclusion + ordinary deletion-review routing for current illustration curation.
 
-Illustrative only: coordinates/text are not observations of an actual image. No extraction pipeline, manga segmentation/OCR weights, or labeled aesthetic model are presently shipped. Each proposed new field requires source/target compatibility, versioning and output tests before support can be claimed.
-
-Public research validates that structured **layout annotation** is possible but does not imply reliable **general aesthetic scoring**: Manga109 includes panel/frame, character face/body and text annotations; CVPR 2025 Manga109 segmentation adds balloons and onomatopoeia; ICCV 2025 Magiv3 uses panel/character/bubble/text association, reading order, OCR and panel captions. These are reference designs, not installed dependencies or a license to redistribute their images.
-
-- Manga109 annotation scheme: https://manga109.github.io/manga109-project-website/en/annotations.html
-- Manga109 segmentation, CVPR 2025: https://openaccess.thecvf.com/content/CVPR2025/papers/Xie_Advancing_Manga_Analysis_Comprehensive_Segmentation_Annotations_for_the_Manga109_Dataset_CVPR_2025_paper.pdf
-- From Panels to Prose (Magiv3), ICCV 2025: https://www.openaccess.thecvf.com/content/ICCV2025/papers/Sachdeva_From_Panels_to_Prose_Generating_Literary_Narratives_from_Comics_ICCV_2025_paper.pdf
-
-**Recommendation:** do not build/enable a comic Profile or specialized flow in PR #11. **Exclude comics from the current illustration training target**, retaining the option to define a separate, explicitly authorized comic dataset later.
-
-## 4. Proposed CLI/MCP integration
-
-**Generic node proposal:** `content.classify` (classification of illustration vs sequential comic/uncertain) is a **separate Node Definition**, with a cheap local source-metadata preflight and an optional Agent vision substage only when needed/consented. A single-node execution does not automatically delete, download or import other media.
-
-**Composite workflow:** the illustration pipeline places the content gate before full download where evidence suffices and repeats validation before import/export as needed. Future `comic.page_annotate` and `comic.page_aesthetic` would be **opt-in and absent from v1 tool discovery**.
-
-- CLI: `bdm node run content.classify --input scope.json --json`; `bdm workflow plan --profile illustration-curation --json` returns exclusion counts, uncertain counts and any review requirement.
-- MCP: `bdm_node_run`, `bdm_work_lease`, `bdm_work_view`, `bdm_work_submit`; new classified outputs use the same strict lease, revision and idempotency contracts.
-- Compact `source_excluded` results should not include model reasoning/images unless specifically requested. Support inspecting the source decision/evidence when needed.
-- Do not overload `bdm_assess`: it currently requires a Keep/Reject/Defer decision and can queue deletion. **Out-of-scope content is an eligibility decision, not an aesthetic or deletion decision.**
-
-## 5. Benchmark, policy and test gates
-
-- Measure content-gate false positives/false negatives on varied comics, manga cover art, monochrome illustrations, 4-koma, character sheets, posters, visual novels, splash pages, text overlays and single-scene panel-styled illustrations. Prefer uncertain review to losing valuable illustrations.
-- Assert `exclude_comic_pages` excludes confirmed comic pages from **new ingestion and illustration export**, but does not mutate shared originals, other collections, human reviews or already exported data without a separate owned-output refresh.
-- Confirm future pagination and incremental sync do not repeatedly download known excluded references. Persist only source skip metadata appropriate for the collection policy.
-- Assert no score is generated for excluded comic pages; null never becomes zero for sorting/training.
-- Only explicitly requested, reviewed library cleanup may permanently delete managed media after association and version checks. Existing legacy dedup behavior must not be invoked as a surrogate cleanup action.
-- All new classifications and nodes must be explicitly tested and measured before claims of improved speed or accuracy.
-
-**Open decisions:** whether to prefer `curation_auto` or `download_strict` by default; the acceptable false-positive/false-negative rates; and future optional comic dataset scope. Default routine human screening is **not** a requirement. Permanent cleanup remains a separate, explicitly authorized operation.
+**Open detail:** If the owner wants every excluded *remote source post* visibly listed alongside deletion candidates, implement a clearly labeled non-deletable source-skip history section; do not create a false managed-media deletion record.
