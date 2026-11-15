@@ -1,6 +1,6 @@
 # ADR-007 / W06+W07: Training suitability, visual assessment and one-pass Caption/Tag annotation
 
-**Status:** PARTIALLY ACCEPTED (2026-11-15). Owner selected **W06 policy A: only images confidently and clearly unsuitable for the selected training target are automatically queued in the existing pending-deletion review; other images are kept or deferred**. Human final deletion confirmation remains mandatory. The detailed W06 rubric/threshold calibration and W07 annotation schema/defaults below are still proposed for review. PR #11 remains docs-only; no runtime code or data has changed.
+**Status:** PARTIALLY ACCEPTED (2026-11-15). Owner selected **W06 policy A: clearly unsuitable high-confidence images automatically enter existing pending-deletion review**. **New accepted priority: aesthetics is a HARD quality gate for the premium illustration dataset**: artwork that clearly falls below an approved style-aware aesthetic standard can be unsuitable even if it is technically valid, and may be queued for review. Weak/uncertain borderline art is deferred and excluded from the premium export, not automatically retained. Final physical deletion remains human-confirmed. Human final deletion confirmation remains mandatory. The detailed W06 rubric/threshold calibration and W07 annotation schema/defaults below are still proposed for review. PR #11 remains docs-only; no runtime code or data has changed.
 **Related:** [ADR-001 persistent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md), [ADR-002 Agent-pull leases](AGENT_PULL_LEASE_PROTOCOL.md), [ADR-003 nodes/workflow](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-004 aesthetics](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md), [ADR-005 comic review routing](COMIC_PAGE_EXCLUSION_AND_OPTIONAL_LABELING.md), [ADR-006 dedup](AGENT_DUPLICATE_WORKFLOW_RFC.md), [current caption/tag rules](../features/CAPTIONS_AND_TAGS.md).
 
 ## 1. Distinct responsibilities and a shared Agent visual pass
@@ -173,7 +173,7 @@ An Agent can request only a **node** or a **workflow**, and one workflow may con
 
 ## 7. Critical discussion decisions (not yet accepted)
 
-1. **W06 routing: policy A ACCEPTED.** High-confidence, clearly unsuitable images automatically enter existing pending-deletion review **only within an explicitly authorized quality-screen workflow**. Low aesthetic score or uncertainty alone never routes rejection. Standalone scoring remains non-destructive. Remaining decisions: tested eligibility reason codes, recoverability and confidence calibration.
+1. **W06 routing: policy A ACCEPTED.** High-confidence, clearly unsuitable images automatically enter existing pending-deletion review **only within an explicitly authorized quality-screen workflow**. **Confirmed poor aesthetics is an eligible rejection reason** in a quality-screen workflow when style-correct, evidence-backed and benchmarked; uncertainty alone never routes rejection. Standalone scoring remains non-destructive. Remaining decisions: tested eligibility reason codes, recoverability and confidence calibration.
 2. **Caption detail:** concise factual description vs **dense training description**; whether to use one adaptive prompt based on image complexity, with maximum length and no hallucinated details.
 3. **Target-specific suitability:** should default target be general 2D illustration style or user-specified dataset Profile for each collection? Collection profile must freeze across the job.
 4. **Annotation overwrite:** default preserve existing reviewed caption/tags, explicit overwrite only on a named output target vs always replace unreviewed artifact on a newly requested optimization run.
@@ -191,7 +191,7 @@ A result is not a scalar "image quality". The daemon stores **independent channe
 | Channel | Interpretation | Who supplies it | Action |
 | --- | --- | --- | --- |
 | `technical` | format/decoder/checksum/size/crop feasibility | Rust local validators | fail/valid/unknown; deterministic preflight |
-| `aesthetic` | artistic appeal *in a style-specific versioned Profile* | Agent W16 | 0-10 or null; **not a deletion threshold** |
+| `aesthetic` | artistic appeal *in a style-specific versioned Profile* | Agent W16 | W16 standalone is score-only; **composed W06 uses approved style-aware aesthetics as a hard premium-dataset eligibility gate** |
 | `training` | suitability *for a declared dataset and goal* | Agent + local target-specific criteria | 0-10 or null, reasons, confidence |
 | `content_form` | standalone illustration vs sequential comic vs uncertain | source tags + optional Agent view | confirmed managed comics follow ADR-005, independent of scores |
 | `duplicate_relation` | whether other images make this instance redundant | W05 pHash/DINO + group review | only W05 selects group survivor and queues nonwinners |
@@ -208,7 +208,7 @@ A result is not a scalar "image quality". The daemon stores **independent channe
 | Severe unintentional artifact covering essential visible content | full view/necessary detail tile; substantial watermark, compression corruption, pasted overlay | suggest `repair_or_crop` when safe; queue only if not usable or repairable under target policy | `UNRECOVERABLE_VISUAL_DEFECT` |
 | Confirmed narrative comic page | exact source tags or visual observation under ADR-005 | route via **comic classification path**, not W06 low score | `COMIC_CONTENT` |
 | Verified duplicate group nonwinner | W05 group winner and immutable revision evidence | route via **W05**, not W06 low training score | `DUPLICATE_GROUP_NON_SURVIVOR` |
-| Low aesthetic score alone | subjective W16 score | **keep or defer**; never automatically reject | `AESTHETIC_LOW_ONLY` (not an auto-reject reason) |
+| Confirmed poor aesthetics against approved style-aware premium-data bar | complete-image view, rubric/Profile, grounded weak composition/light/color/artistic coherence observations, calibrated high confidence | **`reject_for_review` eligible** in explicitly authorized W06 quality-screen flow, otherwise defer when uncertain | `AESTHETIC_BELOW_STANDARD` |
 | Intentional blur, rough sketch, flat colors, low-res pixel style, stylized anatomy, text integral to artwork | style intent and available context | **do not penalize by generic illustration criterion**; use appropriate Profile | `STYLISTIC_INTENT` |
 | Mild noise, small watermark, limited detail, imperfect background | scene-dependent and potentially repairable | `keep` or `defer` / conditional repair | `MINOR_OR_FIXABLE` |
 | Evidence unclear, model disagreeing or incompatible scores | incomplete current view, low confidence, ambiguity | `defer`; do not enter confirmed-delete queue | `INSUFFICIENT_EVIDENCE` |
@@ -219,7 +219,7 @@ A result is not a scalar "image quality". The daemon stores **independent channe
 
 | Outcome | When | Effect in complete W06 quality-screen workflow |
 | --- | --- | --- |
-| `keep` | suitable/usable; low aesthetic alone does not fail it | continue requested W07 annotation or next configured node |
+| `keep` | passes both training-target requirements **and approved minimum aesthetic quality** for premium illustration curation | continue requested W07 annotation or next configured node |
 | `repair_or_crop` | image has a correctable defect; original retained | optionally schedule **explicit** W08 preview/reinspection; otherwise `defer`, not delete |
 | `defer` | evidence incomplete, score uncertain, potentially valuable outlier, model unavailable | persist reason and next action; no deletion queue; may retry or review later |
 | `reject_for_review` | clearly **unfit for the chosen training target**, high confidence, supported by approved condition and current revision, no untried reasonable remedy | enqueue **existing GUI pending deletion review** with target, reason, evidence and current SHA; final physical deletion requires user batch confirmation |
@@ -228,11 +228,11 @@ A result is not a scalar "image quality". The daemon stores **independent channe
 1. It is a workflow with explicit `quality_screen_route_rejects` permission; a standalone W06 node is score-only.
 2. The image/form/target Profile is known, image evidence/technical evidence is current, and the classification is not uncertain.
 3. At least one **approved, versioned reject-eligible reason code** is true, with verifiable evidence and high calibrated confidence, or a deterministic terminal technical failure with completed recovery policy.
-4. The outcome is **not** simply low beauty, small detail, uncommon style, a screenshot of an intentionally stylized piece, an unverified duplicate, or below an arbitrary resolution bucket label.
+4. **Aesthetic below standard is allowed as an approved rejection reason**, but only when the style-appropriate premium-quality rubric was applied to the actual full image, specific visual shortcomings are recorded and confidence/calibration requirements pass. Do **not** reject merely for sparse details, monochrome art, pixel style, intentional roughness, unconventional style, unverified duplicate status or a resolution bucket label.
 5. There is no unresolved meaningful recovery/crop path and no conflicting prior human Keep/cancel or manual protected state.
 6. Versioned per-media current SHA/revision, Agent lease/fencing and user permission all pass the commit transaction. Otherwise **defer** or return conflict, never silently queue.
 
-**Confidence:** `high/medium/low` is a reporting label, *not* sufficient by itself. A high confidence requires specific image-grounded observations or deterministic measurements and passing tests on labeled edge cases. In the absence of calibration, non-deterministic reject rules are not enabled. Do not invent a universal `0.9` probability or choose a score threshold as a substitute for evidence. Keep a separate `decision_confidence` and per-criterion `evidence_source`.
+**Confidence:** `high/medium/low` is a reporting label, *not* sufficient by itself. A high confidence requires specific image-grounded observations or deterministic measurements and passing tests on labeled edge cases. Numeric aesthetic gates require **versioned per-style calibration**; never treat an uncalibrated raw model 7.0 as a universal truth. Before calibration, borderline/low-confidence images are held out of premium export and deferred, while clearly evidenced poor-quality cases can be proposed for review only under separately validated rules. Keep a separate `decision_confidence` and per-criterion `evidence_source`.
 
 ### 8.4 W06 state transitions and durable review
 
@@ -260,7 +260,7 @@ Score `training.suitability` from 0..10 (null if no reliable basis), alongside t
 - `conditioning_feasibility`: can one grounded caption and tags describe the current image without unsupported guesses?
 - `dataset_contribution`: novelty/diversity derived from W05 and catalog coverage, not inferred solely from an isolated picture.
 
-Suggested *interpretation anchors*, not thresholds: `0..2` unusable for the given target, `3..4` major reservations, `5..6` usable with compromises, `7..8` strong fit, `9..10` excellent fit. No automatic score-to-deletion mapping; the categorical gates above decide whether review routing is allowed. An output may be `overall=null` while still reporting deterministic technical state. Always persist score Profile, model/prompt version, confidence and short evidence.
+Suggested *interpretation anchors for TRAINING suitability* (not aesthetics): `0..2` unusable, `3..4` major reservations, `5..6` usable with compromises, `7..8` strong fit, `9..10` excellent fit. The **aesthetic** field has its own versioned premium-quality threshold and confidence gate (section 12); do not conflate the two scales. Review routing is controlled by an approved reason code and evidence, not by aesthetic score alone. An output may be `overall=null` while still reporting deterministic technical state. Always persist score Profile, model/prompt version, confidence and short evidence.
 
 ## 9. W07 precise one-pass labeling pipeline (proposal)
 
@@ -395,10 +395,94 @@ Each W06/W07 media result is idempotent, with a current SHA and lease fencing. G
 
 ## 11. Remaining decisions for discussion
 
-**Accepted now:** high-confidence clearly unfit images enter existing pending-deletion collection in an explicitly selected W06 quality-screen workflow; others keep/defer, human batch approval, raw source and manual overrides protected.
+**Accepted now:** W06 quality-first policy A: high-confidence unsuitable images, including **confidently poor aesthetics under an approved style-aware premium dataset standard**, enter the existing pending-deletion review in an explicitly selected quality-screen workflow. Borderline/uncertain art is deferred and withheld from premium export, not assumed good. Human final batch approval, immutable raw source, and manual overrides remain protected.
 
 **Still open (proposal rather than acceptance):** 
-1. Which concrete W06 reject codes qualify for high-confidence routing in v1 (technical hard faults, target mismatch, severe unrecoverable overlays etc.) and what evidence is mandatory for each?
+1. Which exact W06 reason-code thresholds qualify for high-confidence routing in v1, **including `AESTHETIC_BELOW_STANDARD`**, and what per-style calibration/evidence is mandatory for each?
 2. Caption Profile default: `detailed-grounded-en@1` versus compact vs user-selectable; desired length is derived from scene complexity, not a constant count.
 3. When all selected outputs are requested, should an image with `defer` still receive partial annotation, or wait for a retry/review? Recommendation: preserve existing data and do not automatically export until required checks pass.
 4. Whether quality-scope rejection means “remove from one dataset” versus “propose physical deletion from managed library”; keep physical deletion explicitly review-gated, respecting shared references.
+
+## 12. ACCEPTED direction: aesthetics-first PREMIUM dataset gate (numerical details proposed)
+
+### 12.1 Product decision and task separation
+
+The owner prioritizes **absorbing strong artwork, not retaining weak artwork merely because it is technically trainable or unusually rare**. For the *premium illustration curation workflow*, **aesthetic merit is a required eligibility gate**, not a decorative score displayed after all images are labeled.
+
+The division of responsibilities remains:
+- `W16 / node aesthetic.evaluate` = **score-only**, no hidden Keep/Reject mutation, so independently running an assessment does not unexpectedly alter a collection.
+- `W06 / visual quality-screen workflow` = reads a comparable W16 result or evaluates aesthetics in the same Agent pass, applies a **user-approved premium aesthetic quality policy**, and routes confirmed weak artwork to **the existing pending deletion-review collection**. A human batch-confirms actual deletion.
+- `W07` = detailed captions/tags only for images that pass the active workflow's quality/content/dedup gates; standalone W07 still works for explicitly targeted media, respecting permissions and user intent.
+- `W05` = choose the aesthetically best among interchangeable true duplicates, **but a group winner is not automatically good enough for premium training**. After W05, W06 can still reject the winner if it fails the absolute per-style aesthetic standard; no forced "keep one bad image" exception.
+- Technical invalidity, manga exclusion and duplicates keep their own reason codes. Aesthetics should be recorded as **why** an image is unsuitable, not disguised as corrupt or duplicated.
+
+### 12.2 Calibrated policy shape (proposal; NOT approved thresholds)
+
+An example *strict premium* policy for the 0–10 aesthetics scale **after calibration with user-rated samples**:
+
+| Illustrative calibrated aesthetic range | Intended W06 disposition | Export eligibility |
+| --- | --- | --- |
+| `>=8.0` | `premium_pass` if technically/training eligible | eligible for requested W07/full premium export |
+| `7.0..7.99` | `borderline`: conditional Agent comparison/re-review or user-specified keep | **hold out of default premium export** until accepted |
+| `<7.0` | `aesthetic_reject_candidate` when style-correct evidence + confidence high; otherwise defer | not eligible; queue existing pending-delete review only if accepted criteria pass |
+| `null`, unsupported/ambiguous Profile, model uncertainty | `defer` | not eligible until reliable evaluation |
+
+**These numbers are provisional candidates, not universal model facts or an enabled production policy.** Each Profile (general illustration, pixel art, watercolor, Galgame CG) requires human-rated anchors and a versioned calibration mapping. A local ranking/paired preference result can resolve borderline cases where raw absolute scores drift. User may select different bars by collection/profile; the immutable job snapshot freezes the chosen bar to avoid mid-job inconsistent curation.
+
+**Do not adopt naive top-X-percent filtering without a minimum aesthetic bar.** Selecting the "best" of a poor batch may still leave bad images; selecting only high scores from a narrowly sampled artist may destroy desired variety. Diversity only matters **after** the style-aware quality floor is met. A deliberate high-quality minimalist composition can pass despite fewer objects, fewer details or lower pixel count.
+
+### 12.3 Hard rejection evidence requirements (proposal)
+
+For `AESTHETIC_BELOW_STANDARD`, require:
+1. A valid and current full-image view receipt, current SHA, agreed aesthetic Profile/rubric/model prompt and non-comic content eligibility.
+2. Explicit visual grounds (e.g. incoherent visual hierarchy, poorly integrated foreground/background, inconsistent unintentional rendering, weak color/light interaction, visibly unfinished execution for that style); no invented artist/style attribution.
+3. Calibrated confidence or comparable multi-image reference evidence demonstrating the work falls below the **selected style's** premium-quality floor; uncertain style or disagreement -> `defer` / extra check rather than deletion review.
+4. Check whether an intentional style, comic exclusion, meaningful variant, or *reasonable* native crop changes the assessment. Where a feasible correction could materially improve the image, route `repair_candidate` first, then reassess on the edited revision before rejection.
+5. User Keep/cancel, reviewed manual content, current SHA and shared library references are protected. Do not delete bytes directly or override a human decision.
+
+Suggested structured report:
+~~~json
+{
+  "media_id": 123,
+  "quality_policy": "premium-aesthetic@1",
+  "aesthetic": {
+    "profile": "general-illustration@1",
+    "overall": 6.2,
+    "confidence": "high",
+    "evidence": ["weak visual hierarchy", "unintended inconsistent lighting"]
+  },
+  "training": {
+    "suitability": 7.8,
+    "target_profile": "illustration-curation@1"
+  },
+  "reason_codes": ["AESTHETIC_BELOW_STANDARD"],
+  "decision": "reject_for_review",
+  "route": "existing_pending_deletion",
+  "files_deleted": 0
+}
+~~~
+
+Numbers and observations are fabricated **examples of schema**, not scores for an actual image. The example intentionally illustrates that technically trainable (7.8) is not sufficient when aesthetic merit is poor (6.2).
+
+### 12.4 Efficient execution: quality before expensive captions
+
+    verified media + current SHA
+      -> cheap local integrity/content/duplicate preflight
+      -> Agent full-image aesthetics + training gate (same pass when useful)
+      -> premium_pass: emit requested high-detail Caption/Tags/BBox + persist
+      -> borderline: defer/compare; no premature export or mandatory huge caption
+      -> aesthetics_below_bar with approved evidence: review.route to existing pending-delete
+      -> correctable composition: W08 crop preview/apply + re-view/re-score new SHA
+
+One Agent vision request may use **conditional outputs**: high-confidence pass produces rich W07 labels, confident reject produces short scores/reasons only. This is not a guarantee that the model can perfectly branch or never waste tokens; measure accepted captions/min, tokens per premium accepted image and false-positive deletion proposals.
+
+When throughput/cost benchmarking supports it, optionally stage **cheap triage -> deeper review only for borderline**; do not trust tiny contact sheets alone to reject complex works. Reuse W16 reports with matching Profile/version and SHA, and reuse local pHash/DINO dedup evidence. Never submit captions or scores from a stale/cropped revision.
+
+### 12.5 Evaluation and release gates
+
+- Build human-approved high/mid/low aesthetic anchor examples **per art style**, plus hard counterexamples: sparse yet beautiful illustrations, limited-palette pixel art, line sketches with intentional roughness, painterly/watercolor texture, cinematic CG, black-and-white standalone images.
+- Calibrate scores and paired preference agreement across at least distinct artists and compositions, not just repeats of one artist's output. Track **false-positive aesthetic rejects**, user cancellation rate, premium-export quality distribution, rejection consistency on reruns/model changes and style-specific bias. Exact pass/fail thresholds for calibration require separate owner approval.
+- Test low aesthetic/high technical training result, high aesthetic/low training result, uncertain aesthetics, W05 best-of-bad-group, manual Keep, changed image revision, crop/reassessment, duplicate pending review with another reason, and provider/model version changes.
+- Ensure score-only W16 is non-destructive, while composed W06 premium routing is explicit and auditable. No physical deletion prior to user batch confirmation, and no hidden overwrite of raw tags or manually authored artifacts.
+
+**Pending decisions:** precise per-style score bands and the initial curated reference set; premium export should block borderline records by default (proposed); optional user override to accept borderline; how to express a style preference Profile without rewarding only one narrow art aesthetic.
