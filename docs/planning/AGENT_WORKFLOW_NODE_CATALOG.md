@@ -80,7 +80,7 @@ Return a versioned envelope with `job_id`, `node_run_id`, `state`, `completed`, 
 | N12 `crop.preview` | L | current image revision + bbox; authorization to preview | native crop preview handle/fingerprint/dimensions | bbox bound to current revision, no pixel upscale or hidden save |
 | N13 `crop.apply` | L | verified exact preview receipt, current SHA, scoped edit permission | new image revision/PNG, provenance/audit | align dimensions to 32, preserve verified source, invalidate affected annotations |
 | N14 `image.restore` | L | verified source original, expected current SHA, edit permission | new current-image revision | destructive replacement of current edit must be explicit, not automatic |
-| N15 `annotation.commit` | L | current revision + A outputs + receipt/policy | versioned TXT, tags, text regions, review state | per-image atomic/journaled write, preserve reviewed/manual text by default |
+| N15 `annotation.commit` | L | current revision + requested A outputs + receipt/policy | independently acknowledged TXT/tags/text/visual-region artifacts | shared item fencing + journaled target units; preserve unselected/manual outputs; [ADR-008](AGENT_ANNOTATION_REGION_CONTRACT.md) |
 | N16 `review.route` | L/H | recorded quality/duplicate/uncertainty and policy | Keep / Defer / pending human decision | Agent reject only queues; final delete exclusively human-approved |
 | N17 `export.plan` | L | immutable scope, accepted current images, destination/profile | preview: eligible/excluded/conflicts/estimated bytes | reject missing text, stale review state, unowned output and unsafe destination |
 | N18 `export.write` | L | approved immutable export plan | verified image/TXT pairs, manifest, per-item receipt | no unapproved overwrite or image upscaling; safe incremental resume |
@@ -218,6 +218,8 @@ This is a **conceptual partial DAG**, not ready for direct execution. The defaul
 Existing ten MCP tools remain backward compatible, but a new Agent should **not** need to register all possible per-node action schemas just to run one flow. Use compact definition discovery with schema-on-demand or capability sets, and enforce scopes server-side. Keep all image model/inspection data behind consent and safe size budgets.
 
 ## 9. Review order for this PR
+
+Detailed annotation/region requirements and partial-output recovery are recorded in [ADR-008](AGENT_ANNOTATION_REGION_CONTRACT.md); these are not new running endpoints.
 
 Review the **shared node contract and graph semantics** first, then finish each workflow from trigger to persistence with its input/output schemas, authorization, caching, scheduling and tests. Suggested sequence:
 

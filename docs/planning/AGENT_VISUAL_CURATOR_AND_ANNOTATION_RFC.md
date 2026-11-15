@@ -74,14 +74,16 @@ Numbers above are examples, not results for any actual image. The illustrative `
 
 **Current contract:** three UTF-8 per-image sidecars: `image.raw_tags.txt` (immutable source), `image.tags.txt` (normalized/optimized tags), `image.txt` (factual natural-language caption). Verified artist and character name fields are merged locally. Existing image-based Tag writes verify suggested generic tags against the local category-0 vocabulary; source-protected categories are not model-authoritative. A model can suggest novel visual terms but unverified new terms cannot bypass local validation. Export mode chooses appropriate content; do not overload raw source.
 
+The owner-confirmed annotation contract is detailed in [ADR-008](AGENT_ANNOTATION_REGION_CONTRACT.md): local-only identities, dense adaptive prose, independent region targets, partial acknowledgements and dataset index. Wire details remain proposed.
+
 ### Agent caption expectations
 
 - English; observe image independently even when a batch is sent. Image pixels are primary; source tags are **fallible hints**. Never blend attributes across images.
 - Describe visible subject count, placement, hairstyle and hair color, eye color if actually discernible, expression and gaze, body/head orientation, pose and hand/object interaction, clothes/layers/texture, accessories, scene/background, important objects, framing/camera angle, color and light, stylistic technique, meaningful fine detail.
 - Use evidence-grounded specificity, not unsupported story, identity or artist guesses. Do not describe occluded anatomy. Avoid repetitive filler, boilerplate, speculative mood and "high-quality masterpiece" style tags as factual content.
-- Retain source-confirmed artist/character identity only through local formatter; generated caption body may use visible generic descriptions but must not invent proper names. Keep training caption distinct from the aesthetic explanation.
+- Identity handling is local only: the Agent must not output recognized/copied names either, not merely avoid guessing them. No artist, character, franchise, series or copyright names in generated prose/tags/region descriptions; no `@name`, `by [artist]` or `[artist] style`. Exact visible identity-bearing lettering is OCR evidence only, kept in `text_regions.text`. The local formatter alone adds verified artist/character prefixes and preserves unrelated characters. Keep training caption distinct from the aesthetic explanation.
 - In a batch, each item output is mapped by immutable media ID and expected SHA/revision. A missing or failed item must not borrow another item's caption.
-- Captions should be proportionate to visible complexity; max byte/token limits are model/provider-specific and validated. Existing Agent MCP caption limit is currently 8192 chars; do not silently break compatibility.
+- Captions should be proportionate to visible complexity; max byte/token limits are model/provider-specific and validated. Existing Agent MCP caption limit is currently 8192 UTF-8 bytes; do not silently break compatibility.
 
 ### Tag expectations
 
@@ -93,7 +95,7 @@ Numbers above are examples, not results for any actual image. The illustrative `
 
 ### Text regions / image artifacts
 
-- Optional text boxes on current image, each with type (speech/text overlay/watermark/sign/diagram/etc), normalized `bbox_1000_xyxy`, textual content only if legible, and reading confidence. Distinguish intended artwork lettering from harmful overlays; no blanket aesthetic penalty.
+- Independently selected text boxes and visual-region boxes cover actual lettering, stickers, overlays, embedded images and detail insets. Text supports readable/partial/unreadable/decorative states, original script, location, font/color/layout and nullable subjective confidence. Distinguish superimposed internal views (`x_ray`) from separate cutaways (`cross_section`); validated tag spellings normally use hyphens. See ADR-008 for exact preservation, transcription and indexing requirements. No blanket aesthetic penalty for intentional typography.
 - Bounding boxes must lie inside 0..1000 with valid geometry and current revision; descriptive special-element boxes should be separately typed when required.
 - **No OCR dependency or extra OCR pass by default**. The Agent can describe visible text during the existing model call; if text is unclear, record illegible rather than hallucinate. An optional dedicated OCR node would be a separate future flow.
 
@@ -141,7 +143,7 @@ Daemon prepares only compact media manifests (ID, SHA, dimensions, source generi
 
 **Validation/commit rules:**
 - An Agent **can reason about multiple outputs in one visual call**, but the daemon verifies each schema and permissions separately and only commits requested targets to a still-current revision. A composite per-image result has per-target acknowledgment: `accepted`, `preserved_existing`, `needs_review`, `rejected_invalid`, or `skipped`. A failed tag validation must not falsely mark caption/aesthetic failed, unless the workflow explicitly requires an all-target atomic output.
-- Use short media-revision compare-and-swap and a journal for SQLite + sidecar writes. Never hold media/global DB lock across model reasoning, asset view, OCR/codec/preview or network. Do not replace an existing human-reviewed source or target text from an unrelated job.
+- Apply shared item preconditions before any new effect, then commit independent selected targets as journaled units; see ADR-008 section 6. A target correction uses a new idempotency key and must not replay already saved caption. Use short media-revision compare-and-swap and a journal for SQLite + sidecar writes. Never hold media/global DB lock across model reasoning, asset view, OCR/codec/preview or network. Do not replace an existing human-reviewed source or target text from an unrelated job.
 - Reusing valid current artifacts is conditional on image SHA, selected output/version, source and prompt/model fingerprint, human review state. No repeated model call for already-complete, still-valid unchanged outputs.
 - If the image needs a crop, the first pass **only proposes** it. The crop path requires explicit preview/authorization and returns a new image SHA; final-image annotation is committed only after viewing the new current image and verifying the edited composition. Avoid generating two full captions unless crop actually changes training content.
 - If content form is confidently `sequential_comic`, do not create general-illustration aesthetic/caption/training outputs in the composed illustration workflow. Route **already imported** comics to the existing pending-deletion queue through a separate authorized `review.route` node; never delete bytes automatically.
@@ -171,10 +173,10 @@ An Agent can request only a **node** or a **workflow**, and one workflow may con
 - Scheduler never assumes control over an external Agent's provider inference concurrency. Its local controls are leases, memory/IO CPU pools and resource backpressure. Respect provider consent for sending image pixels to an external model.
 - Benchmark p50/p95 of preflight, Agent wait, image transfer, end-to-end accepted captions, tags accepted/rejected, aesthetic ranking consistency and false-positive review routing against a representative manually checked sample.
 
-## 7. Critical discussion decisions (not yet accepted)
+## 7. Accepted requirements and remaining discussion decisions
 
 1. **W06 routing: policy A ACCEPTED.** High-confidence, clearly unsuitable images automatically enter existing pending-deletion review **only within an explicitly authorized quality-screen workflow**. **Confirmed poor aesthetics is an eligible rejection reason** in a quality-screen workflow when style-correct, evidence-backed and benchmarked; uncertainty alone never routes rejection. Standalone scoring remains non-destructive. Remaining decisions: tested eligibility reason codes, recoverability and confidence calibration.
-2. **Caption detail:** concise factual description vs **dense training description**; whether to use one adaptive prompt based on image complexity, with maximum length and no hallucinated details.
+2. **Caption detail ACCEPTED:** dense factual English adapted to visible complexity, with no guessed details or identity generation; important complex regions must not be omitted to meet a preferred word count. [ADR-008](AGENT_ANNOTATION_REGION_CONTRACT.md) records the owner requirements; exact versioned wire shapes and performance budgets remain proposals.
 3. **Target-specific suitability:** should default target be general 2D illustration style or user-specified dataset Profile for each collection? Collection profile must freeze across the job.
 4. **Annotation overwrite:** default preserve existing reviewed caption/tags, explicit overwrite only on a named output target vs always replace unreviewed artifact on a newly requested optimization run.
 5. **Selected output failure semantics:** per-target independent commit (recommended, matches current sidecar behavior), with a workflow that can require an all-target validation gate before export.

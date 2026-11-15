@@ -136,7 +136,7 @@ MCP: `bdm_work_submit` (bounded item array; same use-case contract).
 
 Response has `accepted`/`skipped`/`rejected` arrays, each entry including `work_id`, `status`, `current_revision`, and, on error, stable `error.code` and `retryable`. Partial batch failure is normal and must not be represented as complete global success.
 
-**Result transaction boundaries:** assessment + caption/tags/text regions for one *unchanged* image should be a single logical per-item commit preserving old manual content unless overwrite is explicitly authorized. Implementation may require a journal across SQLite and sidecars. For a crop proposal, the proposal alone is not an instruction to modify; a separate explicit exact-preview/apply path produces a **new revision**. The old annotation result must not be committed onto the new image without its own verified post-crop evidence.
+**Result transaction boundaries:** shared lease/scope/image-revision/human-edit preconditions fence the item before any new effect. Independent selected output targets then commit as separately acknowledged journaled units; a rejected generic tag does not roll back a valid caption or assessment. An all-target atomic group requires explicit plan semantics. Preserve manual content unless overwrite is explicitly authorized. [ADR-008 section 6](AGENT_ANNOTATION_REGION_CONTRACT.md#6-reconcile-per-item-fencing-with-partial-output-success) defines per-target revisions, durable outcome lookup and correction keys. Implementation requires a journal across SQLite and sidecars before claiming recovery guarantees. For a crop proposal, the proposal alone is not an instruction to modify; a separate explicit exact-preview/apply path produces a **new revision**. The old annotation result must not be committed onto the new image without its own verified post-crop evidence.
 
 ### Heartbeat / release
 
@@ -211,7 +211,7 @@ New names are illustrative. Keep the ten existing MCP tools accessible via compa
 | `IDEMPOTENCY_CONFLICT` | no | same key used with different payload |
 | `REVIEW_REQUIRED` | human | never convert to deletion |
 
-Never retry non-idempotent side effects on an ambiguous response without first querying outcome by idempotency key. Bound retries, persist attempts, and use backoff with jitter. Record failed/skipped/completed IDs and reasons so Agents do not start again from the beginning.
+Query the durable original outcome after an ambiguous response before doing more model work. An authorized identical replay of a committed request returns its stored acknowledgement without new effects, even if its old lease has since expired; an uncommitted new write still requires current ownership/evidence. Corrections use new keys, select failed targets only and preserve already committed outputs. Never retry non-idempotent side effects on an ambiguous response without first querying outcome by idempotency key. Bound retries, persist attempts, and use backoff with jitter. Record failed/skipped/completed IDs and reasons so Agents do not start again from the beginning.
 
 ## 9. Recovery and adversarial tests required before implementation completion
 
