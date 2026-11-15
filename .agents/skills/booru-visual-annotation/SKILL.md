@@ -1,6 +1,6 @@
 ---
 name: booru-visual-annotation
-description: 使用 booru_dataset_manager MCP 为指定收藏生成、修正和复核训练用自然语言与标签，检查文字水印、贴图、复合画面及保存结果。适用于反重力打标；不用于修改 MCP 代码或 API 系统提示词。
+description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提出和预览保全构图的裁剪方案，并生成或复核训练标注及文字／水印／贴纸 BBox。适用于反重力裁剪与打标；不用于修改 MCP 代码或 API 系统提示词。
 ---
 
 # 训练标注：看图取证，一次保存，核对结果

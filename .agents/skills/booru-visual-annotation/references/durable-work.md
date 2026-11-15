@@ -13,7 +13,7 @@
 
 `work_view → work_assess → [work_preview → work_apply → work_view → work_assess] → work_annotate`
 
-可裁剪改善时评估 payload 用 `crop_candidate=true`，初筛不得提前拒绝。精确预览包含实际像素选区、最佳档位和训练缩放尺寸；检查有没有伤害主体、动作、场景关系、关键道具、光影或有意留白。应用后必须看新保存图；不改善则保留原图，已看预览后通过 `work_assess` 提交 `crop_outcome=not_improved`。最终 KEEP 后才给完整流程提交训练文本。详细视觉规则沿用 `crop-first-curation.md`。
+可裁剪改善时评估 payload 用 `crop_candidate=true`，初筛不得提前拒绝。方案必须包含既有 ratio、bbox 和具体构图理由；work_apply 原样回传预览的 preview_sha256。精确预览包含实际像素选区、最佳档位和训练缩放尺寸；检查有没有伤害主体、动作、场景关系、关键道具、光影或有意留白。应用后必须看新保存图；不改善则保留原图，已看预览后通过 `work_assess` 提交 `crop_outcome=not_improved`。最终 KEEP 时逐图填写 retained_elements（无文字／水印／贴纸等元素才为 []），随后为所有保留元素提交最终图 BBox；不可安全裁掉的元素保留，不能强裁。最终 KEEP 后才给完整流程提交训练文本。详细视觉规则沿用 `crop-first-curation.md`。
 
 ## 保存、冲突与续跑
 

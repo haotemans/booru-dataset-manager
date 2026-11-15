@@ -390,44 +390,60 @@ pub(super) fn crop(
     let m = media(repo, settings, args.media_id, Some(&args.expected_sha256))?;
     seen(settings, &m.sha256)?;
     let mut selection = rect(args.bbox_1000_xyxy, m.dimensions())?;
-    // Leased curation plans use the actual Kohya geometry. The exact native
+    let ratio=args.ratio.as_deref().filter(|ratio|bdm_domain::training::RATIOS.iter().any(|r|r.0==*ratio))
+        .ok_or_else(||guidance_error("crop_ratio_required","Choose one of the existing 17 preset ratios after viewing the image; bbox is a visual proposal, not automatic whole-image alignment.",json!({"tool":"bdm_crop","action":"choose_ratio_and_propose_crop"})))?;
+    // Agent proposals use the selected preset and actual Kohya geometry. Native
     // pixels removed by this adjustment are visible in the preview before apply.
-    let bucket = if settings.permit.is_some() {
-        let choice =
-            bdm_domain::training::best_bucket(selection.width, selection.height, "original")
-                .map_err(|message| {
-                    guidance_error(
-                        "bucket_unavailable",
-                        message,
-                        json!({"action":"adjust_crop"}),
-                    )
-                })?;
+    let bucket = {
+        let choice = bdm_domain::training::best_bucket(selection.width, selection.height, ratio)
+            .map_err(|message| {
+                guidance_error(
+                    "bucket_unavailable",
+                    message,
+                    json!({"action":"adjust_crop"}),
+                )
+            })?;
         selection.x += choice.native_crop[0];
         selection.y += choice.native_crop[1];
         selection.width = choice.native_crop[2];
         selection.height = choice.native_crop[3];
         Some(choice)
-    } else {
-        None
     };
     let key = (m.id, m.sha256.clone(), args.bbox_1000_xyxy);
+    let receipt = settings
+        .previews
+        .lock()
+        .map_err(|_| IngestError::Storage)?
+        .get(&key)
+        .cloned();
     if args.apply {
         writes(settings)?;
-        if !settings
-            .previews
-            .lock()
-            .map_err(|_| IngestError::Storage)?
-            .contains(&key)
+        if receipt
+            .as_ref()
+            .is_none_or(|(preview_ratio, _)| preview_ratio != ratio)
         {
             return Err(guidance_error(
                 "crop_preview_required",
                 "Inspect a preview of this exact crop before applying.",
-                json!({"tool":"bdm_crop","args":{"media_id":m.id,"expected_sha256":m.sha256,"bbox_1000_xyxy":args.bbox_1000_xyxy,"apply":false},"hint":"Include reason and model."}),
+                json!({"tool":"bdm_crop","args":{"media_id":m.id,"expected_sha256":m.sha256,"bbox_1000_xyxy":args.bbox_1000_xyxy,"ratio":ratio,"apply":false},"hint":"Include reason and model."}),
             ));
         }
     }
     let preview = editing::native_crop_preview(&m, selection, &AtomicBool::new(false))?;
+    let preview_sha = editing::hash(&preview.image)?;
     if args.apply {
+        if receipt.as_ref().is_none_or(|(_, sha)| *sha != preview_sha)
+            || args
+                .preview_sha256
+                .as_ref()
+                .is_some_and(|sha| *sha != preview_sha)
+        {
+            return Err(guidance_error(
+                "crop_preview_required",
+                "Crop pixels or chosen ratio differ from the inspected proposal; preview again.",
+                json!({"tool":"bdm_crop","action":"preview_exact_ratio_and_bbox"}),
+            ));
+        }
         let saved = repo.commit_repair(m.id, &preview)?;
         storage(repo.connection.execute(
             "UPDATE text_artifacts SET state='needs_review' WHERE media_id=?1 AND is_current=1",
@@ -451,11 +467,12 @@ pub(super) fn crop(
             .previews
             .lock()
             .map_err(|_| IngestError::Storage)?
-            .insert(key);
+            .insert(key, (ratio.to_owned(), preview_sha.clone()));
         picture(
             storage(image::open(&preview.image))?,
-            json!({"saved":false,"media_id":m.id,"expected_sha256":m.sha256,"selection":selection,"training":preview.training,"bucket_plan":bucket,"preview_sha256":editing::hash(&preview.image)?,"bbox_1000_xyxy":args.bbox_1000_xyxy,
-                "next":{"tool":"bdm_crop","args":{"media_id":m.id,"expected_sha256":m.sha256,"bbox_1000_xyxy":args.bbox_1000_xyxy,"apply":true},"hint":"Apply only if this preview improves composition; retain reason and model. Otherwise revise preview or keep unchanged."}}),
+            json!({"saved":false,"media_id":m.id,"expected_sha256":m.sha256,"selection":selection,"training":preview.training,"ratio":ratio,"bucket_plan":bucket,"preview_sha256":preview_sha,"bbox_1000_xyxy":args.bbox_1000_xyxy,
+                "proposal":{"ratio":ratio,"reason":args.reason,"model":args.model,"source_bbox_1000_xyxy":args.bbox_1000_xyxy,"native_selection":selection,"ratio_tolerance":0.02},
+                "next":{"tool":"bdm_crop","args":{"media_id":m.id,"expected_sha256":m.sha256,"bbox_1000_xyxy":args.bbox_1000_xyxy,"ratio":ratio,"preview_sha256":preview_sha,"apply":true},"hint":"Apply only if this preview improves composition; retain reason and model. Otherwise revise preview or keep unchanged."}}),
         )
     }
 }
@@ -501,7 +518,7 @@ pub(super) fn annotate(
     let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
     let m = media(repo, settings, args.media_id, Some(&args.expected_sha256))?;
     seen(settings, &m.sha256)?;
-    if args.require_final_assessment && (args.caption.is_some() || args.tags.is_some()) {
+    if args.require_final_assessment {
         let review = repo.agent_review_value(m.id)?;
         let eligible = review.as_ref().is_some_and(|r| {
             r["image_sha256"] == m.sha256
@@ -684,6 +701,47 @@ pub(super) fn annotate(
             json!({"action":"correct_request","fields":["review_reasons"]}),
         ));
     }
+    if args.require_final_assessment {
+        let review = repo.agent_review_value(m.id)?.ok_or(IngestError::Storage)?;
+        let mut required: Vec<RetainedElement> =
+            serde_json::from_value(review["report"]["retained_elements"].clone())
+                .unwrap_or_default();
+        if review["report"]["watermark_present"] == true
+            && !required.iter().any(|e| {
+                matches!(
+                    e,
+                    RetainedElement::Watermark | RetainedElement::Logo | RetainedElement::Signature
+                )
+            })
+        {
+            required.push(RetainedElement::Watermark);
+        }
+        let missing: Vec<_> = required
+            .into_iter()
+            .filter(|element| !match element {
+                RetainedElement::Text => details.text_regions.iter().any(|r| r.kind != "watermark"),
+                RetainedElement::Watermark => {
+                    details.text_regions.iter().any(|r| r.kind == "watermark")
+                        || details.visual_regions.iter().any(|r| r.kind == "watermark")
+                }
+                RetainedElement::Signature => {
+                    details.text_regions.iter().any(|r| r.kind == "watermark")
+                        || details.visual_regions.iter().any(|r| r.kind == "signature")
+                }
+                RetainedElement::Logo => details.visual_regions.iter().any(|r| r.kind == "logo"),
+                RetainedElement::Sticker => {
+                    details.visual_regions.iter().any(|r| r.kind == "sticker")
+                }
+                RetainedElement::Overlay => {
+                    details.visual_regions.iter().any(|r| r.kind == "overlay")
+                        || details.text_regions.iter().any(|r| r.kind == "overlay")
+                }
+            })
+            .collect();
+        if !missing.is_empty() {
+            return Err(guidance_error("retained_elements_bbox_required","Final inspection reported retained text/watermarks/stickers. Supply matching BBoxes on the final current image before saving; preserve composition instead of forcing removal.",json!({"tool":"bdm_save_annotation","missing":missing,"hint":"OCR in text_regions; non-text decorations in visual_regions. Omitted fields can reuse verified current-image regions."})));
+        }
+    }
     for (kind, content) in outputs {
         repo.write_artifact_locked(&m, kind, &content, &source, "complete", true)?;
         saved.push(kind);
@@ -774,6 +832,11 @@ pub(super) fn assess(
 ) -> Result<ServiceReply, IngestError> {
     writes(settings)?;
     provenance(&args.reason, &args.model)?;
+    if args.retained_elements.as_ref().is_some_and(|items| {
+        items.len() > 6 || items.iter().collect::<BTreeSet<_>>().len() != items.len()
+    }) {
+        return Err(guidance_error("invalid_retained_elements","Use each retained element kind at most once: text/watermark/sticker/overlay/logo/signature.",json!({"tool":"bdm_assess","action":"correct_final_inventory"})));
+    }
     if [
         args.aesthetic,
         args.training_suitability,
@@ -825,7 +888,7 @@ pub(super) fn assess(
                             .lock()
                             .map_err(|_| IngestError::Storage)?
                             .iter()
-                            .any(|(id, sha, _)| *id == m.id && sha == &m.sha256)
+                            .any(|((id, sha, _), _)| *id == m.id && sha == &m.sha256)
                 }
                 None => false,
             };

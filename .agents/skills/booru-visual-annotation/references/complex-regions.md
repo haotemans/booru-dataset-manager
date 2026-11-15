@@ -59,7 +59,7 @@ Tag 拼写以返回的可用词表为准。`x_ray/cross_section` 是协议枚举
 }
 ```
 
-`visual_regions` 限 64 个，kind 仅为 `subject/background/sticker/overlay/embedded_image/detail_inset/x_ray/cross_section`。每项有 `bbox_1000_xyxy`、`description`、`relation`，可选 `confidence`。所有框对完整当前图归一化到 0–1000；不对缩略图或 tile 直接记坐标。不得把协议 kind 当作已经核验的训练标签。
+`visual_regions` 限 64 个，kind 仅为 `subject/background/sticker/overlay/watermark/logo/signature/embedded_image/detail_inset/x_ray/cross_section`。每项有 `bbox_1000_xyxy`、`description`、`relation`，可选 `confidence`。所有框对完整当前图归一化到 0–1000；不对缩略图或 tile 直接记坐标。不得把协议 kind 当作已经核验的训练标签。
 
 ## 保存、追溯和导出
 

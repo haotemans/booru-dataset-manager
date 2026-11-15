@@ -1,25 +1,42 @@
-# 联合筛选：先尝试改善，再按最终画面判断
+# 看图提出方案，再裁剪；保留元素逐处标框
 
-仅用于用户选定了筛选、裁剪和标注的联合任务。独立打标不启动额外筛选／裁剪。检查 `bdm_policy.capabilities` 包含 `crop_first_assessment`。v3 长批次先用 [durable-work.md](durable-work.md) 创建 curate 任务；下文独立调用的业务参数放入同名 work 操作的 payload，由服务端执行阶段限制。
+只执行用户授权的阶段。联合任务使用 [durable-work.md](durable-work.md) 的 curate 任务；独立裁剪仍可用 bdm_crop，独立标注不额外裁剪。
 
-## 执行顺序
+## 视觉决策
 
-1. 查看完整当前图，初步判断技术质量、内容适配和构图；只提出候选，不在此时生成将被裁掉内容的长 Caption。
-2. 发现边缘水印、多余边缘或可通过合理裁剪改善的构图时，用 `bdm_assess(stage="preliminary",crop_candidate=true,decision="defer")` 记录候选和具体理由。初筛分数可为 null，不编确定评分。服务端将其置为待处理、撤下训练通过状态，不能提前加入待删除。
-3. 使用现有比例和裁剪工具预览。只在保留主体动作、场景关系、关键道具、光影和有意义留白时应用；原图留存，结果保留原像素 PNG、32 对齐。现有四档和比例沿用，不强制所有图片为 1024；最佳桶优化仍须按实际实现能力判断。
-4. 应用后重新查看保存的当前图和新 SHA，调用 `bdm_assess(stage="final",crop_outcome="applied")`，**根据最终图**给出 KEEP／DEFER／REJECT。不得把旧分数或旧框换个 SHA 冒充复评。
-5. 预览不改善或损害表达时，不应用该预览；在同一原图 SHA 下调用 `stage="final",crop_outcome="not_improved"`，说明具体判断。服务端要求本连接实际生成过裁剪预览。重连后预览凭据丢失就重新预览；已应用裁剪的来源／父哈希可从持久编辑记录恢复。
-6. 最终 KEEP 后才调用 `bdm_save_annotation(require_final_assessment=true)` 生成本次完整流程的 Caption、Tags、区域。复用刚才的最终图视觉依据，无须额外为评分再看一次。裁剪使旧标注失效且当前任务已授权改写时使用 `overwrite=true`；其余保留默认保护。
-7. 最终仍不达标才加入现有待删除审核；不确定则 DEFER。两者都不生成该完整流程的最终训练 TXT，也不物理删除文件。原始数据不改写。
+先让客户端模型实际看到完整当前图像，检查主体、动作、手脚、发尾、服饰、关键道具、背景关系和有意留白。读取尺寸／标签、成功加载文件或计算分桶候选不等于已经看图。可疑小字再看局部，避免固定给每张切四角。
 
-没有可改善候选、已经满足所需构图时，可直接在当前完整图上完成 final 判断。确证的不可修复技术问题／不适合当前内容范围可依已有收录政策处理，不为满足流程而制造无意义预览。独立评分与独立打标不受联合流程的隐式扩展影响。
+- **像用户图 3 的边缘版权字**：先提出一个既有比例的方案，确认只去掉无关边缘、不损害腿部等主体和构图，才预览并应用。不能把“文字靠边”直接当作可裁掉的结论。
+- **像用户图 2 的画面内英文**：它可能属于原有视觉设计，不能为了去字切掉脸、手势或重要画面。保留时标注为真实文字区域，按实际可读程度记录，不一律称作水印。
+- **像用户图 4 的大幅 Sample 水印**：裁掉它会损害手臂、衣服或完整场景时，保留整体、标水印 BBox。水印本身不是拒绝收录、局部重绘或擦除的授权。
+- 去水印与训练比例适配分别判断。可提出保留水印的轻微比例适配方案；如果任何现有比例都明显破坏表达，保留当前图并说明原因，不能硬裁或无意义重裁。
 
-## 返回与续跑
+禁止把整批图套同一个框、仅因接近某个桶就居中裁剪，或通过循环 native_crop_preview／直接改库绕过视觉方案和预览。几何工具只提供候选，构图取舍由看到图像的 Agent 决定。
 
-- `agent_review.stage="preliminary"`／`requires_final_assessment=true`：继续裁剪或复评，不能报作最终通过。
-- `crop_first_required`：缺少实际裁剪／预览依据，或试图重置未解决候选；按 `next` 继续，不重新下载原图或反复生成 Caption。
-- `final_assessment_required`：本次完整流程还没有当前图的 final KEEP；完成复评后再提交标注。
-- `image_not_viewed`／`stale_image`：查看实际当前图并更新依据；保留已经保存的非失效结果。
-- 最终 REJECT 只进入人工待删除审核，并撤下训练通过状态。任务处理结果与最终物理删除分开统计。
+## 裁剪方案和执行
 
-v3 已提供本地持久任务、守护进程、租约和按实际 Kohya 几何复核的最佳桶候选；尚未实现 PR #11 的全部资源调度、RPC 传输和自动部分写入修复。独立工具与任务入口的预览凭据不同：独立工具凭据属于连接，任务凭据持久保存。原像素 PNG 不因档位而缩小；训练器的缩放要求以返回的 bucket_plan 为准。
+1. 读一次 bdm_policy，复用其 crop_ratios；只从已有 17 个比例中选，不新增比例／分桶目录。
+2. 看完整当前图并复用其 SHA。没有安全去字方案时直接保留，不为满足流程而制造预览。
+3. 可改善时先 work_assess 记录 preliminary crop_candidate=true，然后 work_preview。独立调用用 bdm_crop(apply=false)。方案 payload 必须给 ratio、bbox_1000_xyxy、具体 reason、实际 model；reason 说明保留什么、移除什么以及选择该比例的构图依据。
+4. 实际预览可能为 32 网格和 Kohya 几何略调选区。检查返回的原像素 PNG、selection、bucket_plan；固定比例最多容许 2% 的网格宽高比误差。不能只读 JSON 就宣称确认了预览。
+5. 已授权批次由 Agent 自行检查预览并连续执行，除非用户另行要求人工批准，不逐张询问。预览确认后应用同一 bbox、ratio，并原样回传 preview_sha256。durable work_apply 必须回传；改比例或框需要新预览。不得自动应用新方案。若预览损害表达则不应用，已预览候选通过 final crop_outcome=not_improved 结束；已知没有候选不必先标记 crop_candidate。
+6. 应用后看新保存的完整当前图，以新 SHA 完成 final crop_outcome=applied 复评。原图留存，保存原像素 PNG，不缩小至 1024／2048，不用 JPEG 再编码。
+
+## 最终保留元素与 BBox
+
+final KEEP 的 work_assess 必须提交 retained_elements：text／watermark／sticker／overlay／logo／signature。确实逐图检查后没有这些元素才填 []；不要按来源 Tag、已移除水印或固定模板推断。
+
+| 保留元素 | BBox 存放位置 |
+| --- | --- |
+| 画面文字 | text_regions；kind 根据真实场景选 overlay／sign／dialog／clothing_print 等，**不是** text |
+| 文字水印／署名 | text_regions(kind=watermark)，原样或部分可读 OCR |
+| 不含可读文字的水印／图形标识／署名 | visual_regions(kind=watermark／logo／signature)，描述图形与遮挡关系，不伪造 OCR |
+| 贴纸／叠加素材 | visual_regions(kind=sticker／overlay)；含可读字时另记对应文字 |
+
+- 每一处独立文字、水印、贴纸分别标框，不用一个覆盖半幅图的大框交差。BBox 贴近元素边界并覆盖完整可见范围；半透明水印和局部遮挡也不能遗漏。
+- 所有框是相对**最终完整当前图**的整数 [left,top,right,bottom]，0–1000。看局部 tile 时换算回完整图坐标；不能把截图、缩略图、局部放大图坐标直接存入源图。
+- 裁掉的字不再标进最终图；裁后残留的文字、贴图重新定位。省略字段只保留已验证属于当前 SHA 的区域，不能仅更换旧区域哈希。
+- 记录文字的实际可读程度，不猜缺字；水印／署名／账号原文只在 OCR 索引，训练正文说明其位置和外观。身份仍只由本地合并。
+- final KEEP 后一次提交所需 Caption／Tags／区域，按 [complex-regions.md](complex-regions.md) 核对。若只有区域任务可只保存区域，不重写训练 TXT。完整流程报告了保留元素却没有匹配框时，服务端会拒绝保存，修正本次 payload 即可。
+
+服务端能校验当前哈希、比例、方案回执和已报告元素的 BBox 类型；看图是否准确、是否漏了某一处元素仍需要 Agent 认真复核。审核页“更多 → 显示标注框”可核对当前图的文字／水印／贴纸框；过期 SHA 的区域不叠加到新图，显示框不改变图片像素。

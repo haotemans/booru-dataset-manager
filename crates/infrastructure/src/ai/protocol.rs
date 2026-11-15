@@ -46,7 +46,7 @@ pub struct TextRegion {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VisualRegion {
-    /// subject, background, sticker, overlay, embedded_image, detail_inset, x_ray or cross_section.
+    /// subject, background, sticker, overlay, watermark, logo, signature, embedded_image, detail_inset, x_ray or cross_section.
     pub kind: String,
     pub bbox_1000_xyxy: [i64; 4],
     pub description: String,
@@ -64,6 +64,9 @@ impl VisualRegion {
                 | "background"
                 | "sticker"
                 | "overlay"
+                | "watermark"
+                | "logo"
+                | "signature"
                 | "embedded_image"
                 | "detail_inset"
                 | "x_ray"

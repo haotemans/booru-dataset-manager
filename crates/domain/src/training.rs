@@ -38,6 +38,10 @@ pub struct BucketChoice {
 /// Use the actual no-upscale BucketManager geometry, not a tier label alone.
 /// The Agent chooses composition; this pure function never touches image files.
 pub fn best_bucket(width: u32, height: u32, ratio: &str) -> Result<BucketChoice, &'static str> {
+    let target_aspect = RATIOS
+        .iter()
+        .find(|r| r.0 == ratio)
+        .map(|r| f64::from(r.1) / f64::from(r.2));
     let (w, h) = if ratio == "original" {
         (width / STEP * STEP, height / STEP * STEP)
     } else {
@@ -73,6 +77,13 @@ pub fn best_bucket(width: u32, height: u32, ratio: &str) -> Result<BucketChoice,
         for dx in 0..=16_u32.min((w - 576) / STEP) {
             for dy in 0..=16_u32.min((h - 576) / STEP) {
                 let (cw, ch) = (w - dx * STEP, h - dy * STEP);
+                // Presets are nominal training ratios on a 32-pixel grid. Do
+                // not silently drift into a different ratio to find a bucket.
+                if target_aspect.is_some_and(|target| {
+                    (f64::from(cw) / f64::from(ch) / target - 1.0).abs() > 0.02
+                }) {
+                    continue;
+                }
                 let Ok(training) = plan(cw, ch, tier) else {
                     continue;
                 };
@@ -241,6 +252,14 @@ mod tests {
             assert!(original.retained_fraction > 0.7);
             for choice in bucket_choices(w, h) {
                 let [x, y, cw, ch] = choice.native_crop;
+                if choice.ratio != "original" {
+                    let (_, rw, rh) = RATIOS.iter().find(|r| r.0 == choice.ratio).unwrap();
+                    assert!(
+                        (f64::from(cw) / f64::from(ch) / (f64::from(*rw) / f64::from(*rh)) - 1.0)
+                            .abs()
+                            <= 0.02
+                    );
+                }
                 assert!(x + cw <= w && y + ch <= h);
                 assert_eq!([cw % 32, ch % 32], [0, 0]);
                 assert!(cw.min(ch) >= 576 && u64::from(cw) * u64::from(ch) >= 550_000);

@@ -45,13 +45,14 @@ pub struct AgentServer {
     tool_router: ToolRouter<Self>,
 }
 
+type CropPreviews = std::collections::BTreeMap<(i64, String, [u32; 4]), (String, String)>;
 struct Settings {
     project_root: PathBuf,
     library_root: PathBuf,
     writes: bool,
     permit: Option<(i64, String, i64)>,
     seen: Mutex<std::collections::BTreeSet<String>>,
-    previews: Mutex<std::collections::BTreeSet<(i64, String, [u32; 4])>>,
+    previews: Mutex<CropPreviews>,
 }
 
 impl AgentServer {
@@ -196,7 +197,7 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "Preview or APPLY a crop of the CURRENT image using normalized left/top/right/bottom coordinates. apply=false previews only. apply=true saves native-pixel PNG with 32 alignment and preserves the complete original. Inspect preview and use the fresh hash."
+        description = "Propose a crop AFTER visually inspecting the current image. Choose ratio from policy.crop_ratios and bbox in current-image 0..1000 coordinates, with a composition-specific reason. apply=false returns exact PNG preview and preview_sha256; inspect it before apply=true. Native PNG pixels are retained with 32 alignment, original preserved. Prefer removing a safely removable edge watermark; retain/BBox embedded text or watermarks when removal harms composition."
     )]
     async fn bdm_crop(&self, Parameters(args): Parameters<CropArgs>) -> CallToolResult {
         self.task(!args.apply, move |repo, settings| {
@@ -232,7 +233,7 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "Assess inspected current pixels. stage=preliminary never approves/rejects; crop_candidate=true defers routing until verified crop/preview and final reassessment. Final crop_outcome=applied or not_improved requires matching edit/preview evidence. Reject queues human review and removes training approval, never deletes bytes. Legacy calls default to final."
+        description = "Assess inspected current pixels. Preliminary crop_candidate=true defers routing until a useful crop is previewed and the final image reassessed. Do not force previews when no composition-preserving watermark removal is feasible. Final KEEP in durable curation requires retained_elements (text/watermark/sticker/overlay/logo/signature, [] only after inspection found none); matching final-image BBoxes are required when annotating. crop_outcome=applied/not_improved needs real edit/preview evidence. Reject only queues human review."
     )]
     async fn bdm_assess(&self, Parameters(args): Parameters<AssessArgs>) -> CallToolResult {
         self.task(false, move |repo, settings| {

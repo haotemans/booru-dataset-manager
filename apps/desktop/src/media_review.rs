@@ -13,6 +13,7 @@ pub struct ReviewState {
     pub auto_advance: bool,
     pub refine_hint: String,
     pub(crate) sidebar: bool,
+    pub(crate) show_annotation_boxes: bool,
     canvas_id: Option<usize>,
     pub(crate) view: CanvasView,
     pub(crate) redownload: Option<(usize, Receiver<Result<StoredMedia, String>>)>,
@@ -42,6 +43,7 @@ impl Default for ReviewState {
             auto_advance: true,
             refine_hint: String::new(),
             sidebar: false,
+            show_annotation_boxes: false,
             canvas_id: None,
             view: CanvasView::default(),
             redownload: None,
@@ -531,6 +533,10 @@ impl BdmApp {
                 ui.add_enabled_ui(!busy, |ui| {
                     ui.checkbox(&mut self.prefs.confirm_image_edits, "局部修复后二次确认");
                 });
+                ui.checkbox(&mut self.media_review.show_annotation_boxes, "显示标注框")
+                    .on_hover_text(
+                        "文字、水印、贴纸等区域；仅显示与当前图片哈希一致的标注，不修改图片像素。",
+                    );
                 ui.label(
                     RichText::new("← → 切图 · 滚轮缩放 · 双击适应")
                         .size(11.0)
@@ -743,6 +749,7 @@ impl BdmApp {
         let image_rect = self.media_review.view.image_rect(stage, dimensions);
         let mut canvas_ui = ui.new_child(egui::UiBuilder::new().max_rect(stage));
         canvas_ui.set_clip_rect(stage);
+        let current_pixels = preview.is_none();
         if let Some(texture) = preview.or(texture) {
             canvas_ui.painter().image(
                 texture.id(),
@@ -753,8 +760,42 @@ impl BdmApp {
         } else {
             self.paint_media(&canvas_ui, image_rect, media.id);
         }
+        if current_pixels {
+            self.paint_annotation_boxes(canvas_ui.painter(), image_rect, media.id);
+        }
         self.editor_canvas(&canvas_ui, &response, image_rect, dimensions);
     }
+    fn paint_annotation_boxes(&self, painter: &egui::Painter, image: Rect, id: usize) {
+        if !self.media_review.show_annotation_boxes {
+            return;
+        }
+        let Some(details) = self.workflows.annotation_details.get(&id) else {
+            return;
+        };
+        let Some(current) = self.ingest.stored.get(&id) else {
+            return;
+        };
+        let draw = |bbox: [i64; 4], label: &str, color: egui::Color32| {
+            let rect = Rect::from_min_max(
+                image.min + vec2(bbox[0] as f32, bbox[1] as f32) * image.size() / 1000.0,
+                image.min + vec2(bbox[2] as f32, bbox[3] as f32) * image.size() / 1000.0,
+            );
+            painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.5_f32, color));
+            let text =
+                painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), color);
+            let at = rect.min + vec2(3.0, 3.0);
+            painter.rect_filled(
+                Rect::from_min_size(at, text.size() + vec2(4.0, 2.0)),
+                2.0,
+                egui::Color32::from_black_alpha(210),
+            );
+            painter.galley(at + vec2(2.0, 1.0), text, color);
+        };
+        for (bbox, label, color) in annotation_boxes(details, &current.sha256) {
+            draw(bbox, label, color);
+        }
+    }
+
     fn review_info(&mut self, ui: &mut egui::Ui, media: &Media, height: f32) {
         let id = media.id;
         egui::Frame::none()
@@ -1409,11 +1450,78 @@ fn raw_tag_groups(
     groups
 }
 
+fn annotation_boxes(
+    details: &bdm_infrastructure::ai::AnnotationDetails,
+    sha: &str,
+) -> Vec<([i64; 4], &'static str, egui::Color32)> {
+    if details.image_sha256.as_deref() != Some(sha) {
+        return Vec::new();
+    }
+    let mut boxes = Vec::new();
+    for region in details.text_regions.iter().filter(|r| r.is_valid()) {
+        let watermark = region.kind == "watermark";
+        boxes.push((
+            region.bbox_1000_xyxy,
+            if watermark { "水印" } else { "文字" },
+            if watermark { AMBER } else { ACCENT },
+        ));
+    }
+    for region in details.visual_regions.iter().filter(|r| r.is_valid()) {
+        let label = match region.kind.as_str() {
+            "watermark" => "水印",
+            "sticker" => "贴纸",
+            "logo" => "标识",
+            "signature" => "署名",
+            "overlay" => "叠加素材",
+            _ => continue,
+        };
+        boxes.push((
+            region.bbox_1000_xyxy,
+            label,
+            if region.kind == "sticker" {
+                egui::Color32::from_rgb(50, 190, 130)
+            } else {
+                AMBER
+            },
+        ));
+    }
+    boxes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Preferences;
     use bdm_infrastructure::workflows::TextArtifact;
+
+    #[test]
+    fn visible_boxes_belong_to_current_pixels_and_distinguish_watermarks_from_stickers() {
+        use bdm_infrastructure::ai::{AnnotationDetails, TextRegion, VisualRegion};
+        let details = AnnotationDetails {
+            image_sha256: Some("current-sha".into()),
+            text_regions: vec![TextRegion {
+                text: "SAMPLE".into(),
+                kind: "watermark".into(),
+                legibility: "readable".into(),
+                bbox_1000_xyxy: [30, 700, 300, 950],
+                ..Default::default()
+            }],
+            visual_regions: vec![VisualRegion {
+                kind: "sticker".into(),
+                bbox_1000_xyxy: [800, 800, 950, 950],
+                description: "A heart-shaped sticker.".into(),
+                relation: "Overlapping the lower-right background.".into(),
+                confidence: None,
+            }],
+            ..Default::default()
+        };
+        let boxes = annotation_boxes(&details, "current-sha");
+        assert_eq!(boxes.len(), 2);
+        assert_eq!(boxes[0].1, "水印");
+        assert_eq!(boxes[1].1, "贴纸");
+        assert_ne!(boxes[0].2, boxes[1].2);
+        assert!(annotation_boxes(&details, "new-crop-sha").is_empty());
+    }
 
     fn sample() -> BdmApp {
         let mut app = BdmApp::from_preferences(Preferences::default(), true, None);

@@ -100,7 +100,8 @@ impl AgentService {
     pub fn policy(&self) -> ServiceReply {
         ServiceReply::success(
             json!({"protocol":"bdm-agent-v3","instructions":POLICY,"writes_enabled":self.settings.writes,
-        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging"],
+        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging","preset_crop_proposal","retained_element_boxes"],
+        "crop_ratios":bdm_domain::training::RATIOS.iter().map(|r|r.0).collect::<Vec<_>>(),
         "image_retention":{"original":1,"current":1,"thumbnail":1},"next":{"action":"resolve_scope_then_submit_or_inspect"}}),
         )
     }
@@ -162,6 +163,25 @@ impl AgentService {
                             required.retain(|v| v != key);
                         }
                     }
+                }
+                if matches!(
+                    name.trim_start_matches("work_"),
+                    "preview" | "apply" | "crop"
+                ) {
+                    if schema["required"].is_null() {
+                        schema["required"] = json!([]);
+                    }
+                    schema["required"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!("ratio"));
+                    if name == "work_apply" {
+                        schema["required"]
+                            .as_array_mut()
+                            .unwrap()
+                            .push(json!("preview_sha256"));
+                    }
+                    schema["properties"]["ratio"] = json!({"type":"string","enum":bdm_domain::training::RATIOS.iter().map(|r|r.0).collect::<Vec<_>>()});
                 }
                 Ok(ServiceReply::success(
                     json!({"operation":name,"payload_schema":schema,"work_envelope":{"required":["work_id","lease_token","generation"],"writes_also_require":["request_id","expected_sha256","payload"]},"server_owned":["media_id","overwrite","require_final_assessment","apply"]}),

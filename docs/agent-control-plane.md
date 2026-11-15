@@ -97,3 +97,11 @@ The Rust geometry is tested against 44 outputs generated from the user's local `
 ## Validation boundaries
 
 Tests use temporary catalogs/images, verify cross-client continuation, lease fencing, stale/manual-text conflicts, idempotent writes, crop-first ordering, native PNG geometry, regions-only saves, download queue semantics, CLI JSON behavior and unchanged desktop workflows. They do not invoke a paid model, download a user's gallery or alter the real dataset. Windows CI builds and publishes both executables.
+
+## Visual crop proposals and retained element boxes
+
+Agent crop calls require one of policy.crop_ratios, a visually chosen bbox and a composition-specific reason after full-image inspection. The preset planner keeps nominal aspect error within 2% on the 32-pixel grid. Previews return the exact native selection and preview_sha256; durable apply must echo the same bbox/ratio/hash. A changed ratio or altered proposal needs a new inspected preview. Pure native-image alignment in a bulk loop is not an Agent visual crop plan.
+
+Final KEEP reports retained_elements (text, watermark, sticker, overlay, logo, signature; [] only after actual inspection). Full-curation annotation validates matching BBox kinds before writing text. Plans with retained elements must include regions output. OCR uses text_regions; non-text watermarks/logos/signatures now also have visual_regions kinds. All boxes refer to the final current image SHA. The desktop More menu can display these boxes without changing image pixels and suppresses stale-SHA boxes and boxes over a different edit preview.
+
+Prefer cropping a safely removable edge watermark. If removing embedded typography or a large watermark damages the subject or composition, retain the artwork and label each occurrence. The server validates proof/geometry/schema consistency; the external Agent remains responsible for seeing every occurrence and judging composition. The project Skill documents the exact decision rules; no hosted vision calls or image edits are automatically performed by installing this update.

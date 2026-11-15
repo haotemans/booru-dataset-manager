@@ -731,6 +731,7 @@ fn work(
             )
         })?;
         let mut result = tools::crop(repo, &settings, args)?;
+        payload["preview_sha256"] = result.metadata["preview_sha256"].clone();
         let changed=storage(repo.connection.execute("UPDATE agent_work SET preview=?5,expires=?6 WHERE id=?1 AND lease=?2 AND generation=?3 AND expires>?4 AND EXISTS(SELECT 1 FROM agent_jobs WHERE id=job_id AND state='running')",params![id,token,generation,now(),payload.to_string(),now()+600]))?;
         if changed != 1 {
             return Err(error("lease_lost", "Ownership changed during preview"));
@@ -742,11 +743,13 @@ fn work(
         let p: Value = serde_json::from_str(preview).map_err(|_| IngestError::Storage)?;
         let bbox: [u32; 4] = serde_json::from_value(p["bbox_1000_xyxy"].clone())
             .map_err(|_| IngestError::Storage)?;
-        settings
-            .previews
-            .lock()
-            .unwrap()
-            .insert((media_id, sha.clone(), bbox));
+        settings.previews.lock().unwrap().insert(
+            (media_id, sha.clone(), bbox),
+            (
+                p["ratio"].as_str().unwrap_or("").to_owned(),
+                p["preview_sha256"].as_str().unwrap_or("").to_owned(),
+            ),
+        );
     }
     let allowed = match action {
         "apply" => stage == "crop",
@@ -782,10 +785,15 @@ fn work(
                     .ok_or_else(|| error("preview_required", "Preview the exact crop first"))?,
             )
             .map_err(|_| IngestError::Storage)?;
-            if previous["bbox_1000_xyxy"] != payload["bbox_1000_xyxy"] {
+            if previous["bbox_1000_xyxy"] != payload["bbox_1000_xyxy"]
+                || previous["ratio"] != payload["ratio"]
+                || previous["preview_sha256"]
+                    .as_str()
+                    .is_none_or(|sha| Some(sha) != payload["preview_sha256"].as_str())
+            {
                 return Err(error(
                     "preview_required",
-                    "Requested crop differs from preview",
+                    "Echo the exact inspected proposal's bbox, ratio and preview_sha256 before applying",
                 ));
             }
             payload["apply"] = json!(true);
@@ -807,6 +815,19 @@ fn work(
             };
             if stage != "triage" {
                 args.crop_candidate = false;
+            }
+            if matches!(args.stage, AssessmentStage::Final)
+                && matches!(args.decision, Decision::Keep)
+            {
+                let elements=args.retained_elements.as_ref().ok_or_else(||error("retained_elements_required","Inspect final pixels and report retained_elements, including [] when none; do not infer absence from source tags"))?;
+                if !elements.is_empty()
+                    && !plan["outputs"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!("regions"))
+                {
+                    return Err(error("regions_output_required","Retained text/watermarks/stickers require a plan with regions output; preserve the image and submit a reviewed new plan"));
+                }
             }
             let result = tools::assess(repo, &settings, args)?;
             let next = if result.metadata["stage"] == "preliminary" {
@@ -937,10 +958,17 @@ fn work(
                     | "crop_preview_required"
                     | "no_pending_crop"
                     | "bucket_unavailable"
+                    | "crop_ratio_required"
+                    | "retained_elements_required"
+                    | "invalid_retained_elements"
+                    | "retained_elements_bbox_required"
             );
             let conflict = matches!(
                 code,
-                "annotation_conflict" | "stale_image" | "human_review_required"
+                "annotation_conflict"
+                    | "stale_image"
+                    | "human_review_required"
+                    | "regions_output_required"
             );
             if safe || conflict {
                 storage(repo.connection.execute(
@@ -953,7 +981,7 @@ fn work(
                         "UPDATE agent_work SET stage=?2,lease=NULL,owner=NULL WHERE id=?1",
                         params![
                             id,
-                            if code == "human_review_required" {
+                            if matches!(code, "human_review_required" | "regions_output_required") {
                                 "deferred"
                             } else {
                                 "failed"

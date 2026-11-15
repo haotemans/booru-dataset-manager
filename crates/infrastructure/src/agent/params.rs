@@ -36,6 +36,12 @@ pub struct CropArgs {
     pub expected_sha256: String,
     /// Coordinates are relative to the CURRENT image, not its display thumbnail.
     pub bbox_1000_xyxy: [u32; 4],
+    /// Choose one of the existing 17 fixed ratios after inspecting composition.
+    #[serde(default)]
+    pub ratio: Option<String>,
+    /// Echo the inspected preview's SHA when applying a durable crop proposal.
+    #[serde(default)]
+    pub preview_sha256: Option<String>,
     #[serde(default)]
     pub apply: bool,
     pub reason: String,
@@ -104,6 +110,19 @@ pub enum CropOutcome {
     NotImproved,
 }
 
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RetainedElement {
+    Text,
+    Watermark,
+    Sticker,
+    Overlay,
+    Logo,
+    Signature,
+}
+
 #[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AssessArgs {
@@ -115,6 +134,10 @@ pub struct AssessArgs {
     pub composition: Option<f64>,
     pub detail: Option<f64>,
     pub watermark_present: Option<bool>,
+    /// Final current-image inspection inventory. [] means no visible text or overlays;
+    /// every declared retained kind needs its own matching BBox evidence at annotation.
+    #[serde(default)]
+    pub retained_elements: Option<Vec<RetainedElement>>,
     pub style: String,
     pub decision: Decision,
     /// Preliminary scores are provisional and never approve or reject. Only final results can route keep/reject.

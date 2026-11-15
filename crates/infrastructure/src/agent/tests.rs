@@ -308,13 +308,29 @@ fn full_curation_crop_has_native_pixels_matching_bucket_and_requires_reinspectio
     );
     assert_eq!(preliminary["next_stage"], "crop");
     assert_eq!(preliminary["decision"], "defer");
-    let crop = json!({"bbox_1000_xyxy":[20,20,980,980],"reason":"Keep subject; trim empty margins","model":"test"});
+    let mut crop = json!({"ratio":"1:1","bbox_1000_xyxy":[20,20,980,980],"reason":"Keep subject; trim empty margins","model":"test"});
     let preview = ok(
         &s,
         "work_preview",
         leased_input(&item, "preview", crop.clone()),
     );
     assert_eq!(preview["next"]["operation"], "work_apply");
+    let no_echo = s.execute(
+        "work_apply",
+        leased_input(&item, "missing-preview-proof", crop.clone()),
+    );
+    assert_eq!(no_echo.metadata["code"], "preview_required");
+    crop["preview_sha256"] = preview["preview_sha256"].clone();
+    let mut changed_ratio = crop.clone();
+    changed_ratio["ratio"] = json!("2:1");
+    assert_eq!(
+        s.execute(
+            "work_apply",
+            leased_input(&item, "changed-ratio", changed_ratio)
+        )
+        .metadata["code"],
+        "preview_required"
+    );
     drop(s);
     let s = service(&f, true);
     let saved = ok(&s, "work_apply", leased_input(&item, "crop", crop));
@@ -356,6 +372,75 @@ fn full_curation_crop_has_native_pixels_matching_bucket_and_requires_reinspectio
     assert_eq!(
         ok(&s, "job_status", json!({"job_id":job}))["state"],
         "completed"
+    );
+}
+
+#[test]
+fn retained_text_watermark_and_sticker_need_boxes_without_forcing_a_crop() {
+    let (f, _, m) = fixture();
+    let s = service(&f, true);
+    ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"preserve-composition","mode":"curate","media_ids":[m.id],"outputs":["caption","regions"]}),
+    );
+    ok(&s, "jobs_tick", json!({}));
+    let item = ok(&s, "work_claim", json!({"owner":"test"}))["items"][0].clone();
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    let mut report = serde_json::to_value(assessment(&m, Decision::Keep)).unwrap();
+    report.as_object_mut().unwrap().remove("media_id");
+    report.as_object_mut().unwrap().remove("expected_sha256");
+    report["retained_elements"] = json!(["text", "watermark", "sticker"]);
+    report["watermark_present"] = json!(true);
+    report["reason"]=json!("Removing these overlays would cut the subject and meaningful setting; preserve the composition and annotate every retained region.");
+    let assessed = ok(&s, "work_assess", leased_input(&item, "assess", report));
+    assert_eq!(assessed["next_stage"], "annotation");
+    let missing = json!({"caption":"A blue field with white lettering and a small decorative sticker.","text_regions":[],"visual_regions":[],"reason":"Test","model":"test"});
+    assert_eq!(
+        s.execute(
+            "work_annotate",
+            leased_input(&item, "missing", missing.clone())
+        )
+        .metadata["code"],
+        "retained_elements_bbox_required"
+    );
+    let mut annotated = missing;
+    annotated["text_regions"] = json!([
+        {"text":"SAMPLE","bbox_1000_xyxy":[30,700,300,950],"kind":"watermark","legibility":"readable"},
+        {"text":"HELLO","bbox_1000_xyxy":[500,50,900,200],"kind":"overlay","legibility":"readable"}
+    ]);
+    annotated["visual_regions"] = json!([{"kind":"sticker","bbox_1000_xyxy":[800,800,950,950],"description":"A small heart-shaped decoration.","relation":"Overlapping the lower-right background."}]);
+    let saved = ok(&s, "work_annotate", leased_input(&item, "boxed", annotated));
+    assert_eq!(saved["next_stage"], "completed");
+    assert_eq!(saved["annotation_details"]["text_region_count"], 2);
+    let current = f.repo.media_by_id(m.id).unwrap().unwrap();
+    assert_eq!(current.sha256, m.sha256);
+    assert!(current.edit.is_none());
+}
+
+#[test]
+fn final_overlay_inventory_and_an_agent_chosen_preset_cannot_be_skipped() {
+    let (mut f, settings, m) = fixture();
+    let (s, item, _) = start_work(&f, m.id, "curate");
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    let mut report = serde_json::to_value(assessment(&m, Decision::Keep)).unwrap();
+    for key in ["media_id", "expected_sha256", "retained_elements"] {
+        report.as_object_mut().unwrap().remove(key);
+    }
+    assert_eq!(
+        s.execute("work_assess", leased_input(&item, "no-inventory", report))
+            .metadata["code"],
+        "retained_elements_required"
+    );
+    // Standalone crop proposals obey the same fixed ratio contract.
+    ok(&s, "work_release", item);
+    view(&mut f.repo, &settings, m.id);
+    let mut args = crop_args(&m, false);
+    args.ratio = None;
+    assert_eq!(
+        tools::error_result(tools::crop(&mut f.repo, &settings, args).unwrap_err()).metadata
+            ["code"],
+        "crop_ratio_required"
     );
 }
 
@@ -571,6 +656,8 @@ fn crop_args(m: &bdm_domain::ingest::StoredMedia, apply: bool) -> CropArgs {
         media_id: m.id,
         expected_sha256: m.sha256.clone(),
         bbox_1000_xyxy: [20, 20, 980, 980],
+        ratio: Some("1:1".into()),
+        preview_sha256: None,
         apply,
         reason: "Retain the complete subject with balanced margins".into(),
         model: "unit-test".into(),
@@ -585,6 +672,7 @@ fn assessment(m: &bdm_domain::ingest::StoredMedia, decision: Decision) -> Assess
         composition: Some(8.0),
         detail: Some(9.0),
         watermark_present: None,
+        retained_elements: Some(Vec::new()),
         style: "textured illustration".into(),
         decision,
         stage: AssessmentStage::Final,
