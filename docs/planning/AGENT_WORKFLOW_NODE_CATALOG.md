@@ -103,7 +103,7 @@ A workflow is an explicit graph of nodes with configured scope and exit criteria
 | W02 Download & ingest | N01? -> N02 -> N03 -> N04 -> N05 -> N06? | durable originals, raw provenance, per-post counts and cursors | fetch/verify/import standalone with explicit inputs |
 | W03 Metadata cleanup | N06 -> validation | protected identity tags, normalized sidecars | normalize one image without AI |
 | W04 Technical audit | N04/N10 -> N21? | pass/fail/unknown per image, no aesthetic claim | audit one media without modification |
-| W05 Exact / near-duplicate review | N07 -> N08 -> N09? -> N16 | candidate relations, pair decisions, pending review | feature-only, candidate-only or a single pair |
+| W05 Exact / near-duplicate review | N07 -> N08 -> N09? -> aesthetic group ranking -> N16 | **true interchangeable duplicate group retains the aesthetically best technically eligible survivor**; others become disposition candidates under separately chosen deletion policy | feature-only, candidate-only, pair review, or group-ranking-only; meaningful alternate artwork is not discarded |
 | W06 Visual quality selection | N10 -> N11 -> N16 | individual training suitability and keep/defer/reject queue | one Agent quality assessment, no caption if not requested |
 | W07 Joint visual caption + tags | N11 -> N15 | current-image-consistent caption, tags and optional text boxes | one image, one reasoning pass, no crop |
 | W08 Composition / crop | N11? -> N12 -> N13 -> N11? -> N15? | current native-resolution edit and invalidation; optional post-crop labeling | preview only, apply only after preview, restore only |
@@ -222,7 +222,7 @@ Existing ten MCP tools remain backward compatible, but a new Agent should **not*
 Review the **shared node contract and graph semantics** first, then finish each workflow from trigger to persistence with its input/output schemas, authorization, caching, scheduling and tests. Suggested sequence:
 
 1. W02 Download/ingest (establishes canonical media IDs/provenance/sidecars).
-2. W05 Duplication (exact vs near vs related and legacy auto-delete compatibility), detailed node-by-node in [ADR-006](AGENT_DUPLICATE_WORKFLOW_RFC.md). **Open policy:** review all visual deletion candidates vs preserving legacy strict automatic removal.
+2. W05 Duplication (exact vs near vs related and legacy auto-delete compatibility), detailed node-by-node in [ADR-006](AGENT_DUPLICATE_WORKFLOW_RFC.md). **Accepted survivor principle:** keep the aesthetically best valid image in each true interchangeable duplicate group. **Open policy:** review all visual deletion candidates vs preserving legacy strict automatic removal.
 3. W16 independent aesthetic assessment and W06+W07 training quality + joint caption/tag/text-region output; share model inspection when selected, but keep artifacts and mutation rights separate.
 4. W08/W09 Crop/repair/restore (image revision and invalidation).
 5. W10 Human review/cancellation/deletion (safety gate).
