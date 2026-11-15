@@ -88,6 +88,7 @@ Return a versioned envelope with `job_id`, `node_run_id`, `state`, `completed`, 
 | N20 `backup.upload_verify` | L | authorized destination, snapshot plan, provider adapter | hash-verified remote version and pointer (if supported) | never advance LATEST before full readback verification; currently future implementation |
 | N21 `audit.reconcile` | L | selected catalog/job/output | integrity/audit/recovery report | distinguish missing/corrupt/changed, never auto-delete to "repair" |
 | N22 `image.repair` | L/A/H | selected region, explicit consent, available inpaint worker | preview and journaled image update if approved | optional/manual; a defect cannot be erased purely because model dislikes style |
+| N23 `aesthetic.evaluate` | A | current-image full view, SHA/revision, aesthetic profile, client consent | separate versioned aesthetic report (overall/dimensions/confidence/evidence) | **score-only by default**, no implicit Keep/Reject, crop, caption, tag, deletion or export; see [ADR-004](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md) |
 
 Notes: existing code already implements parts of ingestion, hashing, pHash/DINOv3, editing, annotations and export through other entry points. The **standalone Node API and composed workflow engine are not implemented**. Default source ingestion is **static PNG/JPEG/WebP**, explicitly excluding GIF/video/animated assets. Animated pixel dataset collection is a separate proposed opt-in media workflow requiring new adapters/validators, not a flag that silently bypasses current source-type gates.
 
@@ -112,6 +113,7 @@ A workflow is an explicit graph of nodes with configured scope and exit criteria
 | W13 Ongoing collection update | N02 delta -> N03..N06 only for new/changed -> W05? -> W07? -> W11? | incremental checkpoint; skip unchanged, no new model calls without need | new-source discovery only |
 | W14 Full static-image curation | W02? -> W03 -> W04 -> W05 -> (W06+W07 fused when suitable) -> W08? -> W10? -> W11? | explicit acceptance criteria, per-stage reports, human exceptions | any constituent node or subflow alone |
 | W15 Pixel-art motion dataset (future) | separate animated discover -> animation validation -> sampling/quality -> human/Agent annotation -> export | GIF/video frame-consistent training artifacts | intentionally not supported by current static-only ingestion |
+| W16 Independent aesthetic judgment | N23 -> optional ranking or review recommendation | versioned subjective score/profile and non-destructive explanation | one image, media batch or full collection; can fuse same vision pass with W07 but retains separate persisted artifact |
 
 `?` = conditional or optional and must be declared in the workflow plan. W14 is a reusable template, not a hardcoded "always execute everything" sequence. W13 may run on an explicitly requested schedule; this RFC does not create a recurring automatic download.
 
@@ -218,11 +220,13 @@ Review the **shared node contract and graph semantics** first, then finish each 
 
 1. W02 Download/ingest (establishes canonical media IDs/provenance/sidecars).
 2. W05 Duplication (exact vs near vs related and legacy auto-delete compatibility).
-3. W06+W07 Visual quality and joint caption/tag/text-region output (highest Agent overhead).
+3. W16 independent aesthetic assessment and W06+W07 training quality + joint caption/tag/text-region output; share model inspection when selected, but keep artifacts and mutation rights separate.
 4. W08/W09 Crop/repair/restore (image revision and invalidation).
 5. W10 Human review/cancellation/deletion (safety gate).
 6. W11 Export (native dimensions, four optional buckets and manifest).
 7. W13 Incremental collection refresh (cache reuse, updated images, completion criteria).
 8. W12 Backup/restore; W15 animated dataset only after explicit scope and implementation decisions.
+
+Aesthetic evaluation is separately documented in [ADR-004](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md). **W06 training-quality decisions and W16 aesthetics must not be conflated**: existing `bdm_assess` has Keep/Reject side effects, whereas N23 is score-only by default.
 
 All node and workflow names, schemas and limits in this ADR remain proposals. Confirming "single-node OR full workflow" does not approve silent AI calls, hidden media deletion or merging the draft PR.
