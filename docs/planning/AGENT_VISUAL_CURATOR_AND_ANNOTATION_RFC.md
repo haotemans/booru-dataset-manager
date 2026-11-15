@@ -1,6 +1,6 @@
 # ADR-007 / W06+W07: Training suitability, visual assessment and one-pass Caption/Tag annotation
 
-**Status:** DESIGN DRAFT / OPEN FOR OWNER REVIEW (2026-11-15). W05 difference preservation was accepted before this draft; the **W06 quality policy and W07 annotation output/commit contract are not yet frozen**. PR #11 remains design-only; no runtime code or data has been changed.
+**Status:** PARTIALLY ACCEPTED (2026-11-15). Owner selected **W06 policy A: only images confidently and clearly unsuitable for the selected training target are automatically queued in the existing pending-deletion review; other images are kept or deferred**. Human final deletion confirmation remains mandatory. The detailed W06 rubric/threshold calibration and W07 annotation schema/defaults below are still proposed for review. PR #11 remains docs-only; no runtime code or data has changed.
 **Related:** [ADR-001 persistent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md), [ADR-002 Agent-pull leases](AGENT_PULL_LEASE_PROTOCOL.md), [ADR-003 nodes/workflow](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-004 aesthetics](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md), [ADR-005 comic review routing](COMIC_PAGE_EXCLUSION_AND_OPTIONAL_LABELING.md), [ADR-006 dedup](AGENT_DUPLICATE_WORKFLOW_RFC.md), [current caption/tag rules](../features/CAPTIONS_AND_TAGS.md).
 
 ## 1. Distinct responsibilities and a shared Agent visual pass
@@ -34,9 +34,9 @@ These must be separately *requested and stored*, even when derived in one model 
    - use dedup/dataset coverage evidence when available rather than visually claiming uniqueness;
    - image defects relevant to training such as corrupt regions, severe compression, unintended overlays, confusing collage;
    - do not rank by resolution alone, artistic complexity alone, presumed artist popularity or source rating.
-6. **Decision suggestion** `keep / defer / reject_for_review`, structured reason(s), confidence and whether an in-place crop might help. A score-only W06 remains non-destructive; a composed quality-screen flow may explicitly include `review.route` to queue rejecting images in existing GUI collection, followed by **human final confirmation**.
+6. **Decision suggestion** `keep / defer / reject_for_review`, structured reason(s), confidence and whether an in-place crop might help. **Accepted W06 A:** in a user-authorized *quality-screen workflow*, only `reject_for_review` outcomes satisfying versioned high-confidence unsuitability gates are routed into the **existing pending-deletion collection**; all other cases are kept or deferred. The **standalone `training.evaluate` node remains score-only**, unless the requested workflow explicitly includes `review.route`. Human final confirmation is mandatory.
 7. Preserve prior valid human Keep/cancel and reviewed artifacts; do not overwrite decisions with a lower-confidence automated result. A changed SHA/profile/model must invalidate only affected derived records.
-8. **No speculative "score<7=reject" policy**. Thresholds, high-confidence reject categories, minimum training eligibility and human override behavior must be calibrated and explicitly approved. If no validated policy exists, store scores/recommendations but do not manufacture a rejection.
+8. **No speculative `score < 7 = reject` rule.** Accepted policy A is a **categorical, evidence-backed high-confidence eligibility gate**, not a low aesthetic score cutoff. Concrete defect categories and thresholds must be tested/calibrated. Without a validated high-confidence criterion, return `defer` or `keep` and never fabricate an auto-reject.
 
 ### W06 proposed typed result
 
@@ -173,7 +173,7 @@ An Agent can request only a **node** or a **workflow**, and one workflow may con
 
 ## 7. Critical discussion decisions (not yet accepted)
 
-1. **W06 keep/defer/reject routing:** should training-quality Agent judgments automatically **queue** low-suitability/clearly defective images into the existing deletion-review collection (with human final confirmation), or should W06 only generate scores and route rejections solely on an explicit separate run? Do not conflate this with score-only W16.
+1. **W06 routing: policy A ACCEPTED.** High-confidence, clearly unsuitable images automatically enter existing pending-deletion review **only within an explicitly authorized quality-screen workflow**. Low aesthetic score or uncertainty alone never routes rejection. Standalone scoring remains non-destructive. Remaining decisions: tested eligibility reason codes, recoverability and confidence calibration.
 2. **Caption detail:** concise factual description vs **dense training description**; whether to use one adaptive prompt based on image complexity, with maximum length and no hallucinated details.
 3. **Target-specific suitability:** should default target be general 2D illustration style or user-specified dataset Profile for each collection? Collection profile must freeze across the job.
 4. **Annotation overwrite:** default preserve existing reviewed caption/tags, explicit overwrite only on a named output target vs always replace unreviewed artifact on a newly requested optimization run.
@@ -181,3 +181,224 @@ An Agent can request only a **node** or a **workflow**, and one workflow may con
 6. **Uncertainty:** define benchmarked thresholds for missing detail, unclear text, small/occluded eye color, ambiguous artistic style, and training suitability; do not guess without sample labels.
 
 **No new CLI/MCP/node API is implemented by this RFC.** No background model work, physical deletion or data migration is authorized by discussing these contracts.
+
+## 8. W06 quality policy A — accepted routing, proposed concrete evaluation contract
+
+### 8.1 Separate technical health, aesthetics and training suitability
+
+A result is not a scalar "image quality". The daemon stores **independent channels**:
+
+| Channel | Interpretation | Who supplies it | Action |
+| --- | --- | --- | --- |
+| `technical` | format/decoder/checksum/size/crop feasibility | Rust local validators | fail/valid/unknown; deterministic preflight |
+| `aesthetic` | artistic appeal *in a style-specific versioned Profile* | Agent W16 | 0-10 or null; **not a deletion threshold** |
+| `training` | suitability *for a declared dataset and goal* | Agent + local target-specific criteria | 0-10 or null, reasons, confidence |
+| `content_form` | standalone illustration vs sequential comic vs uncertain | source tags + optional Agent view | confirmed managed comics follow ADR-005, independent of scores |
+| `duplicate_relation` | whether other images make this instance redundant | W05 pHash/DINO + group review | only W05 selects group survivor and queues nonwinners |
+
+**The target Profile is required and frozen in a job snapshot.** Examples: `general-illustration@1`, `pixel-art@1`, `character-lora@1`, or `style-lora@1`. Different targets can disagree about suitability without changing a global "bad image" flag. The same library image may be useful in a different permitted workflow, so review routing must carry target/scope and respect shared references.
+
+### 8.2 Proposed rejection-eligibility matrix
+
+| Signal / example | Evidence | Proposed W06 response | Reason code |
+| --- | --- | --- | --- |
+| Invalid/corrupt original/current bytes | verified local format/decoder/checksum failure, after bounded recovery attempt | `defer_for_recovery` or `reject_for_review` only if verified irrecoverable for target | `UNREADABLE_OR_CORRUPT` |
+| Image below **actual** configured target usability constraints | measured native pixels + named training geometry/profile, no upscale path | `reject_for_review` only if not recoverable by a valid crop/variant and policy has a verified hard floor | `BELOW_TARGET_REQUIREMENT` |
+| Wrong content domain (e.g. screenshot/photo in strictly 2D illustration dataset) | source + full-image evidence, clearly outside frozen target definition | `reject_for_review` when high confidence; otherwise defer | `TARGET_MISMATCH` |
+| Severe unintentional artifact covering essential visible content | full view/necessary detail tile; substantial watermark, compression corruption, pasted overlay | suggest `repair_or_crop` when safe; queue only if not usable or repairable under target policy | `UNRECOVERABLE_VISUAL_DEFECT` |
+| Confirmed narrative comic page | exact source tags or visual observation under ADR-005 | route via **comic classification path**, not W06 low score | `COMIC_CONTENT` |
+| Verified duplicate group nonwinner | W05 group winner and immutable revision evidence | route via **W05**, not W06 low training score | `DUPLICATE_GROUP_NON_SURVIVOR` |
+| Low aesthetic score alone | subjective W16 score | **keep or defer**; never automatically reject | `AESTHETIC_LOW_ONLY` (not an auto-reject reason) |
+| Intentional blur, rough sketch, flat colors, low-res pixel style, stylized anatomy, text integral to artwork | style intent and available context | **do not penalize by generic illustration criterion**; use appropriate Profile | `STYLISTIC_INTENT` |
+| Mild noise, small watermark, limited detail, imperfect background | scene-dependent and potentially repairable | `keep` or `defer` / conditional repair | `MINOR_OR_FIXABLE` |
+| Evidence unclear, model disagreeing or incompatible scores | incomplete current view, low confidence, ambiguity | `defer`; do not enter confirmed-delete queue | `INSUFFICIENT_EVIDENCE` |
+
+**Resolution policy:** the current Rust training module has four target tiers `768/1024/1536/2048` with step `32` and a native crop acceptance check of short side >=576 and area >=550000 pixels. These numbers are **different concepts**: tiers are export/training geometry choices and the current native crop minimum is not a new blanket "all <768 pictures are bad" aesthetic rule. A target dataset may adopt a stricter, explicitly frozen hard minimum, but W06 must check the relevant real feasibility, not compare a filename or nearest tier. No blind upscaling.
+
+### 8.3 Three actionable outcomes plus a recoverability detour
+
+| Outcome | When | Effect in complete W06 quality-screen workflow |
+| --- | --- | --- |
+| `keep` | suitable/usable; low aesthetic alone does not fail it | continue requested W07 annotation or next configured node |
+| `repair_or_crop` | image has a correctable defect; original retained | optionally schedule **explicit** W08 preview/reinspection; otherwise `defer`, not delete |
+| `defer` | evidence incomplete, score uncertain, potentially valuable outlier, model unavailable | persist reason and next action; no deletion queue; may retry or review later |
+| `reject_for_review` | clearly **unfit for the chosen training target**, high confidence, supported by approved condition and current revision, no untried reasonable remedy | enqueue **existing GUI pending deletion review** with target, reason, evidence and current SHA; final physical deletion requires user batch confirmation |
+
+**Mandatory auto-route gate** (logical AND):
+1. It is a workflow with explicit `quality_screen_route_rejects` permission; a standalone W06 node is score-only.
+2. The image/form/target Profile is known, image evidence/technical evidence is current, and the classification is not uncertain.
+3. At least one **approved, versioned reject-eligible reason code** is true, with verifiable evidence and high calibrated confidence, or a deterministic terminal technical failure with completed recovery policy.
+4. The outcome is **not** simply low beauty, small detail, uncommon style, a screenshot of an intentionally stylized piece, an unverified duplicate, or below an arbitrary resolution bucket label.
+5. There is no unresolved meaningful recovery/crop path and no conflicting prior human Keep/cancel or manual protected state.
+6. Versioned per-media current SHA/revision, Agent lease/fencing and user permission all pass the commit transaction. Otherwise **defer** or return conflict, never silently queue.
+
+**Confidence:** `high/medium/low` is a reporting label, *not* sufficient by itself. A high confidence requires specific image-grounded observations or deterministic measurements and passing tests on labeled edge cases. In the absence of calibration, non-deterministic reject rules are not enabled. Do not invent a universal `0.9` probability or choose a score threshold as a substitute for evidence. Keep a separate `decision_confidence` and per-criterion `evidence_source`.
+
+### 8.4 W06 state transitions and durable review
+
+    input_media
+      -> technical_preflight
+      -> content_form_gate
+      -> Agent visual assessment (only if requested/needed)
+      -> keep | defer | repair_candidate | reject_for_review
+      -> [if reject] review.route -> pending_deletion_review -> human confirm/cancel
+      -> [if keep] selected W07/W08/export prerequisites
+
+- Agent result and `review.route` can be planned as one logical composite workflow, but the **score report remains separate** from the authorized pending-review state. Rejects do not make `media.keep=false` or physically delete any bytes.
+- Once `reject_for_review` queues a media ID, the default complete curation flow should **skip W07 and W16 for that image** (unless an explicitly requested independent job overrides that task scope). Preserve all earlier valid annotation artifacts.
+- A subsequent change in image revision, target policy, content-form classification or manually protected decision invalidates stale review proposals and must be reconciled before final confirmation.
+- Review queue cards show current preview, reject reason, evidence/source, confidence, affected target, potential repair, actor/model version, timestamp, and `files_deleted=0`. If this image also has comic or duplicate reasons, aggregate reasons without replacing a human cancellation; current `agent_reviews` one-review-per-media representation may need schema/workflow migration.
+- An image that is genuinely reusable elsewhere should not be globally deleted merely because it fails **one** scoped training target; on physical deletion approval, validate shared collection/source references and permit removing just the unsuitable dataset association when applicable.
+- State/audit events: `w06.keep`, `w06.defer`, `w06.repair_candidate`, `w06.pending_deletion`, `w06.review_cancelled`, `w06.user_confirmed_deleted`; each tied to job, media ID, SHA, target policy and idempotency key.
+
+### 8.5 W06 score rubric — advisory, not a rejection formula
+
+Score `training.suitability` from 0..10 (null if no reliable basis), alongside typed dimensions:
+- `subject_readability`: are needed subjects/poses visible, count and occlusion accurately representable?
+- `composition_for_target`: usefulness of framing and spatial relationships for this particular target (aesthetic beauty is separate).
+- `visual_integrity`: severe unintended artifacts/overlays vs intentional stylization.
+- `conditioning_feasibility`: can one grounded caption and tags describe the current image without unsupported guesses?
+- `dataset_contribution`: novelty/diversity derived from W05 and catalog coverage, not inferred solely from an isolated picture.
+
+Suggested *interpretation anchors*, not thresholds: `0..2` unusable for the given target, `3..4` major reservations, `5..6` usable with compromises, `7..8` strong fit, `9..10` excellent fit. No automatic score-to-deletion mapping; the categorical gates above decide whether review routing is allowed. An output may be `overall=null` while still reporting deterministic technical state. Always persist score Profile, model/prompt version, confidence and short evidence.
+
+## 9. W07 precise one-pass labeling pipeline (proposal)
+
+### 9.1 Node processing order
+
+1. **Scope and target selection**: `caption`, `tags`, `text_regions`, optional `aesthetic`/`training`/`content_form` and `crop_proposal` are **explicit output flags**. A caption-only task has no side effects on tags/review state.
+2. **Reuse and source protection**: read existing current generated/reviewed artifacts and immutable source `raw_tags.txt`, source-verified artist/character/copyright identities, language/config/Profile. Skip target artifacts when valid/unchanged unless a new explicit optimization job requests replacement.
+3. **Inspect current full frame** via `work.view` and optionally view region tiles only for small text/complex garment details. Source tags are fallible hints; the image is authoritative for visible details. Protect identity locally.
+4. **One model reasoning pass** for all requested eligible outputs: structured JSON result with visual Caption, generic tag candidates, text regions and optional scores/crop plan. The client Agent does the inference; the daemon does not call a provider autonomously.
+5. **Image-form and W06 gate** before writing model-generated target annotations in a combined illustration workflow. Confirmed comics and valid high-confidence W06 rejects go to existing review queue; skip target caption/tag writes. Uncertain images do not generate fabricated content.
+6. **Crop detour, only if needed and selected**: proposal -> exact preview receipt -> authorized apply -> **new image SHA** -> full-current re-view -> re-evaluate/adjust final-image captions/regions before commit. Do not overwrite images on the basis of a model's crop proposal alone.
+7. **Per-target local validation**: caption consistency/length/protected identities, approved generic vocabulary for tags, 0..1000 region geometry/legibility and bounded counts; reject or defer uncertain assertions, record unverified tags and reasons.
+8. **Commit**: per-image current-revision CAS with separate artifact outcomes and short journaled sidecar/SQLite write. Return `saved`, `preserved_existing`, `rejected_invalid`, `needs_review`, `skipped` for each selected output.
+9. **Audit/reuse**: persist SHA, source refs, model/prompt/version, selected fields, tag validation failures, receipt IDs, result hashes, next stage. Never overwrite original raw tags or unrelated manually reviewed artifacts without a corresponding explicit authorized target replacement.
+
+### 9.2 Caption contract and training utility
+
+Recommend `detailed-grounded-en@1`: detailed *English* image-based training caption with comma-separated visual clauses, proportional to scene complexity, **not** a free-form artistic critique or invented storyline.
+
+Order as useful, without rigid repetitive templates:
+- subject count and relative placement; each character's visible hair/eyes/expression/gaze/head orientation and distinguishing visible features;
+- pose/body orientation, hand/object interaction, clothing layers/cuts/colors/folds/accessories, shoes/headwear;
+- nearby objects, background, setting, composition/camera/crop/perspective and foreground/midground/background relationships;
+- color palette, lighting direction and quality, shadows, texture, visible linework/paint/render style, important scene detail;
+- accurately located text/bubble/sticker/special element where applicable, with separate typed BBox rather than forcing coordinates into prose.
+
+Do **not** invent artist/character proper names, occluded anatomy, hidden objects, illegible words, timestamps or narrative context. Distinguish visible detail from unreliable source tags. If eye color is not discernible, omit it. Do not copy the full input Danbooru tag list into sentences. No cross-image contamination within a batch.
+
+**Source identity merge:** the local formatter adds trustworthy artist names with the configured prefix (default `@artist`) and confirmed character names as plain identifiers *before* the generated visual description, separated by comma-space. The Agent output contains visible generic facts only. Preserve raw source ordering and underscores in `image.raw_tags.txt`. The generated English caption uses spaces and punctuation as chosen by the caption Profile.
+
+**Bounds:** existing MCP caption limit is 8192 characters, so retain that as a hard compatibility maximum pending schema v2. A flexible target should depend on actual scene complexity and model context/pixel budget. A caption that is 2000 words of boilerplate is not automatically better than one that fully covers meaningful visible details. Selectable compact vs detailed modes are possible but not yet approved.
+
+### 9.3 Tag contract
+
+- Agent returns *generic visual tags only*. Source-verified artist/character/copyright categories never come from model guesswork and stay protected. Danbooru general hints may be corrected or omitted if visually false, without touching raw source.
+- Use established normalized tag output in `image.tags.txt`, no leading identity contamination. A locally verified category-0 vocabulary is currently enforced by the MCP implementation. New unsupported generic tag guesses are rejected or flagged, not blindly accepted.
+- Keep source tagging semantics: e.g. visible color, clothing, pose, setting, expression, object interaction, composition and stylization only if actually visible. Avoid subjective quality tags, speculative names and scene inference.
+- Respect verified character implication logic: don't erase a specific variant in favor of a generic base character; multiple visible variants may coexist. Keep manual metadata and known aliases.
+- Existing MCP upper bound of 512 proposed input tags / 256 chars each remains a guardrail; **do not** aim to emit that many tags. Validate canonicalization, unknown terms and duplicates.
+- Tag-only mode writes only the tags target. Caption-only mode writes only the caption target. A bad Tag result should not erase a good current caption.
+
+### 9.4 Region/BBox contract
+
+- Model supplies normalized `bbox_1000_xyxy` = [x1,y1,x2,y2] on the **current full-frame revision**, with 0<=x1<x2<=1000 and 0<=y1<y2<=1000. Coordinates use image boundaries, not thumbnail viewport boundaries.
+- Type examples: `text_overlay`, `speech_bubble`, `sign`, `watermark`, `sound_effect`, `diagram`, `sticker`. Location, legibility and typed field are stored independently from caption/tags.
+- Text content is null or omitted if illegible; do not hallucinate OCR. No separate OCR model call by default. One image may have multiple regions, capped by configured resource limits.
+- After crop, BBoxes must be transformed/verified against the new current image dimensions and revision; no stale regions from the old frame may be considered current.
+
+## 10. Shared Agent result and scheduling details (proposal)
+
+### Request profile
+
+~~~json
+{
+  "workflow": "visual-curation",
+  "version": 1,
+  "scope": {"collection": "artist-or-collection-id"},
+  "target_profile": "general-illustration@1",
+  "quality_policy": {
+    "mode": "route_high_confidence_unfit",
+    "review_destination": "existing_pending_deletion",
+    "allow_physical_delete": false
+  },
+  "requested_outputs": [
+    "content_form", "training", "aesthetic", "caption", "tags", "text_regions"
+  ],
+  "write_policy": {"preserve_manual": true, "raw_tags_immutable": true},
+  "image_transfer_consent": "explicit"
+}
+~~~
+
+`workflow.run` displays planned side effects (including potential review queue inserts) and requests required scope/consent before execution. Standalone `node.run training.evaluate` remains score-only even when a review hint is returned.
+
+### Agent payload
+
+~~~json
+{
+  "work_id": "curate:123:7",
+  "media_id": 123,
+  "expected_sha256": "current-verified-sha",
+  "lease_generation": 12,
+  "content_form": "standalone_illustration",
+  "training": {
+    "target_profile": "general-illustration@1",
+    "overall": 3.4,
+    "confidence": "high",
+    "reason_codes": ["UNRECOVERABLE_VISUAL_DEFECT"],
+    "evidence": ["A large unintended overlay obscures the only main subject"],
+    "recoverability": "none_known"
+  },
+  "aesthetic": {
+    "profile": "general-illustration@1",
+    "overall": 7.2,
+    "confidence": "medium"
+  },
+  "review_suggestion": "reject_for_review",
+  "requested_outputs": ["content_form", "training", "aesthetic", "caption", "tags"],
+  "caption": null,
+  "generic_tags": null,
+  "text_regions": [],
+  "crop_proposal": null
+}
+~~~
+
+Numeric values and evidence are synthetic examples only. This payload is an **Agent proposal**; the daemon independently validates whether the reject reason is allowlisted/verified before queueing.
+
+### Server acknowledgement
+
+~~~json
+{
+  "media_id": 123,
+  "state": "pending_deletion_review",
+  "reason_code": "UNRECOVERABLE_VISUAL_DEFECT",
+  "quality_saved": true,
+  "caption_state": "skipped_due_to_quality_gate",
+  "tags_state": "skipped_due_to_quality_gate",
+  "files_deleted": 0,
+  "review_destination": "existing_pending_deletion"
+}
+~~~
+
+Each W06/W07 media result is idempotent, with a current SHA and lease fencing. Grouped reviews (W05) and comic review (ADR-005) can coexist with quality reasons in the same existing pending review UI. If other contexts require this image, final user confirmation must handle shared references safely.
+
+**Execution optimization:**
+- Local technical checks run while other Agent visual batches execute. The Agent receives a small bounded work lease; batch metadata does not include raw image base64.
+- Fusing `content_form + aesthetic + training + caption/tags/regions` in **one visual pass** is preferred when all selected, but an early "clearly reject" can skip emitting long captions/huge tag arrays. This is one requested model response, not a guarantee of lower token usage; benchmark overall accepted images/min and provider cost.
+- Caches per image current SHA + source/tag rules + target Profile + quality/aesthetic rubric + model/prompt + requested outputs. A human revision or crop invalidates only dependent results; do not re-download unchanged sources.
+- Per-target validation permits independent accepted outputs. A workflow export gate checks all specifically required results are complete/current before export; a tag failure does not silently mark caption as accepted.
+- Error responses distinguish `INSPECTION_REQUIRED`, `UNSUPPORTED_FORMAT`, `REASON_NOT_APPROVED`, `NOT_REPAIRABLE_UNVERIFIED`, `REVISION_CONFLICT`, `LEASE_EXPIRED`, `PERMISSION_DENIED`, `RATE_LIMITED`, `TAG_VOCAB_MISSING` and `PARTIAL_RESULT`.
+- Measure automatic-review **precision** in human-approved samples (low false-positive reject is critical), deferred percentage, recovered images, residual bad-image export percentage, caption hallucination/identity contamination, locally rejected tags, model calls per image, image bytes, p50/p95 stage latency and peak RAM. Record separately from W16 subjective aesthetic scores.
+- Fault tests: CLI session loss after score submission; reject routing retried with same key; human Keep/cancel races Agent outcome; edited image SHA between view and submit; corrupt-source recovery; style-specific pixel art blur false positive; raw tag invariance; multi-image cross-contamination; partial target commit and SQLite/TXT crash journal recovery.
+
+## 11. Remaining decisions for discussion
+
+**Accepted now:** high-confidence clearly unfit images enter existing pending-deletion collection in an explicitly selected W06 quality-screen workflow; others keep/defer, human batch approval, raw source and manual overrides protected.
+
+**Still open (proposal rather than acceptance):** 
+1. Which concrete W06 reject codes qualify for high-confidence routing in v1 (technical hard faults, target mismatch, severe unrecoverable overlays etc.) and what evidence is mandatory for each?
+2. Caption Profile default: `detailed-grounded-en@1` versus compact vs user-selectable; desired length is derived from scene complexity, not a constant count.
+3. When all selected outputs are requested, should an image with `defer` still receive partial annotation, or wait for a retry/review? Recommendation: preserve existing data and do not automatically export until required checks pass.
+4. Whether quality-scope rejection means “remove from one dataset” versus “propose physical deletion from managed library”; keep physical deletion explicitly review-gated, respecting shared references.
