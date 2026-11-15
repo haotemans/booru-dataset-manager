@@ -17,6 +17,119 @@ pub(crate) struct Fixture {
 }
 
 #[test]
+fn character_prefix_repair_preserves_body_reviews_manual_files_and_raw_source() {
+    use bdm_domain::tags::CharacterRelation;
+    let mut f = fixture();
+    let base = "kazusa_(blue_archive)";
+    let variant = "kazusa_(band)_(blue_archive)";
+    f.post.tag_string_character = format!("{variant} {base} another_character");
+    f.post.tag_string_artist = "artist".into();
+    f.post.tag_string = format!("artist solo {variant} {base} another_character");
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &AtomicBool::new(false),
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    let body = "A musician, holding a bass. Printed lettering remains unchanged.";
+    let caption = format!(
+        "@artist, kazusa (band) (blue archive), kazusa (blue archive), another character, {body}"
+    );
+    f.repo
+        .write_artifact(
+            &media,
+            "caption",
+            &caption,
+            "mcp-antigravity:test",
+            "complete",
+        )
+        .unwrap();
+    f.repo.review_artifact(media.id, "caption").unwrap();
+    f.repo
+        .write_artifact(
+            &media,
+            "tags",
+            "@artist, kazusa (band) (blue archive), kazusa (blue archive), another character, solo",
+            "mcp-antigravity:test",
+            "complete",
+        )
+        .unwrap();
+    let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
+    let image = std::fs::read(&media.path).unwrap();
+    let mut rules = f.repo.tag_rules().unwrap();
+    rules.characters.push(CharacterRelation {
+        base: base.into(),
+        variant: variant.into(),
+        verified: true,
+        exclusive_group: String::new(),
+        evidence: "user-confirmed test".into(),
+    });
+    f.repo.save_tag_rules(&rules).unwrap();
+    f.repo.set_media_keep(media.id, true).unwrap();
+    let destination = f.directory.path().join("export");
+    let mut export = f.repo.new_workflow("export", vec![media.id]).unwrap();
+    export.mode = "caption".into();
+    export.export_layout = "flat".into();
+    crate::export::run(
+        &mut f.repo,
+        &mut export,
+        &destination,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    let expected = format!("@artist, kazusa (band) (blue archive), another character, {body}");
+    assert_eq!(
+        std::fs::read_to_string(destination.join(format!("media_{}.txt", media.id))).unwrap(),
+        expected
+    );
+    std::fs::write(
+        media.path.with_extension("tags.txt"),
+        "Manual content edited outside the app.",
+    )
+    .unwrap();
+    let preview = f.repo.repair_character_outputs(&[media.id], false).unwrap();
+    assert_eq!(preview["files_written"], 0);
+    assert_eq!(
+        std::fs::read_to_string(media.path.with_extension("txt")).unwrap(),
+        caption
+    );
+    let applied = f.repo.repair_character_outputs(&[media.id], true).unwrap();
+    assert_eq!(applied["files_written"], 1);
+    assert_eq!(
+        std::fs::read_to_string(media.path.with_extension("txt")).unwrap(),
+        expected
+    );
+    assert!(
+        f.repo
+            .list_artifacts()
+            .unwrap()
+            .iter()
+            .find(|a| a.media_id == media.id && a.kind == "caption")
+            .unwrap()
+            .reviewed
+    );
+    assert_eq!(
+        std::fs::read_to_string(media.path.with_extension("tags.txt")).unwrap(),
+        "Manual content edited outside the app."
+    );
+    assert_eq!(
+        std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap(),
+        raw
+    );
+    assert_eq!(std::fs::read(&media.path).unwrap(), image);
+    assert_eq!(
+        f.repo.repair_character_outputs(&[media.id], true).unwrap()["files_written"],
+        0
+    );
+}
+
+#[test]
 fn task_cleanup_persists_and_preserves_retry_data_without_dismissing_workers() {
     let mut f = fixture();
     let mut job = f.repo.new_workflow("optimize", vec![7, 8]).unwrap();
@@ -2291,9 +2404,16 @@ fn export_filters_redundant_character_bases_without_rewriting_reviewed_artifacts
         (0, "base, solo", "base, solo"),
         (1, "base, specific, another", "specific, another"),
     ] {
+        // Model a saved artifact from before the relationship was discovered.
+        // New writes now normalize identities; export must also filter legacy
+        // reviewed content without rewriting that source artifact.
+        let mut unresolved = rules.clone();
+        unresolved.characters.clear();
+        f.repo.save_tag_rules(&unresolved).unwrap();
         f.repo
             .write_artifact(&media, "tags", source, "ai:test", "complete")
             .unwrap();
+        f.repo.save_tag_rules(&rules).unwrap();
         if index == 1 {
             f.repo.review_artifact(media.id, "tags").unwrap();
         }

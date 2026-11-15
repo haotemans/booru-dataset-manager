@@ -266,9 +266,40 @@ impl SqliteCatalog {
         state: &str,
         replace_reviewed: bool,
     ) -> Result<(), IngestError> {
+        self.write_artifact_record_locked(
+            media,
+            kind,
+            content,
+            provenance,
+            state,
+            (replace_reviewed, None),
+        )
+    }
+    fn write_artifact_record_locked(
+        &mut self,
+        media: &StoredMedia,
+        kind: &str,
+        content: &str,
+        provenance: &str,
+        state: &str,
+        review: (bool, Option<bool>),
+    ) -> Result<(), IngestError> {
+        let (replace_reviewed, preserved_reviewed) = review;
         if !matches!(kind, "tags" | "caption") || content.len() > 64 * 1024 {
             return Err(IngestError::InvalidMedia);
         }
+        let rules = self.tag_rules()?;
+        let filtered = if kind == "caption" {
+            bdm_domain::tags::filter_caption_characters(
+                content,
+                &media.post.tag_string_artist,
+                &media.post.tag_string_character,
+                &rules,
+            )
+        } else {
+            bdm_domain::tags::filter_character_tags(content, true, &rules)
+        };
+        let content = filtered.as_str();
         let tx = storage(
             self.connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
@@ -289,11 +320,101 @@ impl SqliteCatalog {
             "UPDATE text_artifacts SET is_current=0 WHERE media_id=?1 AND kind=?2 AND is_current=1",
             params![media.id, kind],
         ))?;
-        storage(tx.execute("INSERT INTO text_artifacts(media_id,kind,content,sha256,provenance,state) VALUES(?1,?2,?3,?4,?5,?6)",params![media.id,kind,content,format!("{:x}",Sha256::digest(content.as_bytes())),provenance,state]))?;
+        storage(tx.execute("INSERT INTO text_artifacts(media_id,kind,content,sha256,provenance,state,reviewed) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![media.id,kind,content,format!("{:x}",Sha256::digest(content.as_bytes())),provenance,state,preserved_reviewed.unwrap_or(false)]))?;
         storage(tx.commit())?;
         // Database content is authoritative; startup materializes interrupted sidecar writes.
         storage(temporary.persist(&target))?;
         Ok(())
+    }
+    /// Deterministic prefix repair under existing verified rules. Never infer a
+    /// relationship, rewrite raw source data, or overwrite an externally edited TXT.
+    pub fn repair_character_outputs(
+        &mut self,
+        ids: &[i64],
+        apply: bool,
+    ) -> Result<serde_json::Value, IngestError> {
+        let selected: BTreeSet<_> = ids.iter().copied().collect();
+        if selected.len() != ids.len()
+            || selected.is_empty()
+            || selected.len() > 64
+            || selected.iter().any(|id| *id <= 0)
+        {
+            return Err(IngestError::InvalidMedia);
+        }
+        let lock = self.media_lock.clone();
+        let _guard = if apply {
+            Some(lock.lock().map_err(|_| IngestError::Storage)?)
+        } else {
+            None
+        };
+        let rules = self.tag_rules()?;
+        rules
+            .validate_characters()
+            .map_err(|_| IngestError::InvalidMedia)?;
+        let mut items = Vec::new();
+        let mut written = 0;
+        for id in selected {
+            if apply {
+                let leased:bool=storage(self.connection.query_row("SELECT EXISTS(SELECT 1 FROM agent_work WHERE media_id=?1 AND lease IS NOT NULL AND expires>unixepoch())",[id],|r|r.get(0)))?;
+                if leased {
+                    return Err(IngestError::StorageDetails(serde_json::json!({"code":"media_leased","message":"Release active work before repairing its saved identities"}).to_string()));
+                }
+            }
+            let media = self.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
+            let mut q=storage(self.connection.prepare("SELECT kind,content,state,reviewed,provenance FROM text_artifacts WHERE media_id=?1 AND is_current=1 AND kind IN ('caption','tags') ORDER BY kind"))?;
+            let artifacts: Vec<TextArtifact> = storage(
+                q.query_map([id], |r| {
+                    Ok(TextArtifact {
+                        media_id: id,
+                        kind: r.get(0)?,
+                        content: r.get(1)?,
+                        state: r.get(2)?,
+                        reviewed: r.get(3)?,
+                        provenance: r.get(4)?,
+                    })
+                })
+                .and_then(|r| r.collect()),
+            )?;
+            drop(q);
+            for artifact in artifacts {
+                let corrected = if artifact.kind == "caption" {
+                    bdm_domain::tags::filter_caption_characters(
+                        &artifact.content,
+                        &media.post.tag_string_artist,
+                        &media.post.tag_string_character,
+                        &rules,
+                    )
+                } else {
+                    bdm_domain::tags::filter_character_tags(&artifact.content, true, &rules)
+                };
+                if corrected == artifact.content {
+                    continue;
+                }
+                let sidecar = media.path.with_extension(if artifact.kind == "caption" {
+                    "txt"
+                } else {
+                    "tags.txt"
+                });
+                let protected =
+                    !fs::read(&sidecar).is_ok_and(|bytes| bytes == artifact.content.as_bytes());
+                if apply && !protected {
+                    self.write_artifact_record_locked(
+                        &media,
+                        &artifact.kind,
+                        &corrected,
+                        &artifact.provenance,
+                        &artifact.state,
+                        (true, Some(artifact.reviewed)),
+                    )?;
+                    self.audit("character_prefix_repair",&serde_json::json!({"id":id,"kind":artifact.kind,"previous_sha256":format!("{:x}",Sha256::digest(artifact.content.as_bytes())),"sha256":format!("{:x}",Sha256::digest(corrected.as_bytes())),"preserved_reviewed":artifact.reviewed}).to_string())?;
+                    written += 1;
+                }
+                items.push(serde_json::json!({"media_id":id,"kind":artifact.kind,"changed":true,"written":apply&&!protected,"manual_or_missing_sidecar_preserved":protected}));
+            }
+        }
+        Ok(
+            serde_json::json!({"items":items,"files_written":written,"apply":apply,"raw_source_modified":false}),
+        )
     }
     pub fn materialize_artifacts(&self) -> Result<(), IngestError> {
         let lock = self.media_lock.clone();

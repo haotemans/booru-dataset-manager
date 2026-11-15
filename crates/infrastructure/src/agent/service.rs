@@ -121,21 +121,22 @@ impl AgentService {
     }
     fn try_execute(&self, operation: &str, input: Value) -> Result<ServiceReply, IngestError> {
         macro_rules! args {($t:ty)=>{serde_json::from_value::<$t>(input.clone()).map_err(|e|IngestError::StorageDetails(json!({"code":"invalid_arguments","message":e.to_string(),"next":{"action":"check_schema"}}).to_string()))?};}
-        let read_only = matches!(
-            operation,
-            "collections"
-                | "list"
-                | "view"
-                | "bucket_plan"
-                | "doctor"
-                | "status"
-                | "jobs_list"
-                | "job_status"
-                | "job_plan"
-                | "policy"
-                | "download_status"
-                | "describe"
-        );
+        let read_only = (operation == "character_repair" && input["apply"] != true)
+            || matches!(
+                operation,
+                "collections"
+                    | "list"
+                    | "view"
+                    | "bucket_plan"
+                    | "doctor"
+                    | "status"
+                    | "jobs_list"
+                    | "job_status"
+                    | "job_plan"
+                    | "policy"
+                    | "download_status"
+                    | "describe"
+            );
         let mut repo = self.connection(read_only)?;
         let settings = &self.settings;
         match operation {
@@ -188,6 +189,26 @@ impl AgentService {
                 ))
             }
             "policy" => Ok(self.policy()),
+            "character_repair" => {
+                let apply = input["apply"].as_bool().unwrap_or(false);
+                if apply && !settings.writes {
+                    return Err(IngestError::StorageDetails(json!({"code":"read_only","message":"Restart with --allow-writes for prefix repair"}).to_string()));
+                }
+                let ids: Vec<i64> = serde_json::from_value(input["media_ids"].clone())
+                    .map_err(|_| IngestError::InvalidMedia)?;
+                for id in &ids {
+                    let m = repo.media_by_id(*id)?.ok_or(IngestError::InvalidMedia)?;
+                    tools::media(
+                        &repo,
+                        settings,
+                        *id,
+                        if apply { Some(&m.sha256) } else { None },
+                    )?;
+                }
+                Ok(ServiceReply::success(
+                    repo.repair_character_outputs(&ids, apply)?,
+                ))
+            }
             "collections" => tools::collections(&mut repo, settings, args!(ListArgs)),
             "list" => tools::list(&mut repo, settings, args!(ListArgs)),
             "view" => tools::view(&mut repo, settings, args!(ViewArgs)),

@@ -1231,7 +1231,17 @@ impl BdmApp {
                     &self.workflows.rules,
                 )
             } else {
-                artifact.content
+                self.ingest.stored.get(&media.id).map_or_else(
+                    || artifact.content.clone(),
+                    |m| {
+                        bdm_domain::tags::filter_caption_characters(
+                            &artifact.content,
+                            &m.post.tag_string_artist,
+                            &m.post.tag_string_character,
+                            &self.workflows.rules,
+                        )
+                    },
+                )
             };
         }
         if self.demo && !self.is_capture() {

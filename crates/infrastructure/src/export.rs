@@ -98,7 +98,12 @@ pub fn run(
                 if job.mode == "tags" {
                     bdm_domain::tags::filter_character_tags(&text.content, true, &rules)
                 } else {
-                    text.content.clone()
+                    bdm_domain::tags::filter_caption_characters(
+                        &text.content,
+                        &media.post.tag_string_artist,
+                        &media.post.tag_string_character,
+                        &rules,
+                    )
                 }
             });
             let directory = destination.join(&base);

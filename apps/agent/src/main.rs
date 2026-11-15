@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
 const HELP: &str = "bdm <operation> --catalog ABS_DB --project-root ABS_DIR --library-root ABS_DIR [--input FILE|-] [--output PNG] [--allow-writes]
 Operations: policy, describe, doctor, status, collections, list, view, bucket_plan,
+character_repair (media_ids, apply=false by default; existing verified rules only),
 job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick,
 download_submit, download_status, download_control,
 work_claim, work_view, work_preview, work_apply, work_assess, work_annotate,
