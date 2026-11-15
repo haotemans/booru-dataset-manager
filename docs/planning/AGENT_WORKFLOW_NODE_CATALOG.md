@@ -222,7 +222,7 @@ Existing ten MCP tools remain backward compatible, but a new Agent should **not*
 Review the **shared node contract and graph semantics** first, then finish each workflow from trigger to persistence with its input/output schemas, authorization, caching, scheduling and tests. Suggested sequence:
 
 1. W02 Download/ingest (establishes canonical media IDs/provenance/sidecars).
-2. W05 Duplication (exact vs near vs related and legacy auto-delete compatibility).
+2. W05 Duplication (exact vs near vs related and legacy auto-delete compatibility), detailed node-by-node in [ADR-006](AGENT_DUPLICATE_WORKFLOW_RFC.md). **Open policy:** review all visual deletion candidates vs preserving legacy strict automatic removal.
 3. W16 independent aesthetic assessment and W06+W07 training quality + joint caption/tag/text-region output; share model inspection when selected, but keep artifacts and mutation rights separate.
 4. W08/W09 Crop/repair/restore (image revision and invalidation).
 5. W10 Human review/cancellation/deletion (safety gate).
