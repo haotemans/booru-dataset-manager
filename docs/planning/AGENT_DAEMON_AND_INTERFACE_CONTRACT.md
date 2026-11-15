@@ -1,7 +1,8 @@
 # ADR-001: Persistent Agent scheduler and CLI/MCP contract
 
-**Status:** Partially accepted. Scheduler lifecycle **A — independent persistent service** was selected by the project owner on 2026-11-15. Other choices in this document remain proposals for discussion. No runtime changes are authorized by this document.
+**Status:** Partially accepted. Scheduler lifecycle **A — independent persistent service** and Agent work assignment **A — Agent actively pulls work** were selected by the project owner on 2026-11-15. Other choices in this document remain proposals for discussion. No runtime changes are authorized by this document.
 **PR:** #11 (draft, design-only).
+**Detailed Agent-pull protocol:** [ADR-002: Work Leases, Batching and Resource Scheduling](AGENT_PULL_LEASE_PROTOCOL.md).
 **Scope:** local Windows/Linux, headless and desktop, reusable across collections. Cloud/remote transports are out of scope for the first implementation.
 
 ## 1. Accepted requirements and boundaries
@@ -26,14 +27,14 @@
                                                                          +-> CPU/IO/model workers
                                                                          +-> media & export storage
 
-A suggested packaging strategy is one **headless** \`bdm\` executable with CLI, \`bdm daemon serve\`, and \`bdm mcp serve --stdio\` modes, plus the existing \`bdm-desktop\` GUI. These are separate OS processes even when they share the same binary. A separate named daemon binary is optional later; avoid forcing CLI to initialize eframe or the GUI.
+A suggested packaging strategy is one **headless** `bdm` executable with CLI, `bdm daemon serve`, and `bdm mcp serve --stdio` modes, plus the existing `bdm-desktop` GUI. These are separate OS processes even when they share the same binary. A separate named daemon binary is optional later; avoid forcing CLI to initialize eframe or the GUI.
 
 - One daemon **per canonical catalog/data root** in v1 (all collections in that catalog share queues); do not start multiple daemon writers for the same catalog. Other catalog roots are isolated.
 - One daemon is the **sole schedule owner**. CLI, MCP and GUI may issue concurrent requests, but never create separate independent schedulers.
 - All interfaces use **versioned RPC/use-case contracts**; no CLI->MCP->CLI chaining.
 - IPC proposal: Windows named pipe with per-user ACL; Linux Unix domain socket with restrictive permissions. No listening public TCP port by default. Explicitly authenticated remote access is a future design.
 - RPC transport should bound request size, response size, in-flight calls and image payload. Images/large previews use scoped asset handles or controlled streaming rather than arbitrary file paths or huge JSON/base64 blobs.
-- Authentication is OS identity + endpoint ACL in v1. Authorization is separate: per-client read, curation-write, job-control, export, and human-only destructive scopes. Client-provided \`model\` labels are audit metadata, **not** authentication.
+- Authentication is OS identity + endpoint ACL in v1. Authorization is separate: per-client read, curation-write, job-control, export, and human-only destructive scopes. Client-provided `model` labels are audit metadata, **not** authentication.
 - Daemon health includes protocol version, catalog identity, startup/recovery state, resource pressure and running work counts. No credentials in logs or telemetry.
 
 ## 3. Daemon lifecycle
@@ -41,10 +42,10 @@ A suggested packaging strategy is one **headless** \`bdm\` executable with CLI, 
 **Lifecycle states:** stopped -> starting -> recovering -> ready <-> degraded -> draining -> stopped. Crashes and hard kills may bypass draining.
 
 **Start:**
-1. Explicit \`bdm daemon start --detach --catalog <absolute path>\` (proposed). CLI/MCP/GUI connect if already running. An optional, user-approved auto-start policy can launch it if absent.
+1. Explicit `bdm daemon start --detach --catalog <absolute path>` (proposed). CLI/MCP/GUI connect if already running. An optional, user-approved auto-start policy can launch it if absent.
 2. Acquire an exclusive per-catalog daemon-owner lock. Check identity, process liveness and protocol; never trust a stale PID file alone or create two owners.
-3. Open and validate catalog; perform transactional schema migrations with backup/checks. Recover staged image writes, interrupted filesystem/database journals and known jobs before advertising \`ready\`.
-4. Reconcile prior tasks. A local deterministic stage may resume if safe. Expired Agent work leases return to \`awaiting_agent\` without applying unacknowledged model output. Awaiting-user approvals stay pending.
+3. Open and validate catalog; perform transactional schema migrations with backup/checks. Recover staged image writes, interrupted filesystem/database journals and known jobs before advertising `ready`.
+4. Reconcile prior tasks. A local deterministic stage may resume if safe. Expired Agent work leases return to `awaiting_agent` without applying unacknowledged model output. Awaiting-user approvals stay pending.
 5. Warm only required caches and workers; defer expensive DINOv3 model initialization until needed and within configured resource budgets.
 
 **Running:**
@@ -54,10 +55,10 @@ A suggested packaging strategy is one **headless** \`bdm\` executable with CLI, 
 - Daemon health, last error and resource pressure are visible to CLI/MCP/GUI.
 
 **Stop / restart / upgrade:**
-- \`stop --drain\` stops new leases, waits for in-flight short commits, checkpoints work, and releases owner lock. Forced stop is distinct and should be clearly reported.
+- `stop --drain` stops new leases, waits for in-flight short commits, checkpoints work, and releases owner lock. Forced stop is distinct and should be clearly reported.
 - Upgrade is controlled: reject incompatible clients, stop/drain the old daemon, migrate with backup/check and start one replacement, then reconnect clients.
-- Windows autostart via a user-approved login task/service option; Linux via optional \`systemd --user\`. No elevation or boot-time installation in the default path.
-- Service must never silently transform \`awaiting_user\` into approval after restart.
+- Windows autostart via a user-approved login task/service option; Linux via optional `systemd --user`. No elevation or boot-time installation in the default path.
+- Service must never silently transform `awaiting_user` into approval after restart.
 
 ## 4. Scheduler model (proposed)
 
@@ -80,8 +81,8 @@ Model output and local feature computation are separate stages; no LLM call for 
 
 **Execution states:** queued, ready, running_local, awaiting_agent, leased, awaiting_user, paused, retry_wait, completed, failed, cancelled. These are *stage/work-item* states; a job aggregates its items and uses a simpler outward state. Use an explicit transition table with atomic predicates, rather than unconstrained strings.
 
-**Lease/commit protocol:**
-1. Agent requests \`lease(job_id, max_items, supported_capabilities)\`; daemon grants bounded image IDs with revision+SHA, lease ID, monotonically increasing fencing generation, expiry, stage requirements and already-prepared evidence handles.
+**Lease/commit protocol (Agent-pull chosen; field names, batching and defaults still under review; see ADR-002):**
+1. Agent requests `lease(job_id, max_items, supported_capabilities)`; daemon grants bounded image IDs with revision+SHA, lease ID, monotonically increasing fencing generation, expiry, stage requirements and already-prepared evidence handles.
 2. Lease is renewed by an explicit heartbeat; ordinary result submission also heartbeats. Agents are not expected to keep a socket open while reasoning.
 3. Result submission supplies lease ID, fencing generation, idempotency key and expected image revision plus observations. Daemon commits each item atomically if the lease is current and image has not changed; partial success is reported per item.
 4. Late or duplicated submissions are rejected or replayed idempotently. Expired work is offered again; already committed effects are never applied twice.
@@ -103,35 +104,35 @@ Every public capability specifies: input/filter, expected revision, actor/permis
 
 | Operation | Agent CLI proposal | MCP proposal | Output, scheduling or safety requirement |
 | --- | --- | --- | --- |
-| Capabilities | \`bdm capabilities --json\` | \`bdm_capabilities\` | version, permission scopes, limits, supported tools, resource availability |
-| Daemon status/control | \`bdm daemon status/start/stop\` | \`bdm_service_status\` read-only | only authenticated owner controls shutdown; MCP does not expose daemon shutdown by default |
-| Collections | \`bdm collections list --json\` | existing \`bdm_collections\` | indexed type/provider/tag filters, opaque cursor, count |
-| Media query | \`bdm media list/inspect --json\` | existing \`bdm_list_media\` | field projection, stable sort, current SHA, compact response, pagination |
-| Image presentation | \`bdm media view --output <file>\` | existing \`bdm_view_image\` plus proposed \`bdm_view_batch\` | scoped asset handle or image blocks; thumbnails/contact sheets only for triage; full current view before mutation |
-| Job submit | \`bdm jobs submit --input job.json\` | \`bdm_job_submit\` | durable job ID, workflow profile/version, dedupe key, dependency plan |
-| Job inspect/events | \`bdm jobs status/events --json[l]\` | \`bdm_job_status\` | aggregates, per-stage errors, incremental event cursor, no unbounded log |
-| Job pause/resume/cancel | \`bdm jobs pause/resume/cancel\` | \`bdm_job_control\` | scope-controlled, checkpoint and safe cancellation semantics |
-| Agent work lease | \`bdm work lease --job ... --json\` | \`bdm_work_lease\` | bounded batch of ID/revisions; expiry/generation; no duplicate active lease |
-| Lease renewal | \`bdm work heartbeat --lease ...\` | \`bdm_work_heartbeat\` (or bundled renewal) | explicit expiry, reject lost ownership; low overhead |
-| Agent result commit | \`bdm work submit --input @-\` | \`bdm_work_submit\` | score+caption+tags+text regions in one result if no crop; item-atomic and idempotent |
-| Crop/restore | \`bdm media crop preview/apply\` / \`restore\` | existing \`bdm_crop\`, \`bdm_restore_original\` | exact preview binding, 32 alignment, full verified original, revision compare |
-| Duplicate candidates/decision | \`bdm dedup scan/pairs/resolve\` | existing \`bdm_scan_duplicates\`, \`bdm_resolve_duplicates\` | asynchronously scan local features; visual comparison of both; no automatic deletion |
-| Review queue | \`bdm review pending/decision\` | read-only review listing; scoped review updates | human override, stale decisions and confirmation gate |
-| Export | \`bdm export submit/status\` | \`bdm_job_submit\` with \`export\` kind | manifests, output conflict checks, resumability and profile controls |
+| Capabilities | `bdm capabilities --json` | `bdm_capabilities` | version, permission scopes, limits, supported tools, resource availability |
+| Daemon status/control | `bdm daemon status/start/stop` | `bdm_service_status` read-only | only authenticated owner controls shutdown; MCP does not expose daemon shutdown by default |
+| Collections | `bdm collections list --json` | existing `bdm_collections` | indexed type/provider/tag filters, opaque cursor, count |
+| Media query | `bdm media list/inspect --json` | existing `bdm_list_media` | field projection, stable sort, current SHA, compact response, pagination |
+| Image presentation | `bdm media view --output <file>` | existing `bdm_view_image` plus proposed `bdm_view_batch` | scoped asset handle or image blocks; thumbnails/contact sheets only for triage; full current view before mutation |
+| Job submit | `bdm jobs submit --input job.json` | `bdm_job_submit` | durable job ID, workflow profile/version, dedupe key, dependency plan |
+| Job inspect/events | `bdm jobs status/events --json[l]` | `bdm_job_status` | aggregates, per-stage errors, incremental event cursor, no unbounded log |
+| Job pause/resume/cancel | `bdm jobs pause/resume/cancel` | `bdm_job_control` | scope-controlled, checkpoint and safe cancellation semantics |
+| Agent work lease | `bdm work lease --job ... --json` | `bdm_work_lease` | bounded batch of ID/revisions; expiry/generation; no duplicate active lease |
+| Lease renewal | `bdm work heartbeat --lease ...` | `bdm_work_heartbeat` (or bundled renewal) | explicit expiry, reject lost ownership; low overhead |
+| Agent result commit | `bdm work submit --input @-` | `bdm_work_submit` | score+caption+tags+text regions in one result if no crop; item-atomic and idempotent |
+| Crop/restore | `bdm media crop preview/apply` / `restore` | existing `bdm_crop`, `bdm_restore_original` | exact preview binding, 32 alignment, full verified original, revision compare |
+| Duplicate candidates/decision | `bdm dedup scan/pairs/resolve` | existing `bdm_scan_duplicates`, `bdm_resolve_duplicates` | asynchronously scan local features; visual comparison of both; no automatic deletion |
+| Review queue | `bdm review pending/decision` | read-only review listing; scoped review updates | human override, stale decisions and confirmation gate |
+| Export | `bdm export submit/status` | `bdm_job_submit` with `export` kind | manifests, output conflict checks, resumability and profile controls |
 
 **No new command or MCP tool above is implemented yet.** Keep legacy ten MCP tools operating as compatible adapters during rollout. Explicit v2 capability negotiation or a distinct server name can avoid injecting all old+new descriptions into every Agent prompt; exact migration strategy remains open.
 
 CLI v1 requirements:
-- Headless, non-interactive by default. Machine output on stdout only (default JSON); \`--jsonl\` for stream/event feeds; logs on stderr.
-- Stable versioned envelope with \`request_id\`, \`ok\`, \`data\`, \`error.code\`, \`retryable\`, \`current_revision\`, and \`next_cursor\` where applicable.
+- Headless, non-interactive by default. Machine output on stdout only (default JSON); `--jsonl` for stream/event feeds; logs on stderr.
+- Stable versioned envelope with `request_id`, `ok`, `data`, `error.code`, `retryable`, `current_revision`, and `next_cursor` where applicable.
 - Nonzero exit codes for errors; clear partial-batch result and differentiated unavailable/conflict/permission/retryable outcomes.
-- Accept \`--input @-\` for piped JSON/JSONL; avoid passing huge captions in shell arguments. Token-aware compact default fields and a \`--fields\` selector.
+- Accept `--input @-` for piped JSON/JSONL; avoid passing huge captions in shell arguments. Token-aware compact default fields and a `--fields` selector.
 - CLI connects to the existing daemon; it must not spin up a second scheduler, nor require a GUI or model. Explicit start is supported; automatic startup remains policy-controlled.
 
 MCP v1/v2 requirements:
 - Expose actions as discoverable, schema-bounded tools with short descriptions and precise field constraints; keep image pixels in MCP image blocks, not model-facing base64 JSON.
-- Provide an optional bounded multi-image triage tool with stable \`id -> frame\` mapping. Images selected for mutation still require full-current-image inspection; contact sheets alone do not satisfy it.
-- Keep read, curation-write, and human-destructive capabilities separate; do not trust \`model\` or \`reason\` text as permissions.
+- Provide an optional bounded multi-image triage tool with stable `id -> frame` mapping. Images selected for mutation still require full-current-image inspection; contact sheets alone do not satisfy it.
+- Keep read, curation-write, and human-destructive capabilities separate; do not trust `model` or `reason` text as permissions.
 - Prefer bulk result submission for multi-output work; do not introduce an extra model call merely to run separate score/tag/caption mutations.
 - Bridge can exit or reconnect without cancelling daemon jobs or work already committed.
 
@@ -159,9 +160,9 @@ Measure before refactoring against fixed synthetic and explicitly approved produ
 - Validation guardrails: exact identity/tag preservation, SHA and original integrity, race/cancel/retry correctness, user-review retention, zero unintended destructive action.
 
 Known code-review candidates, not verified bottleneck measurements:
-- \`AgentServer.task\` holds a \`Mutex<SqliteCatalog>\` for each tool task (agent/mod.rs).
-- \`tools::collections\` / \`tools::list\` load broad catalog/media/artifact sets before filtering (agent/tools.rs).
-- \`tools::scan\` holds shared \`media_lock\` during visual analysis (agent/tools.rs).
+- `AgentServer.task` holds a `Mutex<SqliteCatalog>` for each tool task (agent/mod.rs).
+- `tools::collections` / `tools::list` load broad catalog/media/artifact sets before filtering (agent/tools.rs).
+- `tools::scan` holds shared `media_lock` during visual analysis (agent/tools.rs).
 
 Optimization priority: instrument and baseline -> SQL projection/keyset paging -> staged workers and brief commit locks -> Agent batch presentation + combined results -> cache policy -> multi-Agent lease tests. Never claim numerical speedups before measuring.
 
@@ -179,7 +180,7 @@ No code should be merged solely because unit tests pass: crash recovery, RPC rec
 
 ## 9. Open design decisions for next discussion
 
-1. **Agent execution ownership:** Agent clients pull/heartbeat work leases (recommended for API-neutral CLI+MCP), versus a daemon-driven adapter that launches Agent sessions. The daemon does not embed a provider-specific model by default.
+1. **Agent execution ownership: option A accepted.** Agent clients proactively claim/heartbeat/submit work. The daemon does not embed a provider-specific model or launch an Agent automatically (ADR-002).
 2. **Daemon start policy:** explicit start by default, or consented lazy-start when CLI/MCP/GUI cannot connect.
 3. **Work unit granularity:** individual-image commit with dynamically sized batch leases (recommended), versus fixed batch atomicity.
 4. **MCP exposed-tool budget:** v1 compatibility and v2 capability negotiation/visible tools; decide the minimal low-token surface.
