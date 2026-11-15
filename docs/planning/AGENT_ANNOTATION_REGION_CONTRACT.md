@@ -109,6 +109,14 @@ Prefer a crop that removes a watermark **when it preserves the image's expressio
 
 Preview before applying; inspect the actual final image, refresh hashes and regenerate only affected caption/tag/region outputs. Watermark content absent from the final crop must not return through source-tag hints. Raw source evidence stays immutable. These are confirmed functional requirements for a follow-up implementation, not new runtime changes in this draft.
 
+### 8.1 Accepted ordering: improve before final rejection
+
+In selected full curation, inspect/triage -> resolve feasible crop improvement -> inspect actual final pixels -> final aesthetic/training decision -> W07 annotation only after passing. Edge watermarks, excess margins and correctable composition must not cause an early rejection solely from the preliminary score. Previewing a harmful crop does not authorize applying it: retain the original expression, record that the preview did not improve it, and make the final decision on the actual unchanged image. Irreparable technical defects and confirmed out-of-scope content remain governed by their existing explicit gates.
+
+Keep preliminary reports separate from final approval. Persist useful crop candidates as pending/deferred so reconnects do not lose them. A final result must use the post-crop current SHA and actual view, or unchanged-image evidence plus an inspected declined preview. Only a final passing result authorizes this composite workflow's training annotation/export. Final rejection goes to existing pending-deletion review; uncertainty defers; neither creates a training-ready result or physically deletes files. Independent annotation/scoring nodes retain their separate scopes.
+
+The local tool-level prototype now supports optional preliminary/final assessment, verified applied/not-improved crop outcomes and final-KEEP gating for full-curation annotation. These local changes belong in a separate implementation PR, not this docs-only RFC. They do not constitute the planned daemon or automatic best-bucket optimizer.
+
 ## 9. Acceptance scenarios for the implementation PR
 
 | Scenario | Required observable outcome |
@@ -122,6 +130,7 @@ Preview before applying; inspect the actual final image, refresh hashes and rege
 | Crop/restore race or human edit | Old revision/region evidence cannot modify the new image; no silent hash relabelling. |
 | Automatic crop/bucket preparation | Uses existing ratios/four tiers, selects per-image geometry without forced 1024, respects retained-pixel/export constraints and validates against the local training script. |
 | Watermark at a removable edge vs essential composition | Prefer safe removal; preserve expression when removal is harmful. Final annotation reflects actual remaining pixels. |
+| Correctable low preliminary score | Defer rather than reject; require applied/declined-preview evidence and final reassessment before quality routing or full-curation annotation. |
 | Separate inset, internal overlay, magnified detail and narrative panels | Correctly distinct typed structure; no blanket comic or anatomy inference. |
 | Uncertain admission | Review-only route works without text generation; premium export stays blocked until the concern is resolved. |
 | Restart at sidecar/index write boundary | Journal reconciles data/receipt without duplicate effects or lost human edits. |

@@ -38,6 +38,8 @@ These must be separately *requested and stored*, even when derived in one model 
 7. Preserve prior valid human Keep/cancel and reviewed artifacts; do not overwrite decisions with a lower-confidence automated result. A changed SHA/profile/model must invalidate only affected derived records.
 8. **No speculative `score < 7 = reject` rule.** Accepted policy A is a **categorical, evidence-backed high-confidence eligibility gate**, not a low aesthetic score cutoff. Concrete defect categories and thresholds must be tested/calibrated. Without a validated high-confidence criterion, return `defer` or `keep` and never fabricate an auto-reject.
 
+**Owner-confirmed order (2026-11-15):** correctable composition, extra margins or edge-watermark problems first become a crop-improvement candidate, not an early rejection. Preview/apply as useful, inspect actual final pixels, make the final aesthetic/training decision, then produce W07 annotation only after passing. A declined harmful preview leaves original pixels for the final decision. See [ADR-008 section 8.1](AGENT_ANNOTATION_REGION_CONTRACT.md#81-accepted-ordering-improve-before-final-rejection). Preliminary judgments are provisional, pending work is resumable, and final rejection remains human deletion review.
+
 ### W06 proposed typed result
 
 ~~~json
