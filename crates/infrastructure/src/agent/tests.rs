@@ -692,6 +692,16 @@ fn uncertain_content_defers_training_without_deleting_originals() {
         "defer"
     );
     assert!(m.path.is_file());
+    let mut preliminary = assessment(&m, Decision::Defer);
+    preliminary.stage = AssessmentStage::Preliminary;
+    preliminary.crop_candidate = true;
+    assert!(tools::assess(&mut f.repo, &settings, preliminary).is_err());
+    assert!(
+        !f.repo.agent_review_value(m.id).unwrap().unwrap()["report"]["review_reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let error = tools::assess(&mut f.repo, &settings, assessment(&m, Decision::Keep)).unwrap_err();
     assert_eq!(
         payload(&tools::error_result(error))["code"],

@@ -782,13 +782,12 @@ pub(super) fn assess(
             ));
         }
     }
-    if !preliminary
-        && matches!(args.decision, Decision::Keep)
+    if (preliminary || matches!(args.decision, Decision::Keep))
         && !annotation_details(repo, m.id)?.review_reasons.is_empty()
     {
         return Err(guidance_error(
             "human_review_required",
-            "This image has unresolved review reasons and cannot be automatically approved.",
+            "Resolve manual-review concerns before automatic crop assessment or approval.",
             json!({"action":"leave_for_human_review","hint":"Resolve the recorded concern before explicitly clearing review_reasons and approving."}),
         ));
     }
