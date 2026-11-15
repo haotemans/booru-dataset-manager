@@ -223,7 +223,7 @@ Review the **shared node contract and graph semantics** first, then finish each 
 
 1. W02 Download/ingest (establishes canonical media IDs/provenance/sidecars).
 2. W05 Duplication (exact vs near vs related and legacy auto-delete compatibility), detailed node-by-node in [ADR-006](AGENT_DUPLICATE_WORKFLOW_RFC.md). **Accepted P1:** keep the aesthetically best valid image in each true interchangeable duplicate group, queue all verified nonwinners in the existing deletion-review collection, final human batch confirmation. Pending discussion: group eligibility, tied aesthetics and differences.
-3. W16 independent aesthetic assessment and W06+W07 training quality + joint caption/tag/text-region output; share model inspection when selected, but keep artifacts and mutation rights separate.
+3. W16 independent aesthetic assessment and W06+W07 training quality + joint caption/tag/text-region output; share model inspection when selected, but keep artifacts and mutation rights separate. **Detailed proposals:** [ADR-007: W06/W07 shared visual pass and per-target artifact contract](AGENT_VISUAL_CURATOR_AND_ANNOTATION_RFC.md). Pending owner choice: when low training suitability should queue existing deletion review.
 4. W08/W09 Crop/repair/restore (image revision and invalidation).
 5. W10 Human review/cancellation/deletion (safety gate).
 6. W11 Export (native dimensions, four optional buckets and manifest).
