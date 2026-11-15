@@ -1,8 +1,8 @@
 # RFC: Agent-first CLI, MCP, and dataset scheduler
 
-**Status:** DRAFT / OPEN FOR DISCUSSION. **Decision ADR-001 accepted: lifecycle A, an independent persistent daemon.** Other API and scheduler contracts remain proposals; this is **not** authorization to implement or merge them.
+**Status:** DRAFT / OPEN FOR DISCUSSION. **Accepted decisions:** lifecycle **A — independent persistent daemon** (ADR-001); Agent work allocation **A — Agent actively pulls work** (ADR-002). Other API and scheduler details remain proposals; this is **not** authorization to implement or merge them.
 
-Detailed lifecycle, resource scheduling and CLI/MCP interface design: [ADR-001](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md).
+Detailed documents: [ADR-001: Persistent Agent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md) and [ADR-002: Agent-pull leases, batches and resource scheduling](AGENT_PULL_LEASE_PROTOCOL.md).
 **Target:** Booru Dataset Manager; Windows and Linux, including headless environments.
 **Scope of this PR:** design discussion only. No runtime, migration, deletion, or API behavior changes.
 
@@ -116,7 +116,7 @@ First optimization hypotheses, not unmeasured claims:
 ## 9. Discussion checkpoints (OPEN; deliberately undecided)
 
 1. **Scheduler lifecycle: A accepted.** Independent persistent daemon; CLI, MCP and GUI reconnect to it. Remaining: lazy-start policy, work-lease ownership and service packaging (ADR-001).
-2. **Agent work unit:** individual image, bounded image batch, or collection-stage task; which operations should be atomic.
+2. **Work allocation: A accepted.** Agents actively claim leased work via CLI/MCP (ADR-002); granularity, sizing, receipt schema and resource defaults remain to be finalized.
 3. **Interface priority:** which capabilities belong to CLI and MCP v1; how many tools to expose to avoid unnecessary Agent context.
 4. **Image presentation:** preview/contact-sheet grouping and when a full view is mandatory; token vs fidelity budget.
 5. **Quality policy:** rejection/duplicate thresholds, preservation of composition and style, and human override.
