@@ -1,6 +1,6 @@
 # ADR-004: Aesthetic evaluation as a first-class independent Agent workflow
 
-**Status:** PARTIALLY ACCEPTED. The owner approved **shared aesthetic dimensions + style-specific, versioned Profile extensions** and decided **to defer comic/manga aesthetic assessment** on 2026-11-15. Concrete scoring calibration, profile auto-selection, execution defaults and review decisions are still **proposals pending discussion**.
+**Status:** PARTIALLY ACCEPTED. Owner approved **shared aesthetic dimensions + style-specific versioned Profiles**, exclusion of comic-page aesthetics, and **aesthetics as a required premium-dataset quality gate in composed W06 curation** (2026-11-15). **Independent W16 remains score-only.** Numeric bar, calibration and specific reject rubric remain proposals pending review; see [ADR-007](AGENT_VISUAL_CURATOR_AND_ANNOTATION_RFC.md).
 **PR:** #11, draft / docs only; no runtime or existing review decisions changed.
 **Related:** [ADR-003: composable workflow and node catalog](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-002: Agent-pull leases](AGENT_PULL_LEASE_PROTOCOL.md), [existing visual identity design](../features/DINOV3_VISUAL_IDENTITY.md).
 
@@ -302,3 +302,13 @@ Numbers/observations above are **illustrative placeholders**, not image-specific
 3. An uncertain panel/page detection is marked uncertain/deferred and preserves the source.
 4. Full workflow execution correctly counts manga-aesthetic skips while continuing eligible technical/annotation work.
 5. No standard Profile comparative ranking includes skipped comic pages as if `null` meant zero.
+
+## 12. Accepted aesthetic priority in premium curation (see ADR-007)
+
+**Owner direction:** curate a high-quality illustration dataset that absorbs the strongest artwork rather than retaining visually poor samples merely for their uniqueness, dimensions, or technical trainability. In **composed W06 premium quality screening**, a well-evidenced, style-calibrated aesthetic assessment may function as a **hard eligibility gate**. Confidently below-standard images are automatically **queued for the existing pending deletion review** under an approved policy and current-image revision. Actual physical deletion still requires the existing human batch confirmation.
+
+This does **not** change the semantics of independent W16 `aesthetic.evaluate`: it generates a **versioned, non-destructive score report**, with no queue mutation, Keep/Reject change, text overwrite, crop or physical deletion. W06 consumes the W16 result or reuses its visual reasoning as part of a declared workflow. A mere choice of aesthetic Profile never authorizes deletion.
+
+**Crucial guardrails:** do not use identical raw cutoffs across watercolor, pixel-art, Galgame CG and general illustration without calibration. High aesthetic merit can come from intentional minimalism and stylized or monochrome art. A low-confidence or borderline judgment is deferred and excluded from the premium export until resolved, not automatically allowed into training. Diversity is optimized **after** the premium aesthetic floor, not instead of it. A top-ranked member of a weak duplicate group still must pass the W06 premium bar.
+
+The candidate policy in ADR-007 illustrates `>=8.0` for high-quality pass, `7.0..7.99` for borderline and `<7.0` for a confirmed below-standard candidate, **only after per-Profile calibration**. These bands are **not approved operational constants** or a reason to auto-delete on a single model score. Evidence, qualified reasons, confidence, user overrides and benchmarked review precision remain required.
