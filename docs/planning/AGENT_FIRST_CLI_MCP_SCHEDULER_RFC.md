@@ -2,7 +2,7 @@
 
 **Status:** DRAFT / OPEN FOR DISCUSSION. **Accepted decisions:** lifecycle **A — independent persistent daemon** (ADR-001); Agent work allocation **A — Agent actively pulls work** (ADR-002). Other API and scheduler details remain proposals; this is **not** authorization to implement or merge them.
 
-Detailed documents: [ADR-001: Persistent Agent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md), [ADR-002: Agent-pull leases, batches and resource scheduling](AGENT_PULL_LEASE_PROTOCOL.md), and [ADR-003: Independent nodes and composable workflows](AGENT_WORKFLOW_NODE_CATALOG.md).
+Detailed documents: [ADR-001: Persistent Agent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md), [ADR-002: Agent-pull leases, batches and resource scheduling](AGENT_PULL_LEASE_PROTOCOL.md), [ADR-003: Independent nodes and composable workflows](AGENT_WORKFLOW_NODE_CATALOG.md), and [ADR-004: Aesthetic evaluation](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md).
 **Target:** Booru Dataset Manager; Windows and Linux, including headless environments.
 **Scope of this PR:** design discussion only. No runtime, migration, deletion, or API behavior changes.
 
@@ -116,7 +116,7 @@ First optimization hypotheses, not unmeasured claims:
 ## 9. Discussion checkpoints (OPEN; deliberately undecided)
 
 1. **Scheduler lifecycle: A accepted.** Independent persistent daemon; CLI, MCP and GUI reconnect to it. Remaining: lazy-start policy, work-lease ownership and service packaging (ADR-001).
-2. **Work allocation: A accepted.** Agents actively claim leased work via CLI/MCP (ADR-002). **Workflow requirement recorded:** tasks may run one independently declared node or an entire explicitly composed graph (ADR-003). Granularity, sizing, receipt schemas and workflow defaults remain to be finalized.
+2. **Work allocation: A accepted.** Agents actively claim leased work via CLI/MCP (ADR-002). **Workflow requirement recorded:** tasks may run one independently declared node or an entire explicitly composed graph (ADR-003). **Aesthetic evaluation:** an optional independent score-only stage (ADR-004), separate from training suitability and destructive reviews. Granularity, sizing, receipt schemas and workflow defaults remain to be finalized.
 3. **Interface priority:** which capabilities belong to CLI and MCP v1; how many tools to expose to avoid unnecessary Agent context.
 4. **Image presentation:** preview/contact-sheet grouping and when a full view is mandatory; token vs fidelity budget.
 5. **Quality policy:** rejection/duplicate thresholds, preservation of composition and style, and human override.
