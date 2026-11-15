@@ -99,6 +99,10 @@ pub struct AnnotationDetails {
     pub review_reasons: Vec<String>,
     /// All boxes and decisions refer to this current image, never silently to a later crop.
     pub image_sha256: Option<String>,
+    /// Tag retention is tied to both the inspected pixels and the saved text.
+    /// Independent of the region hash so a tags-only save cannot rebind old boxes.
+    pub tags_image_sha256: Option<String>,
+    pub tags_content_sha256: Option<String>,
 }
 
 impl TextRegion {

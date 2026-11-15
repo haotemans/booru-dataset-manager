@@ -64,7 +64,7 @@ pub struct AnnotationArgs {
     pub expected_sha256: String,
     /// Visual description only: identities are merged locally, artist first. May be omitted with tags for a review_reasons-only decision.
     pub caption: Option<String>,
-    /// Array of generic visual tags. Choose supported terms from view.tag_vocabulary; spaces instead of underscores. Unknown categories return per-tag reasons.
+    /// Complete generic visual tag list, including view.tag_vocabulary.required_tags; omission cannot delete an existing ordinary tag. Spaces instead of underscores. Unknown categories return per-tag reasons.
     pub tags: Option<Vec<String>>,
     /// Omit to preserve existing regions; [] explicitly clears. Coordinates refer to full current image.
     pub text_regions: Option<Vec<Region>>,

@@ -212,6 +212,36 @@ fn tag_vocabulary(m: &StoredMedia, rules: &bdm_domain::tags::TagRules) -> Value 
     );
     json!({"source_general":tags,"rule":"Choose only visually supported terms. Other locally verified category-0 terms are accepted; unknown terms belong in caption prose, not forced into tags."})
 }
+/// Omission is not deletion permission. Source terms protect an unedited image;
+/// edited pixels require a tag result explicitly bound to that current image.
+/// Never auto-append terms: the client still has to inspect the pixels.
+fn required_visual_tags(
+    m: &StoredMedia,
+    rules: &bdm_domain::tags::TagRules,
+    existing: &[crate::workflows::TextArtifact],
+    details: &ai::AnnotationDetails,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if m.edit.is_none() {
+        candidates.extend(
+            m.post
+                .tag_string_general
+                .split_whitespace()
+                .map(str::to_owned),
+        );
+    }
+    for artifact in existing.iter().filter(|a| a.kind == "tags") {
+        let bound_to_current = details.tags_image_sha256.as_deref() == Some(&m.sha256)
+            && details.tags_content_sha256.as_deref()
+                == Some(
+                    format!("{:x}", sha2::Sha256::digest(artifact.content.as_bytes())).as_str(),
+                );
+        if m.edit.is_none() || bound_to_current {
+            candidates.extend(artifact.content.split(',').map(|t| t.trim().to_owned()));
+        }
+    }
+    ai::identity::verified_visual_tags(&candidates, rules)
+}
 fn info(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
     let artifacts=artifacts(repo,m.id)?.into_iter().map(|a|{
         let content=a.content.chars().take(1200).collect::<String>();
@@ -363,9 +393,18 @@ pub(super) fn view(
             "original"
         )
         .ok());
-        data["tag_vocabulary"] = tag_vocabulary(&m, &tag_rules(repo, &m)?);
-        data["annotation_details"] =
-            storage(serde_json::to_value(annotation_details(repo, m.id)?))?;
+        let rules = tag_rules(repo, &m)?;
+        let details = annotation_details(repo, m.id)?;
+        let mut vocabulary = tag_vocabulary(&m, &rules);
+        vocabulary["required_tags"] = json!(required_visual_tags(
+            &m,
+            &rules,
+            &artifacts(repo, m.id)?,
+            &details
+        ));
+        vocabulary["retention_rule"] = json!("Submit the full visual tag list, including required_tags. Missing terms block the entire save; overwrite/reason cannot authorize deletion. Do not copy a term contradicted by the current pixels: defer that conflict for human correction. Edited images do not inherit stale source-image requirements.");
+        data["tag_vocabulary"] = vocabulary;
+        data["annotation_details"] = storage(serde_json::to_value(details))?;
         data["capabilities"] = json!([
             "rich_text_regions",
             "visual_regions",
@@ -634,6 +673,16 @@ pub(super) fn annotate(
                 }
             }
             if !accepted.is_empty() {
+                let required =
+                    required_visual_tags(&m, &rules, &existing, &annotation_details(repo, m.id)?);
+                let missing: Vec<_> = required
+                    .iter()
+                    .filter(|tag| !accepted.contains(tag))
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(guidance_error("tag_coverage_incomplete", "Ordinary visual tags cannot be silently dropped. Nothing in this call was saved. Submit the complete visually checked tag list; neither overwrite nor a reason bypasses retention. If an existing term contradicts the pixels, defer for human correction instead of copying it blindly.",
+                        json!({"tool":"bdm_save_annotation","args":{"media_id":m.id,"expected_sha256":m.sha256},"missing_tags":missing,"required_tags":required,"accepted_tags":accepted,"tag_rejections":rejection_details,"hint":"Preserve all still-visible detail, not just key tags. Do not pad with unrelated tags. Reuse this image inspection; no new view is needed unless detail is uncertain."})));
+                }
                 // Merge only verified identities and model-verified visual tags.
                 // Source meta/protected tags must never leak back into training TXT.
                 outputs.push((
@@ -771,12 +820,25 @@ pub(super) fn annotate(
             )?;
         }
     }
-    let details_saved =
-        ((!saved.is_empty() || regions_only) && details_requested) || args.review_reasons.is_some();
+    let current = artifacts(repo, m.id)?;
+    let tags_saved = saved.contains(&"tags");
+    if tags_saved {
+        let tags = current
+            .iter()
+            .find(|a| a.kind == "tags")
+            .ok_or(IngestError::Storage)?;
+        details.tags_image_sha256 = Some(m.sha256.clone());
+        details.tags_content_sha256 = Some(format!(
+            "{:x}",
+            sha2::Sha256::digest(tags.content.as_bytes())
+        ));
+    }
+    let details_saved = ((!saved.is_empty() || regions_only) && details_requested)
+        || args.review_reasons.is_some()
+        || tags_saved;
     if details_saved {
         repo.save_annotation_details(m.id, &details)?;
     }
-    let current = artifacts(repo, m.id)?;
     let mut verified = true;
     for a in current.iter().filter(|a| saved.contains(&a.kind.as_str())) {
         let path = m

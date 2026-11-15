@@ -23,7 +23,9 @@ description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提�
 
 ## 生成内容
 
-**caption：只提交英文视觉正文，不手写身份前缀。** 先主体、动作和服饰，再环境、构图、光色、线条／笔触／肌理及可见文字。复杂画面可约 100–200 词，简单画面不凑数；不以 `1girl, solo` 开头，不写质量口号或美学分数。
+**caption：只提交英文视觉正文，不手写身份前缀。** 以可见内容覆盖完整为准，不设目标词数，也不能压缩成两三句人物摘要。不以 `1girl, solo` 开头，不写质量口号或美学分数。
+
+保存前一次检查以下内容，有则写清、无则省略、看不清则不猜：主体人数与外观；表情视线及人物关系；服装层次、配饰、材质和纹样；姿势、手部动作、持物及接触关系；场景、道具与前中后景；景别、视角、主体位置、遮挡、裁切和留白；光源方向、软硬、明暗、冷暖及主色；线条、笔触、上色、轮廓、肌理和景深；文字、印花、水印、贴纸、Logo、嵌入画面及局部放大框。重要可见内容不能为了简短而略过。BBox 写入区域字段，正文说明对应内容、外观和位置，不罗列坐标。描述画法特征，不推测画师身份。
 
 **身份只由本地处理。** AI 不得在 caption、tags 或区域描述中生成、抄入、猜测、翻译或改写画师、角色、作品／系列等身份名；认出了也不输出。不写 `@name`、`artist:`、`character:`、`by 某画师` 或 `某画师风格`。描述可见外观和匿名主体即可；唯一例外是确实可读的图中文字，可原样存入 `text_regions.text` 作为 OCR 证据，不能回流到训练正文／通用标签作为身份。
 
@@ -31,7 +33,10 @@ description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提�
 - 区分前中后景、人物与道具关系、主体比例、留白、光的方向／软硬、色块、边缘与笔触。不要用一串“beautiful/detailed”替代这些细节。
 - 本地自动合并 `@画师, 角色, 正文/标签`，训练身份名和通用标签使用空格。角色变体沿用本地已确认关系；其他角色保留，不凭共现或相似名字删人。
 
-**tags：数组，只提交画面支持的通用概念。** 优先从 `tag_vocabulary.source_general` 选择，但它只是可用词表，不是必须保留的来源答案。也可提交其他本地已确认的 category-0 词；未知词准确写进正文，不强改分类。
+**tags：数组，只提交画面支持的通用概念。** 用 `tag_vocabulary.source_general` 逐项核对，按 `required_tags` 检查有无省略；来源标签仍需看图确认，有错误则延后人工修正，不能盲抄。也可提交其他本地已确认的 category-0 词；未知词准确写进正文，不强改分类。
+
+- 提交完整视觉标签集，不是十几个重点词或摘要。逐项核对来源和已有普通标签，再补充漏项；“更精炼”“只留核心”不是删标签的许可。
+- `tag_vocabulary.required_tags` 是当前图片的防漏项基线。服务端按规范词比较具体集合，漏词会在写任何文件前返回 `tag_coverage_incomplete`，不能用其他词凑数量，也不能用 reason／overwrite 绕过。根据已看图依据补齐，不必重复看完整图。确有来源错误、与当前图矛盾的词时，记录具体冲突并延后人工修正；不为通过检查盲目复制。裁剪／修复后的旧图标签不自动成为新图基线，必须按最终图重新看图打标。
 
 - 每个数组元素一个词组，使用小写和空格，去重；不提交画师／角色／作品身份。
 - 排除 `highres`、`absurdres`、`commentary request`、`copyright request`、`masterpiece` 等来源管理词或质量口号。服务端会过滤，但模型也应保持输入干净。
@@ -67,6 +72,7 @@ description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提�
 | `invalid_syntax` | 改为单独词组；无 `@`、冒号、逗号和控制字符 |
 | `code=stale_image/image_not_viewed` | 按 `next` 重新看完整当前图，取新 SHA 再决定 |
 | `code=invalid_caption/invalid_text_regions/invalid_visual_regions/invalid_special_elements/invalid_review_reasons/invalid_tags` | 只修对应字段，参照 `message` 和 `next`；不要重跑无关阶段 |
+| `code=tag_coverage_incomplete` | 整次未写入。按 `next.missing_tags` 补齐完整标签；无法视觉确认则延后人工复核，不删 TXT、不改数据库、不用理由绕过 |
 | `code=stale_annotation_details` | 旧框对应裁剪前图片，按当前图重新核实并替换／清空结构字段 |
 | `verification_failed` 或 `sidecars_match=false` | 停止该图并报告落盘异常；重复模型生成不能修复文件问题 |
 

@@ -106,6 +106,12 @@ Final KEEP reports retained_elements (text, watermark, sticker, overlay, logo, s
 
 Prefer cropping a safely removable edge watermark. If removing embedded typography or a large watermark damages the subject or composition, retain the artwork and label each occurrence. The server validates proof/geometry/schema consistency; the external Agent remains responsible for seeing every occurrence and judging composition. The project Skill documents the exact decision rules; no hosted vision calls or image edits are automatically performed by installing this update.
 
+## Annotation completeness
+
+Image inspection returns `tag_vocabulary.required_tags`. On unchanged images this baseline includes locally accepted ordinary source and current-output tags; on edited images only tags bound to the current image and output hashes become the baseline. Quality/administrative terms, aliases, duplicates and locally handled identities are filtered deterministically. An annotation that omits any required ordinary term fails with `tag_coverage_incomplete` before writing any field. The error supplies the missing set; unrelated padding, overwrite permission and prose reasons do not authorize deletion. No visual truth is inferred from this check: a conflicting source term must be deferred for human correction, and a new crop needs actual fresh visual coverage. The service never silently fills in unseen source tags.
+
+Caption instructions require coverage of all important visible subjects, clothing/actions, scene/composition, light/color/rendering and text/compound regions, without a word-count target. Region coordinates remain structured metadata. File/schema validation does not certify semantic completeness. These checks reuse the existing view/save calls.
+
 ## Local character prefix repair
 
 Artist/character identities remain local. Confirmed base→variant relations apply to caption prefixes, optimized tags, copy/display, new writes and new exports; verified ancestor chains also work when an intermediate tag is absent. A base by itself and unrelated characters are retained. Relationships are never inferred from similar spelling or co-occurrence alone.

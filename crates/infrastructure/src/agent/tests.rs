@@ -1024,6 +1024,188 @@ fn annotation_args(m: &bdm_domain::ingest::StoredMedia) -> AnnotationArgs {
 }
 
 #[test]
+fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_padding() {
+    let (mut f, settings, mut m) = fixture();
+    m.post.tag_string_general = "scenery blue_hair smile long_sleeves hair_ornament soft_lighting highres commentary_request".into();
+    f.repo
+        .connection
+        .execute(
+            "UPDATE media SET metadata=?1 WHERE id=?2",
+            rusqlite::params![serde_json::to_string(&m).unwrap(), m.id],
+        )
+        .unwrap();
+    let mut rules = f.repo.tag_rules().unwrap();
+    for term in [
+        "rim_lighting",
+        "tree",
+        "sky",
+        "cloud",
+        "grass",
+        "flower",
+        "water",
+        "red_hair",
+    ] {
+        rules.categories.insert(term.into(), 0);
+    }
+    rules
+        .aliases
+        .insert("azure_hair".into(), "blue_hair".into());
+    f.repo.save_tag_rules(&rules).unwrap();
+    let inspected = payload(
+        &tools::view(
+            &mut f.repo,
+            &settings,
+            ViewArgs {
+                media_id: m.id,
+                original: false,
+                bbox_1000_xyxy: None,
+            },
+        )
+        .unwrap(),
+    );
+    let required: Vec<String> =
+        serde_json::from_value(inspected["tag_vocabulary"]["required_tags"].clone()).unwrap();
+    assert_eq!(required.len(), 6);
+    assert!(!required.contains(&"highres".into()));
+    let old: Vec<_> = ["txt", "tags.txt", "raw_tags.txt"]
+        .into_iter()
+        .map(|ext| {
+            (
+                m.path.with_extension(ext),
+                fs::read(m.path.with_extension(ext)).ok(),
+            )
+        })
+        .collect();
+    let mut args = annotation_args(&m);
+    args.overwrite = true;
+    args.reason = "Keep only concise highlights; authorized overwrite".into();
+    args.tags = Some(vec!["scenery".into(), "smile".into()]);
+    let error =
+        tools::error_result(tools::annotate(&mut f.repo, &settings, args.clone()).unwrap_err())
+            .metadata;
+    assert_eq!(error["code"], "tag_coverage_incomplete");
+    assert_eq!(error["next"]["missing_tags"].as_array().unwrap().len(), 4);
+    for (path, bytes) in &old {
+        assert_eq!(fs::read(path).ok(), *bytes);
+    }
+    args.tags = Some(
+        [
+            "scenery", "smile", "tree", "sky", "cloud", "grass", "flower", "water", "red hair",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+    );
+    assert_eq!(
+        tools::error_result(tools::annotate(&mut f.repo, &settings, args.clone()).unwrap_err())
+            .metadata["code"],
+        "tag_coverage_incomplete"
+    );
+    let mut complete = required;
+    *complete.iter_mut().find(|t| *t == "blue hair").unwrap() = "azure hair".into();
+    complete.extend(
+        [
+            "highres",
+            "commentary request",
+            "azure hair",
+            "rim lighting",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    );
+    args.tags = Some(complete);
+    let saved = payload(&tools::annotate(&mut f.repo, &settings, args.clone()).unwrap());
+    assert_eq!(saved["status"], "partial"); // only excluded quality/management terms
+    let tags = fs::read_to_string(m.path.with_extension("tags.txt")).unwrap();
+    assert!(tags.contains("blue hair"));
+    assert!(!tags.contains("highres"));
+    assert_eq!(tags.matches("blue hair").count(), 1);
+    args.tags.as_mut().unwrap().retain(|t| t != "rim lighting");
+    assert_eq!(
+        tools::error_result(tools::annotate(&mut f.repo, &settings, args).unwrap_err()).metadata
+            ["next"]["missing_tags"],
+        json!(["rim lighting"])
+    );
+    assert_eq!(
+        fs::read_to_string(m.path.with_extension("tags.txt")).unwrap(),
+        tags
+    );
+    let (raw, bytes) = old
+        .iter()
+        .find(|(p, _)| {
+            p.extension().is_some_and(|e| e == "txt")
+                && p.to_string_lossy().ends_with("raw_tags.txt")
+        })
+        .unwrap();
+    assert_eq!(fs::read(raw).ok(), *bytes);
+    assert_eq!(crate::editing::hash(&m.path).unwrap(), m.sha256);
+}
+
+#[test]
+fn edited_pixel_tag_baselines_do_not_reuse_old_source_terms_or_rebind_old_region_boxes() {
+    let (mut f, settings, m) = fixture();
+    let mut rules = f.repo.tag_rules().unwrap();
+    rules.categories.insert("blue_hair".into(), 0);
+    f.repo.save_tag_rules(&rules).unwrap();
+    view(&mut f.repo, &settings, m.id);
+    let mut args = annotation_args(&m);
+    args.text_regions = Some(vec![crate::ai::TextRegion {
+        text: "unreadable text".into(),
+        kind: "watermark".into(),
+        legibility: "unreadable".into(),
+        bbox_1000_xyxy: [900, 900, 990, 990],
+        ..Default::default()
+    }]);
+    tools::annotate(&mut f.repo, &settings, args).unwrap();
+    let old_regions = tools::annotation_details(&f.repo, m.id).unwrap();
+    tools::crop(&mut f.repo, &settings, crop_args(&m, false)).unwrap();
+    tools::crop(&mut f.repo, &settings, crop_args(&m, true)).unwrap();
+    let current = f.repo.media_by_id(m.id).unwrap().unwrap();
+    // Simulate legacy metadata retained by another client after the crop.
+    f.repo.save_annotation_details(m.id, &old_regions).unwrap();
+    let inspected = payload(
+        &tools::view(
+            &mut f.repo,
+            &settings,
+            ViewArgs {
+                media_id: m.id,
+                original: false,
+                bbox_1000_xyxy: None,
+            },
+        )
+        .unwrap(),
+    );
+    assert_eq!(inspected["tag_vocabulary"]["required_tags"], json!([]));
+    let mut args = annotation_args(&current);
+    args.caption = None;
+    args.tags = Some(vec!["blue hair".into()]);
+    args.overwrite = true;
+    // A stale region still requires explicit correction; don't silently relabel it.
+    let stale =
+        tools::error_result(tools::annotate(&mut f.repo, &settings, args.clone()).unwrap_err())
+            .metadata;
+    assert_eq!(stale["code"], "stale_annotation_details");
+    args.text_regions = Some(vec![]);
+    tools::annotate(&mut f.repo, &settings, args.clone()).unwrap();
+    let before = tools::annotation_details(&f.repo, m.id).unwrap();
+    assert_eq!(
+        before.tags_image_sha256.as_deref(),
+        Some(current.sha256.as_str())
+    );
+    assert_eq!(
+        before.image_sha256.as_deref(),
+        Some(current.sha256.as_str())
+    );
+    args.tags = Some(vec!["scenery".into()]);
+    args.text_regions = None;
+    let rejected =
+        tools::error_result(tools::annotate(&mut f.repo, &settings, args).unwrap_err()).metadata;
+    assert_eq!(rejected["code"], "tag_coverage_incomplete");
+    assert_eq!(rejected["next"]["missing_tags"], json!(["blue hair"]));
+    assert_eq!(tools::annotation_details(&f.repo, m.id).unwrap(), before);
+}
+
+#[test]
 fn annotation_rejections_explain_exact_terms_and_do_not_discard_caption_or_leak_source_metadata() {
     let (mut f, settings, mut m) = fixture();
     m.post.tag_string.push_str(" highres commentary_request");
