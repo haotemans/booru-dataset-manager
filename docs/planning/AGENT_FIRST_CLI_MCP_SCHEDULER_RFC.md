@@ -1,6 +1,8 @@
 # RFC: Agent-first CLI, MCP, and dataset scheduler
 
-**Status:** DRAFT / OPEN FOR DISCUSSION. This RFC records proposed directions and open decisions; it is **not** authorization to implement or merge them.
+**Status:** DRAFT / OPEN FOR DISCUSSION. **Decision ADR-001 accepted: lifecycle A, an independent persistent daemon.** Other API and scheduler contracts remain proposals; this is **not** authorization to implement or merge them.
+
+Detailed lifecycle, resource scheduling and CLI/MCP interface design: [ADR-001](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md).
 **Target:** Booru Dataset Manager; Windows and Linux, including headless environments.
 **Scope of this PR:** design discussion only. No runtime, migration, deletion, or API behavior changes.
 
@@ -82,7 +84,7 @@ Do not assume every image needs every stage: unchanged valid annotations, confir
 - **Dynamic micro-batches**: batch metadata and independent commits; avoid huge image tool payloads. Batch sizes/configuration should follow benchmarks and model/provider constraints, not fixed magic numbers.
 - **No duplicate work** across MCP, CLI, GUI or multiple Agents. Per-item state and revisions decide what to skip/resume.
 - **Delivery semantics**: the system should target at-least-once execution with idempotent effects, not promise exactly-once model calls.
-- **Lifecycle open question:** a persistent local scheduler daemon shared by GUI/CLI/MCP, or an embedded scheduler with a single-owner arbitration protocol. Do not choose before discussing UX and deployment.
+- **Lifecycle selected (ADR-001):** a persistent independent scheduler daemon shared by GUI/CLI/MCP. The daemon remains active after client sessions exit; automatic start on boot is separately optional. See the detailed ADR for remaining open decisions.
 
 ## 7. Speed strategy and measurement
 
@@ -113,7 +115,7 @@ First optimization hypotheses, not unmeasured claims:
 
 ## 9. Discussion checkpoints (OPEN; deliberately undecided)
 
-1. **Scheduler lifecycle:** persistent daemon vs embedded + single-owner arbitration; how CLI launches/reuses it; whether MCP should work when GUI is closed.
+1. **Scheduler lifecycle: A accepted.** Independent persistent daemon; CLI, MCP and GUI reconnect to it. Remaining: lazy-start policy, work-lease ownership and service packaging (ADR-001).
 2. **Agent work unit:** individual image, bounded image batch, or collection-stage task; which operations should be atomic.
 3. **Interface priority:** which capabilities belong to CLI and MCP v1; how many tools to expose to avoid unnecessary Agent context.
 4. **Image presentation:** preview/contact-sheet grouping and when a full view is mandatory; token vs fidelity budget.
