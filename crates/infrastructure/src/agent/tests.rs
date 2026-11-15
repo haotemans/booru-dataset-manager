@@ -1024,9 +1024,9 @@ fn annotation_args(m: &bdm_domain::ingest::StoredMedia) -> AnnotationArgs {
 }
 
 #[test]
-fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_padding() {
+fn redundancy_cleanup_is_allowed_but_large_tag_reduction_is_atomic_and_cannot_be_padded() {
     let (mut f, settings, mut m) = fixture();
-    m.post.tag_string_general = "scenery blue_hair smile long_sleeves hair_ornament soft_lighting highres commentary_request".into();
+    m.post.tag_string_general = "scenery blue_hair smile long_sleeves hair_ornament soft_lighting looking_at_viewer shirt skirt blush hairclip highres commentary_request".into();
     f.repo
         .connection
         .execute(
@@ -1063,10 +1063,10 @@ fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_p
         )
         .unwrap(),
     );
-    let required: Vec<String> =
-        serde_json::from_value(inspected["tag_vocabulary"]["required_tags"].clone()).unwrap();
-    assert_eq!(required.len(), 6);
-    assert!(!required.contains(&"highres".into()));
+    let baseline: Vec<String> =
+        serde_json::from_value(inspected["tag_vocabulary"]["baseline_tags"].clone()).unwrap();
+    assert_eq!(baseline.len(), 11);
+    assert!(!baseline.contains(&"highres".into()));
     let old: Vec<_> = ["txt", "tags.txt", "raw_tags.txt"]
         .into_iter()
         .map(|ext| {
@@ -1084,7 +1084,7 @@ fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_p
         tools::error_result(tools::annotate(&mut f.repo, &settings, args.clone()).unwrap_err())
             .metadata;
     assert_eq!(error["code"], "tag_coverage_incomplete");
-    assert_eq!(error["next"]["missing_tags"].as_array().unwrap().len(), 4);
+    assert_eq!(error["next"]["removed_tags"].as_array().unwrap().len(), 9);
     for (path, bytes) in &old {
         assert_eq!(fs::read(path).ok(), *bytes);
     }
@@ -1101,7 +1101,7 @@ fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_p
             .metadata["code"],
         "tag_coverage_incomplete"
     );
-    let mut complete = required;
+    let mut complete = baseline;
     *complete.iter_mut().find(|t| *t == "blue hair").unwrap() = "azure hair".into();
     complete.extend(
         [
@@ -1120,16 +1120,18 @@ fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_p
     assert!(tags.contains("blue hair"));
     assert!(!tags.contains("highres"));
     assert_eq!(tags.matches("blue hair").count(), 1);
+    // A small deletion is permitted; the model remains responsible for judging
+    // whether this term actually duplicates retained visual information.
     args.tags.as_mut().unwrap().retain(|t| t != "rim lighting");
+    let refined = payload(&tools::annotate(&mut f.repo, &settings, args).unwrap());
     assert_eq!(
-        tools::error_result(tools::annotate(&mut f.repo, &settings, args).unwrap_err()).metadata
-            ["next"]["missing_tags"],
+        refined["tag_changes"]["removed_tags"],
         json!(["rim lighting"])
     );
-    assert_eq!(
-        fs::read_to_string(m.path.with_extension("tags.txt")).unwrap(),
-        tags
-    );
+    assert_eq!(refined["tag_changes"]["large_reduction"], false);
+    assert!(!fs::read_to_string(m.path.with_extension("tags.txt"))
+        .unwrap()
+        .contains("rim lighting"));
     let (raw, bytes) = old
         .iter()
         .find(|(p, _)| {
@@ -1145,7 +1147,9 @@ fn incomplete_tag_replacement_is_atomic_and_cannot_be_bypassed_with_reasons_or_p
 fn edited_pixel_tag_baselines_do_not_reuse_old_source_terms_or_rebind_old_region_boxes() {
     let (mut f, settings, m) = fixture();
     let mut rules = f.repo.tag_rules().unwrap();
-    rules.categories.insert("blue_hair".into(), 0);
+    for term in ["blue_hair", "smile", "shirt", "skirt", "blush", "long_hair"] {
+        rules.categories.insert(term.into(), 0);
+    }
     f.repo.save_tag_rules(&rules).unwrap();
     view(&mut f.repo, &settings, m.id);
     let mut args = annotation_args(&m);
@@ -1175,10 +1179,15 @@ fn edited_pixel_tag_baselines_do_not_reuse_old_source_terms_or_rebind_old_region
         )
         .unwrap(),
     );
-    assert_eq!(inspected["tag_vocabulary"]["required_tags"], json!([]));
+    assert_eq!(inspected["tag_vocabulary"]["baseline_tags"], json!([]));
     let mut args = annotation_args(&current);
     args.caption = None;
-    args.tags = Some(vec!["blue hair".into()]);
+    args.tags = Some(
+        ["blue hair", "smile", "shirt", "skirt", "blush", "long hair"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    );
     args.overwrite = true;
     // A stale region still requires explicit correction; don't silently relabel it.
     let stale =
@@ -1201,7 +1210,10 @@ fn edited_pixel_tag_baselines_do_not_reuse_old_source_terms_or_rebind_old_region
     let rejected =
         tools::error_result(tools::annotate(&mut f.repo, &settings, args).unwrap_err()).metadata;
     assert_eq!(rejected["code"], "tag_coverage_incomplete");
-    assert_eq!(rejected["next"]["missing_tags"], json!(["blue hair"]));
+    assert_eq!(
+        rejected["next"]["removed_tags"].as_array().unwrap().len(),
+        6
+    );
     assert_eq!(tools::annotation_details(&f.repo, m.id).unwrap(), before);
 }
 

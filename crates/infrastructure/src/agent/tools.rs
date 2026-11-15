@@ -212,10 +212,10 @@ fn tag_vocabulary(m: &StoredMedia, rules: &bdm_domain::tags::TagRules) -> Value 
     );
     json!({"source_general":tags,"rule":"Choose only visually supported terms. Other locally verified category-0 terms are accepted; unknown terms belong in caption prose, not forced into tags."})
 }
-/// Omission is not deletion permission. Source terms protect an unedited image;
+/// Source terms provide a comparison baseline for an unedited image;
 /// edited pixels require a tag result explicitly bound to that current image.
 /// Never auto-append terms: the client still has to inspect the pixels.
-fn required_visual_tags(
+fn baseline_visual_tags(
     m: &StoredMedia,
     rules: &bdm_domain::tags::TagRules,
     existing: &[crate::workflows::TextArtifact],
@@ -241,6 +241,12 @@ fn required_visual_tags(
         }
     }
     ai::identity::verified_visual_tags(&candidates, rules)
+}
+
+/// A conservative anomaly check, not a semantic redundancy classifier.
+/// Canonical aliases, quality/admin tags and identities were already excluded.
+fn tag_reduction_is_large(baseline: usize, removed: usize) -> bool {
+    removed >= 5 && removed * 100 >= baseline * 30
 }
 fn info(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
     let artifacts=artifacts(repo,m.id)?.into_iter().map(|a|{
@@ -396,13 +402,14 @@ pub(super) fn view(
         let rules = tag_rules(repo, &m)?;
         let details = annotation_details(repo, m.id)?;
         let mut vocabulary = tag_vocabulary(&m, &rules);
-        vocabulary["required_tags"] = json!(required_visual_tags(
+        vocabulary["baseline_tags"] = json!(baseline_visual_tags(
             &m,
             &rules,
             &artifacts(repo, m.id)?,
             &details
         ));
-        vocabulary["retention_rule"] = json!("Submit the full visual tag list, including required_tags. Missing terms block the entire save; overwrite/reason cannot authorize deletion. Do not copy a term contradicted by the current pixels: defer that conflict for human correction. Edited images do not inherit stale source-image requirements.");
+        vocabulary["reduction_guard"] = json!({"minimum_removed":5,"removed_percent":30,"comparison":"canonical baseline set; additions cannot offset removals","semantic_redundancy_verified":false});
+        vocabulary["retention_rule"] = json!("Remove redundant/synonymous concepts and broader concepts fully covered by retained specific tags, while preserving distinct visible detail. baseline_tags is a comparison set, NOT a mandatory keep list. Removing >=5 ordinary terms AND >=30% of that set blocks the entire save for review; reasons/overwrite cannot bypass this anomaly check. Small deletions are allowed but still require visual correctness. Never blindly copy contradicted terms. Edited images do not inherit stale source-image requirements.");
         data["tag_vocabulary"] = vocabulary;
         data["annotation_details"] = storage(serde_json::to_value(details))?;
         data["capabilities"] = json!([
@@ -600,6 +607,7 @@ pub(super) fn annotate(
     let mut rejected = Vec::new();
     let mut rejection_details = Vec::new();
     let mut accepted = Vec::new();
+    let mut tag_changes = Value::Null;
     // Decide preservation before validating unused replacement text. A protected
     // caption must not block a tags-only continuation (or vice versa).
     for (kind, provided) in [
@@ -673,15 +681,16 @@ pub(super) fn annotate(
                 }
             }
             if !accepted.is_empty() {
-                let required =
-                    required_visual_tags(&m, &rules, &existing, &annotation_details(repo, m.id)?);
-                let missing: Vec<_> = required
+                let baseline =
+                    baseline_visual_tags(&m, &rules, &existing, &annotation_details(repo, m.id)?);
+                let removed: Vec<_> = baseline
                     .iter()
                     .filter(|tag| !accepted.contains(tag))
                     .collect();
-                if !missing.is_empty() {
-                    return Err(guidance_error("tag_coverage_incomplete", "Ordinary visual tags cannot be silently dropped. Nothing in this call was saved. Submit the complete visually checked tag list; neither overwrite nor a reason bypasses retention. If an existing term contradicts the pixels, defer for human correction instead of copying it blindly.",
-                        json!({"tool":"bdm_save_annotation","args":{"media_id":m.id,"expected_sha256":m.sha256},"missing_tags":missing,"required_tags":required,"accepted_tags":accepted,"tag_rejections":rejection_details,"hint":"Preserve all still-visible detail, not just key tags. Do not pad with unrelated tags. Reuse this image inspection; no new view is needed unless detail is uncertain."})));
+                tag_changes = json!({"baseline_count":baseline.len(),"removed_tags":removed,"added_tags":accepted.iter().filter(|t|!baseline.contains(t)).collect::<Vec<_>>(),"large_reduction":tag_reduction_is_large(baseline.len(),removed.len())});
+                if tag_reduction_is_large(baseline.len(), removed.len()) {
+                    return Err(guidance_error("tag_coverage_incomplete", "Large ordinary-tag reduction requires reinspection before replacement. Nothing in this call was saved. Redundancy cleanup is allowed; do not compress full annotation into highlights or blindly restore contradicted tags. A reason/overwrite cannot bypass the anomaly check.",
+                        json!({"tool":"bdm_save_annotation","args":{"media_id":m.id,"expected_sha256":m.sha256},"removed_tags":removed,"baseline_tags":baseline,"tag_changes":tag_changes,"accepted_tags":accepted,"tag_rejections":rejection_details,"hint":"Review whether removed concepts are genuinely redundant with retained ones. Restore lost independent detail; do not pad with unrelated tags. If large reduction remains necessary, defer for human review instead of writing an excuse or bypassing the service."})));
                 }
                 // Merge only verified identities and model-verified visual tags.
                 // Source meta/protected tags must never leak back into training TXT.
@@ -875,10 +884,10 @@ pub(super) fn annotate(
     } else {
         json!({"action":"continue_requested_workflow","hint":"Check readback semantics, then assess/annotate the next inspected image as requested. No extra list/view call is needed just to confirm this save."})
     };
-    repo.audit("agent_annotation",&json!({"id":m.id,"sha256":m.sha256,"saved":saved,"preserved":preserved,"rejected_tags":rejection_details,"status":status,"model":args.model,"reason":args.reason,
+    repo.audit("agent_annotation",&json!({"id":m.id,"sha256":m.sha256,"saved":saved,"preserved":preserved,"rejected_tags":rejection_details,"tag_changes":tag_changes,"status":status,"model":args.model,"reason":args.reason,
         "annotation_details":if details_saved {Some(&details)}else{None}}).to_string())?;
     let mut response = json!({"media_id":m.id,"expected_sha256":m.sha256,"status":status,"saved":saved,"preserved":preserved,
-        "accepted_tags":accepted,"rejected_tags":rejected,"tag_rejections":rejection_details,"readback":readback,
+        "accepted_tags":accepted,"rejected_tags":rejected,"tag_rejections":rejection_details,"tag_changes":tag_changes,"readback":readback,
         "verification":{"sidecars_match":verified,"semantic_approval":false},
         "annotation_details":{"status":if details_saved {"saved"} else {"preserved"},"image_sha256":details.image_sha256,"text_region_count":details.text_regions.len(),"visual_region_count":details.visual_regions.len(),"special_elements":details.special_elements,"review_reasons":details.review_reasons},"next":next});
     if !rejected.is_empty() {

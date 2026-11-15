@@ -33,10 +33,10 @@ description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提�
 - 区分前中后景、人物与道具关系、主体比例、留白、光的方向／软硬、色块、边缘与笔触。不要用一串“beautiful/detailed”替代这些细节。
 - 本地自动合并 `@画师, 角色, 正文/标签`，训练身份名和通用标签使用空格。角色变体沿用本地已确认关系；其他角色保留，不凭共现或相似名字删人。
 
-**tags：数组，只提交画面支持的通用概念。** 用 `tag_vocabulary.source_general` 逐项核对，按 `required_tags` 检查有无省略；来源标签仍需看图确认，有错误则延后人工修正，不能盲抄。也可提交其他本地已确认的 category-0 词；未知词准确写进正文，不强改分类。
+**tags：数组，只提交画面支持的通用概念。** 用 `tag_vocabulary.source_general` 逐项核对，用 `baseline_tags` 对比优化前后保留的信息；来源标签仍需看图确认，有错误可纠正，不能盲抄。也可提交其他本地已确认的 category-0 词；未知词准确写进正文，不强改分类。
 
-- 提交完整视觉标签集，不是十几个重点词或摘要。逐项核对来源和已有普通标签，再补充漏项；“更精炼”“只留核心”不是删标签的许可。
-- `tag_vocabulary.required_tags` 是当前图片的防漏项基线。服务端按规范词比较具体集合，漏词会在写任何文件前返回 `tag_coverage_incomplete`，不能用其他词凑数量，也不能用 reason／overwrite 绕过。根据已看图依据补齐，不必重复看完整图。确有来源错误、与当前图矛盾的词时，记录具体冲突并延后人工修正；不为通过检查盲目复制。裁剪／修复后的旧图标签不自动成为新图基线，必须按最终图重新看图打标。
+- 提交完整视觉标签集，允许精简冗余，不把完整标注压成十几个重点词。重复／同义／规范别名可合并；更具体的保留词已完整涵盖的宽泛词可去掉。判断标准是有没有丢失独立视觉信息，不是所有原词都必须保留，也不是越短越好。服装、动作、构图、光影、材质、场景和文字等不同维度不能当成冗余一起删。
+- `tag_vocabulary.baseline_tags` 是比较基线，不是强制保留清单。服务端先排除质量／管理词、重复／别名和本地身份，再比较具体集合：普通词删除至少 5 项且达到基线的 30% 才拦截整次保存，返回 `tag_coverage_incomplete`。这是异常兜底，不能证明少删就正确或多删就一定无冗余。正常保存回执 `tag_changes.removed_tags` 用于一次自检：被删概念是否已被保留词涵盖，有无遗漏有效细节；无需逐词写理由。大量独立信息被删就补回，仍需大幅精简则延后复核，不用 reason／overwrite 绕过，也不为通过检查盲抄。裁剪／修复后按最终图重新建立基线。
 
 - 每个数组元素一个词组，使用小写和空格，去重；不提交画师／角色／作品身份。
 - 排除 `highres`、`absurdres`、`commentary request`、`copyright request`、`masterpiece` 等来源管理词或质量口号。服务端会过滤，但模型也应保持输入干净。
@@ -72,7 +72,7 @@ description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提�
 | `invalid_syntax` | 改为单独词组；无 `@`、冒号、逗号和控制字符 |
 | `code=stale_image/image_not_viewed` | 按 `next` 重新看完整当前图，取新 SHA 再决定 |
 | `code=invalid_caption/invalid_text_regions/invalid_visual_regions/invalid_special_elements/invalid_review_reasons/invalid_tags` | 只修对应字段，参照 `message` 和 `next`；不要重跑无关阶段 |
-| `code=tag_coverage_incomplete` | 整次未写入。按 `next.missing_tags` 补齐完整标签；无法视觉确认则延后人工复核，不删 TXT、不改数据库、不用理由绕过 |
+| `code=tag_coverage_incomplete` | 异常大幅删减，整次未写入。检查 `next.removed_tags`，补回丢失的独立信息；冗余可清理，不要求原词全留。仍需大幅精简则延后复核，不写理由绕过 |
 | `code=stale_annotation_details` | 旧框对应裁剪前图片，按当前图重新核实并替换／清空结构字段 |
 | `verification_failed` 或 `sidecars_match=false` | 停止该图并报告落盘异常；重复模型生成不能修复文件问题 |
 
