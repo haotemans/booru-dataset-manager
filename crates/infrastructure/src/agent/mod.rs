@@ -76,12 +76,23 @@ impl AgentServer {
         let settings = self.settings.clone();
         let outcome = tokio::task::spawn_blocking(move || {
             let mut repo = repo.lock().map_err(|_| IngestError::Storage)?;
-            task(&mut repo, &settings)
+            let outcome = task(&mut repo, &settings);
+            if let Err(error) = &outcome {
+                // Keep validation failures diagnosable without recording pixels,
+                // credentials or the full submitted training text.
+                if settings.writes {
+                    let _ = repo.audit(
+                        "agent_tool_error",
+                        &json!({"error":error.to_string()}).to_string(),
+                    );
+                }
+            }
+            outcome
         })
         .await;
         match outcome {
             Ok(Ok(result)) => result,
-            Ok(Err(error)) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
+            Ok(Err(error)) => tools::error_result(error),
             Err(_) => CallToolResult::error(vec![ContentBlock::text(
                 "Local tool failed; inspect the image again before retrying.",
             )]),
@@ -97,7 +108,9 @@ impl AgentServer {
     )]
     fn bdm_policy(&self) -> CallToolResult {
         tools::result(
-            json!({"instructions":POLICY,"writes_enabled":self.settings.writes,"image_retention":{"original":1,"current":1,"thumbnail":1}}),
+            json!({"protocol":"bdm-agent-v2","instructions":POLICY,"writes_enabled":self.settings.writes,"image_retention":{"original":1,"current":1,"thumbnail":1},
+                "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment"],
+                "next":{"tool":"bdm_collections","hint":"Locate the requested collection once, then page bdm_list_media. Run only the user's requested phases."}}),
         )
     }
 
@@ -148,7 +161,7 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "Save visual caption/tags for the CURRENT image. Artist and character prefixes are merged locally; successful/manual text is preserved unless overwrite=true. Never changes raw API/TXT source data or calls another paid API."
+        description = "Save caption/tags and optional rich text/visual regions for an inspected CURRENT image, or submit review_reasons only to defer it. Use view.tag_vocabulary; identities merge locally. Invalid terms have per-tag reasons and do not discard valid caption. Same-call readback, verification and next. Omitted region fields preserve; [] clears. overwrite=false preserves successful/manual TXT."
     )]
     async fn bdm_save_annotation(
         &self,
@@ -159,7 +172,7 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "Record explainable aesthetic/training scores and keep/reject/defer decision for an inspected image. Reject queues the image for final deletion review; it does not delete the original."
+        description = "Assess inspected current pixels. stage=preliminary never approves/rejects; crop_candidate=true defers routing until verified crop/preview and final reassessment. Final crop_outcome=applied or not_improved requires matching edit/preview evidence. Reject queues human review and removes training approval, never deletes bytes. Legacy calls default to final."
     )]
     async fn bdm_assess(&self, Parameters(args): Parameters<AssessArgs>) -> CallToolResult {
         self.task(move |repo, settings| tools::assess(repo, settings, args))

@@ -244,6 +244,8 @@ impl SqliteCatalog {
         for (media_id, provenance) in rows {
             if let Ok(details) = serde_json::from_str::<crate::ai::AnnotationDetails>(&provenance) {
                 if !details.text_regions.is_empty()
+                    || !details.visual_regions.is_empty()
+                    || !details.review_reasons.is_empty()
                     || !details.special_elements.is_empty()
                     || details.user_hint.is_some()
                     || !details.schema_version.is_empty()

@@ -107,7 +107,7 @@ impl SqliteCatalog {
 }
 
 pub(super) fn save_review(
-    repo: &mut SqliteCatalog,
+    repo: &SqliteCatalog,
     id: i64,
     sha: &str,
     decision: &str,

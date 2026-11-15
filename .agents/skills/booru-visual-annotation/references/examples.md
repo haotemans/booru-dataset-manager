@@ -1,0 +1,55 @@
+# 视觉证据与标注校准
+
+以下场景只用于说明判断方法，不是当前图片的标准答案。不能把文案、物体、身份或坐标套用到别的图。
+
+## 自然语言不要退化成标签串
+
+差：`1girl, solo, highres, masterpiece, beautiful detailed anime art.`
+
+较好（只有画面真符合时）：
+
+> A single pink-haired girl crouches beside a dark leafy hedge in a sunlit garden. Her small figure sits near the lower edge beneath a broad cyan sky, with a vine-covered arch to the left, a blue mailbox to the right, and distant buildings between them. A light shirt is layered beneath a blue patterned pinafore. Large, simplified foliage shapes and broken paint-like edges give the greenery a textured appearance. Pale clouds separate the dark foreground leaves from the spacious sky. A faint signature lies along the lower edge; its lettering is too small to read confidently in this view.
+
+这段的价值来自主体比例、左右关系、光色与笔触等可核对事实，不在于长度。若图里没有签名，最后一句必须删除。
+
+## 把不确定性变成准确措辞
+
+| 初步判断 | 应怎样写 |
+| --- | --- |
+| 只看见白色钟形小花，不能确认品种 | `small white bell-shaped blossoms`，不直接断言 lily of the valley |
+| 眼睛被头发或阴影遮住 | 描述遮挡，不从原始标签补瞳色 |
+| 手放在脸附近，没有清楚看到手指接触嘴唇 | `a hand raised near the face`，不编咬手套／吃东西 |
+| 强烈暖色侧光，但看不到太阳、天空或时钟 | 描述暖色侧光，不擅自补“落日时分” |
+| 衣物和背景都是红色，边界有遮挡 | 先确认服装轮廓，不把背景花纹写成衣服印花 |
+| 报纸可见，但字太小或是画出来的假字 | 描述纸张和印刷状文字，逐字结果使用 unreadable text |
+| 同角色的眼神、手势或服装不同 | 是有意义差分，不能仅凭相似度合并 |
+
+## 文字区域示例
+
+下面坐标是假设值，不可复制到真实图片。实际应查看细节并换算到完整当前图片。
+
+```json
+{
+  "text_regions": [
+    {
+      "text": "unreadable text",
+      "bbox_1000_xyxy": [620, 950, 800, 995],
+      "kind": "watermark",
+      "legibility": "unreadable"
+    }
+  ],
+  "special_elements": []
+}
+```
+
+正文应相应提到下边缘的小型签名／水印。不因有水印就自动擦除或拒绝整张作品。
+
+如果纸张上有成片可见而不可读的印刷字，可以把纸面文字区域作为一块 `other` 记录；对话框、招牌、衣服印花则按真实类型记录。不要为了凑 OCR 结果给无字画面添加区域。
+
+## 保存后要抓到的错误
+
+- 输入 `tags` 很干净，但落盘变成 `highres, commentary request, @artist, ...`：服务端合并回流，当前批次不能验收，重写同一段 caption 不能修复它。
+- 返回 `preserved=["caption"]`：本次并未改写该描述。只有它仍与当前图一致时才计为已有结果保留。
+- 用户只要求修标签：省略 `text_regions` 和 `special_elements` 即保留原值；不要无意传 `[]` 清空。需要修文字框时才显式传入核实后的完整数组。
+- 图里确实有签名或报纸文字，但 `text_regions=[]`：回看细节并补齐；不能以 JSON 合法为由标作逐张验收通过。
+- 正文写“白裙”，画面只有一块白色物体且服装边界看不清：降低描述粒度，不用流畅语句掩盖证据不足。

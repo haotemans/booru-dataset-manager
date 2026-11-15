@@ -9,6 +9,18 @@ const FORBIDDEN_QUALITY_TAGS: &[&str] = &[
     "highres",
     "lowres",
     "aesthetic_score",
+    "incredibly_absurdres",
+    "commentary",
+    "commentary_request",
+    "chinese_commentary",
+    "japanese_commentary",
+    "english_commentary",
+    "copyright_request",
+    "artist_request",
+    "character_request",
+    "source_request",
+    "translation_request",
+    "tagme",
 ];
 
 /// Danbooru's raw_tags.txt is provenance, not trusted model instructions.
@@ -39,33 +51,50 @@ pub(super) fn generic_metadata_prior(
 pub(crate) fn verified_visual_tags(tags: &[String], rules: &TagRules) -> Vec<String> {
     let mut seen = BTreeSet::new();
     tags.iter()
-        .filter_map(|tag| {
-            let candidate = tag
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .to_lowercase()
-                .replace(' ', "_");
-            if candidate.is_empty()
-                || candidate.contains('@')
-                || candidate.contains(':')
-                || candidate.contains(',')
-                || candidate.chars().any(char::is_control)
-                || FORBIDDEN_QUALITY_TAGS.contains(&candidate.as_str())
-            {
-                return None;
-            }
-            let canonical = rules.canonical(&candidate);
-            if rules.categories.get(&canonical) != Some(&0)
-                || rules.protected.contains(&canonical)
-                || FORBIDDEN_QUALITY_TAGS.contains(&canonical.as_str())
-                || !seen.insert(canonical.clone())
-            {
-                return None;
-            }
-            Some(canonical.replace('_', " "))
-        })
+        .filter_map(|tag| check_visual_tag(tag, rules).ok())
+        .filter(|tag| seen.insert(tag.clone()))
         .collect()
+}
+
+/// One deterministic check shared by validation, vocabulary hints and rejection reports.
+pub(crate) fn check_visual_tag(tag: &str, rules: &TagRules) -> Result<String, &'static str> {
+    let candidate = tag
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .replace(' ', "_");
+    if candidate.is_empty()
+        || tag.chars().any(char::is_control)
+        || candidate.contains('@')
+        || candidate.contains(':')
+        || candidate.contains(',')
+    {
+        return Err("invalid_syntax");
+    }
+    let mut canonical = rules.canonical(&candidate);
+    // Protocol enum spellings are not Danbooru tag spellings. Resolve only
+    // when the actual hyphenated term is already locally verified.
+    if matches!(canonical.as_str(), "x_ray" | "cross_section") {
+        let hyphenated = canonical.replace('_', "-");
+        if !rules.categories.contains_key(&canonical)
+            && rules.categories.get(&hyphenated) == Some(&0)
+        {
+            canonical = hyphenated;
+        }
+    }
+    if FORBIDDEN_QUALITY_TAGS.contains(&candidate.as_str())
+        || FORBIDDEN_QUALITY_TAGS.contains(&canonical.as_str())
+    {
+        return Err("non_visual_metadata");
+    }
+    match rules.categories.get(&canonical) {
+        Some(0) if !rules.protected.contains(&canonical) => Ok(canonical.replace('_', " ")),
+        Some(0) => Err("protected_tag"),
+        Some(1 | 3 | 4) => Err("identity_merged_locally"),
+        Some(_) => Err("not_general_category"),
+        None => Err("unknown_category"),
+    }
 }
 
 fn tokens(text: &str) -> Vec<String> {
@@ -142,6 +171,21 @@ pub(crate) fn caption_mentions_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn special_tag_spellings_require_verified_hyphenated_categories() {
+        let mut rules = TagRules::default();
+        assert!(check_visual_tag("x ray", &rules).is_err());
+        rules.categories.insert("x-ray".into(), 0);
+        rules.categories.insert("cross-section".into(), 0);
+        assert_eq!(check_visual_tag("x_ray", &rules), Ok("x-ray".into()));
+        assert_eq!(
+            check_visual_tag("cross section", &rules),
+            Ok("cross-section".into())
+        );
+        rules.categories.insert("cross-section".into(), 4);
+        assert!(check_visual_tag("cross section", &rules).is_err());
+    }
 
     #[test]
     fn raw_danbooru_prior_excludes_artist_character_copyright_and_protected_tags_and_uses_spaces() {
