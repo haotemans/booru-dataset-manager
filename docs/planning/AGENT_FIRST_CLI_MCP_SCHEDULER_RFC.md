@@ -2,7 +2,7 @@
 
 **Status:** DRAFT / OPEN FOR DISCUSSION. **Accepted decisions:** lifecycle **A — independent persistent daemon** (ADR-001); Agent work allocation **A — Agent actively pulls work** (ADR-002). Other API and scheduler details remain proposals; this is **not** authorization to implement or merge them.
 
-Detailed documents: [ADR-001: Persistent Agent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md), [ADR-002: Agent-pull leases, batches and resource scheduling](AGENT_PULL_LEASE_PROTOCOL.md), [ADR-003: Independent nodes and composable workflows](AGENT_WORKFLOW_NODE_CATALOG.md), and [ADR-004: Aesthetic evaluation](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md).
+Detailed documents: [ADR-001: Persistent Agent daemon](AGENT_DAEMON_AND_INTERFACE_CONTRACT.md), [ADR-002: Agent-pull leases, batches and resource scheduling](AGENT_PULL_LEASE_PROTOCOL.md), [ADR-003: Independent nodes and composable workflows](AGENT_WORKFLOW_NODE_CATALOG.md), and [ADR-004: Aesthetic evaluation](AGENT_AESTHETIC_EVALUATION_WORKFLOW.md), [ADR-005: Comic exclusion and review routing](COMIC_PAGE_EXCLUSION_AND_OPTIONAL_LABELING.md), and [ADR-006: Duplicate workflow](AGENT_DUPLICATE_WORKFLOW_RFC.md).
 **Target:** Booru Dataset Manager; Windows and Linux, including headless environments.
 **Scope of this PR:** design discussion only. No runtime, migration, deletion, or API behavior changes.
 
