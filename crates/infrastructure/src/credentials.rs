@@ -51,7 +51,40 @@ pub struct NativeCredentialStore {
     account: String,
 }
 
+#[cfg(all(test, windows))]
+#[test]
+fn portable_accounts_match_desktop_and_canonical_headless_paths_without_global_fallback() {
+    use std::path::Path;
+    let root = Path::new(r"D:\portable\booru");
+    let canonical = Path::new(r"\\?\D:\portable\booru");
+    assert_eq!(
+        NativeCredentialStore::danbooru_portable(root).account,
+        NativeCredentialStore::danbooru_portable(canonical).account
+    );
+    assert_eq!(
+        NativeCredentialStore::gelbooru(Some(root)).account,
+        NativeCredentialStore::gelbooru(Some(canonical)).account
+    );
+    assert_ne!(
+        NativeCredentialStore::danbooru().account,
+        NativeCredentialStore::danbooru_portable(root).account
+    );
+    assert_eq!(
+        NativeCredentialStore::portable_root_key(Path::new(r"\\?\UNC\host\share")),
+        NativeCredentialStore::portable_root_key(Path::new(r"\\host\share"))
+    );
+}
+
 impl NativeCredentialStore {
+    #[cfg(windows)]
+    fn portable_root_key(root: &std::path::Path) -> String {
+        let path = root.to_string_lossy().to_lowercase().replace('/', "\\");
+        if let Some(rest) = path.strip_prefix(r"\\?\unc\") {
+            format!(r"\\{rest}")
+        } else {
+            path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+        }
+    }
     pub fn gelbooru(directory: Option<&std::path::Path>) -> Self {
         #[cfg(windows)]
         use sha2::{Digest, Sha256};
@@ -66,7 +99,7 @@ impl NativeCredentialStore {
                 |root| {
                     format!(
                         "gelbooru-portable-{:x}",
-                        Sha256::digest(root.to_string_lossy().to_lowercase().as_bytes())
+                        Sha256::digest(Self::portable_root_key(root).as_bytes())
                     )
                 },
             ),
@@ -84,7 +117,7 @@ impl NativeCredentialStore {
             #[cfg(windows)]
             account: format!(
                 "danbooru-portable-{:x}",
-                Sha256::digest(directory.to_string_lossy().to_lowercase().as_bytes())
+                Sha256::digest(Self::portable_root_key(directory).as_bytes())
             ),
         }
     }

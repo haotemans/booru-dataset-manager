@@ -31,6 +31,10 @@ absolute and the catalog/library must already exist. Omit `--allow-writes` for
 inspection-only use. The server itself exposes no network listener. Client
 permission prompts remain controlled by Antigravity's permission mode.
 
+## Durable jobs and optional headless CLI
+
+Protocol v3 adds `bdm_agent` for durable batches, leased work, job controls, operation-schema discovery, download queues, bucket planning and local health checks. Existing configuration above remains valid. The optional `bdm.exe mcp-serve` entry serves the same tools without linking the desktop UI; `bdm.exe --help` documents standalone JSON commands. See [the implemented control-plane contract](../agent-control-plane.md) for exact commands, restart behavior and current limits.
+
 ## Project annotation skill
 
 The workspace skill [booru-visual-annotation](../../.agents/skills/booru-visual-annotation/SKILL.md)

@@ -24,10 +24,495 @@ fn fixture() -> (
         project_root: f.directory.path().to_owned(),
         library_root: f.directory.path().join("library").canonicalize().unwrap(),
         writes: true,
+        permit: None,
         seen: Mutex::default(),
         previews: Mutex::default(),
     };
     (f, settings, m)
+}
+
+fn service(f: &crate::workflow_tests::Fixture, writes: bool) -> AgentService {
+    AgentService::open(
+        &f.directory.path().join("catalog.sqlite3"),
+        f.directory.path(),
+        &f.directory.path().join("library"),
+        writes,
+    )
+    .unwrap()
+}
+fn ok(service: &AgentService, op: &str, input: serde_json::Value) -> serde_json::Value {
+    let reply = service.execute(op, input);
+    assert!(!reply.is_error, "{op}: {}", reply.metadata);
+    reply.metadata
+}
+fn leased_input(
+    item: &serde_json::Value,
+    request: &str,
+    payload: serde_json::Value,
+) -> serde_json::Value {
+    let mut input = item.clone();
+    input["request_id"] = json!(request);
+    input["payload"] = payload;
+    input
+}
+fn start_work(
+    f: &crate::workflow_tests::Fixture,
+    id: i64,
+    mode: &str,
+) -> (AgentService, serde_json::Value, i64) {
+    let s = service(f, true);
+    let submitted = ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"job-1","media_ids":[id],"mode":mode,"outputs":["caption"]}),
+    );
+    let job = submitted["job_id"].as_i64().unwrap();
+    ok(&s, "jobs_tick", json!({}));
+    let item = ok(&s, "work_claim", json!({"owner":"test","job_id":job}))["items"][0].clone();
+    assert!(item["work_id"].as_i64().is_some());
+    (s, item, job)
+}
+
+#[test]
+fn durable_work_survives_new_clients_and_replays_once_without_model_or_gui() {
+    let (f, _, m) = fixture();
+    let (s, item, job) = start_work(&f, m.id, "annotate");
+    let input = leased_input(
+        &item,
+        "save-1",
+        json!({"caption":"A blue square with flat color.","reason":"Observed current pixels","model":"test"}),
+    );
+    assert!(s.execute("work_annotate", input.clone()).is_error);
+    ok(&s, "work_view", leased_input(&item, "view", json!({})));
+    drop(s);
+    let s = service(&f, true);
+    let saved = ok(&s, "work_annotate", input.clone());
+    assert_eq!(saved["next_stage"], "completed");
+    let replay = ok(&service(&f, true), "work_annotate", input.clone());
+    assert_eq!(saved, replay);
+    let mut changed = input.clone();
+    changed["payload"]["caption"] = json!("Another caption.");
+    assert_eq!(
+        s.execute("work_annotate", changed).metadata["code"],
+        "idempotency_conflict"
+    );
+    let mut forged = input;
+    forged["lease_token"] = json!("not-the-lease");
+    assert_eq!(
+        s.execute("work_annotate", forged).metadata["code"],
+        "lease_lost"
+    );
+    assert_eq!(
+        ok(&s, "job_status", json!({"job_id":job}))["state"],
+        "completed"
+    );
+    let logs: i64 = f
+        .repo
+        .connection
+        .query_row(
+            "SELECT count(*) FROM audit_log WHERE action='agent_annotation'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(logs, 1);
+    assert!(
+        f.repo
+            .list_workflows()
+            .unwrap()
+            .iter()
+            .find(|j| j.id == job)
+            .unwrap()
+            .dismissed
+    );
+}
+
+#[test]
+fn pause_fences_old_lease_and_cancel_cannot_be_revived() {
+    let (f, _, m) = fixture();
+    let (s, item, job) = start_work(&f, m.id, "annotate");
+    ok(&s, "job_control", json!({"job_id":job,"action":"pause"}));
+    assert_eq!(
+        s.execute("work_view", leased_input(&item, "view", json!({})))
+            .metadata["code"],
+        "lease_lost"
+    );
+    ok(&s, "job_control", json!({"job_id":job,"action":"resume"}));
+    let new = ok(&s, "work_claim", json!({"owner":"new","job_id":job}))["items"][0].clone();
+    assert!(new["generation"].as_i64() > item["generation"].as_i64());
+    ok(&s, "job_control", json!({"job_id":job,"action":"cancel"}));
+    assert!(
+        s.execute("job_control", json!({"job_id":job,"action":"resume"}))
+            .is_error
+    );
+    assert_eq!(
+        ok(&s, "job_status", json!({"job_id":job}))["state"],
+        "cancelled"
+    );
+}
+
+#[test]
+fn two_clients_cannot_claim_same_image_and_expiry_reissues_fenced_generation() {
+    let (f, _, m) = fixture();
+    let (s, item, job) = start_work(&f, m.id, "annotate");
+    assert!(
+        ok(&service(&f, true), "work_claim", json!({"owner":"second"}))["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    f.repo
+        .connection
+        .execute(
+            "UPDATE agent_work SET expires=1 WHERE id=?1",
+            [item["work_id"].as_i64().unwrap()],
+        )
+        .unwrap();
+    let next = ok(&s, "work_claim", json!({"owner":"second","job_id":job}))["items"][0].clone();
+    assert!(next["generation"].as_i64() > item["generation"].as_i64());
+    assert_eq!(
+        s.execute("work_view", leased_input(&item, "v", json!({})))
+            .metadata["code"],
+        "lease_lost"
+    );
+}
+
+#[test]
+fn task_plan_prevents_skipping_curation_or_overwriting_unselected_outputs() {
+    let (f, _, m) = fixture();
+    let (s, item, _) = start_work(&f, m.id, "curate");
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    let annotate = leased_input(
+        &item,
+        "a",
+        json!({"caption":"Blue.","reason":"Test","model":"test","require_final_assessment":false}),
+    );
+    assert_eq!(
+        s.execute("work_annotate", annotate).metadata["code"],
+        "wrong_stage"
+    );
+    let mut payload = serde_json::to_value(assessment(&m, Decision::Keep)).unwrap();
+    payload.as_object_mut().unwrap().remove("media_id");
+    payload.as_object_mut().unwrap().remove("expected_sha256");
+    ok(&s, "work_assess", leased_input(&item, "assess", payload));
+    let bad = leased_input(
+        &item,
+        "bad",
+        json!({"tags":["1girl"],"reason":"Test","model":"test"}),
+    );
+    assert_eq!(
+        s.execute("work_annotate", bad).metadata["code"],
+        "output_not_requested"
+    );
+    // A validation failure is correctable, not an ambiguous committed write.
+    ok(
+        &s,
+        "work_annotate",
+        leased_input(
+            &item,
+            "good",
+            json!({"caption":"A blue square.","reason":"Test","model":"test"}),
+        ),
+    );
+}
+
+#[test]
+fn regions_can_be_saved_without_rewriting_text_and_readonly_rejects_job_submission() {
+    let (f, settings, m) = fixture();
+    let s = service(&f, true);
+    let job = ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"regions","media_ids":[m.id],"mode":"annotate","outputs":["regions"]}),
+    )["job_id"]
+        .clone();
+    ok(&s, "jobs_tick", json!({}));
+    let item = ok(&s, "work_claim", json!({"owner":"test","job_id":job}))["items"][0].clone();
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    let before = fs::read(m.path.with_extension("txt")).ok();
+    let result = ok(
+        &s,
+        "work_annotate",
+        leased_input(
+            &item,
+            "regions",
+            json!({"text_regions":[],"visual_regions":[],"special_elements":[],"reason":"No visible lettering or insets","model":"test"}),
+        ),
+    );
+    assert_eq!(result["next_stage"], "completed");
+    assert_eq!(before, fs::read(m.path.with_extension("txt")).ok());
+    let readonly = service(&f, false);
+    assert_eq!(
+        readonly.execute("job_submit", json!({})).metadata["code"],
+        "read_only"
+    );
+    assert!(tools::media(&f.repo, &settings, m.id, None).is_ok());
+}
+
+#[test]
+fn full_curation_crop_has_native_pixels_matching_bucket_and_requires_reinspection() {
+    let (f, _, m) = fixture();
+    let (s, mut item, job) = start_work(&f, m.id, "curate");
+    ok(&s, "work_view", leased_input(&item, "view", json!({})));
+    let mut assessment = serde_json::to_value(assessment(&m, Decision::Reject)).unwrap();
+    assessment.as_object_mut().unwrap().remove("media_id");
+    assessment
+        .as_object_mut()
+        .unwrap()
+        .remove("expected_sha256");
+    assessment["crop_candidate"] = json!(true);
+    let preliminary = ok(
+        &s,
+        "work_assess",
+        leased_input(&item, "triage", assessment.clone()),
+    );
+    assert_eq!(preliminary["next_stage"], "crop");
+    assert_eq!(preliminary["decision"], "defer");
+    let crop = json!({"bbox_1000_xyxy":[20,20,980,980],"reason":"Keep subject; trim empty margins","model":"test"});
+    let preview = ok(
+        &s,
+        "work_preview",
+        leased_input(&item, "preview", crop.clone()),
+    );
+    assert_eq!(preview["next"]["operation"], "work_apply");
+    drop(s);
+    let s = service(&f, true);
+    let saved = ok(&s, "work_apply", leased_input(&item, "crop", crop));
+    assert_eq!(saved["next"]["operation"], "work_view");
+    let current = f.repo.media_by_id(m.id).unwrap().unwrap();
+    assert_ne!(current.sha256, m.sha256);
+    assert_eq!(current.current_extension(), "png");
+    let actual = bdm_domain::training::plan(
+        current.dimensions().0,
+        current.dimensions().1,
+        saved["bucket_plan"]["resolution"].as_u64().unwrap() as u32,
+    )
+    .unwrap();
+    assert_eq!(actual.resized, actual.output);
+    assert_eq!(current.dimensions(), (768, 768));
+    item["expected_sha256"] = json!(current.sha256);
+    assessment["crop_candidate"] = json!(false);
+    assessment["crop_outcome"] = json!("applied");
+    assessment["decision"] = json!("keep");
+    assert_eq!(
+        s.execute(
+            "work_assess",
+            leased_input(&item, "final", assessment.clone())
+        )
+        .metadata["code"],
+        "inspection_required"
+    );
+    ok(&s, "work_view", leased_input(&item, "new-view", json!({})));
+    ok(&s, "work_assess", leased_input(&item, "final", assessment));
+    ok(
+        &s,
+        "work_annotate",
+        leased_input(
+            &item,
+            "caption",
+            json!({"caption":"A blue square with uniform color.","reason":"Final current crop inspected","model":"test"}),
+        ),
+    );
+    assert_eq!(
+        ok(&s, "job_status", json!({"job_id":job}))["state"],
+        "completed"
+    );
+}
+
+#[test]
+fn text_changes_after_planning_are_never_overwritten_even_with_authorized_overwrite() {
+    let (f, _, m) = fixture();
+    let s = service(&f, true);
+    ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"protect","mode":"annotate","media_ids":[m.id],"outputs":["caption"],"overwrite":true}),
+    );
+    ok(&s, "jobs_tick", json!({}));
+    let item = ok(&s, "work_claim", json!({"owner":"test"}))["items"][0].clone();
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    fs::write(m.path.with_extension("txt"), "New manual edit.").unwrap();
+    let response = s.execute(
+        "work_annotate",
+        leased_input(
+            &item,
+            "a",
+            json!({"caption":"Old model suggestion.","reason":"Test","model":"test"}),
+        ),
+    );
+    assert_eq!(response.metadata["code"], "annotation_conflict");
+    assert_eq!(
+        fs::read_to_string(m.path.with_extension("txt")).unwrap(),
+        "New manual edit."
+    );
+}
+
+#[test]
+fn submission_replay_keeps_original_scope_after_job_changes_and_validation_receipt_stays_error() {
+    let (f, _, m) = fixture();
+    let (s, item, _) = start_work(&f, m.id, "annotate");
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    let invalid = leased_input(
+        &item,
+        "bad",
+        json!({"caption":"","reason":"Test","model":"test"}),
+    );
+    assert!(s.execute("work_annotate", invalid.clone()).is_error);
+    assert!(s.execute("work_annotate", invalid).is_error);
+    ok(
+        &s,
+        "work_annotate",
+        leased_input(
+            &item,
+            "save",
+            json!({"caption":"A blue square.","reason":"Test","model":"test"}),
+        ),
+    );
+    assert_eq!(
+        ok(
+            &s,
+            "job_submit",
+            json!({"request_id":"job-1","media_ids":[m.id],"mode":"annotate","outputs":["caption"]})
+        )["replayed"],
+        true
+    );
+}
+
+#[test]
+fn queued_download_reuses_existing_collection_and_is_idempotent_without_network() {
+    let (f, _, _) = fixture();
+    let s = service(&f, true);
+    let input = json!({"request_id":"download-1","collection_id":f.collection,"source":"gelbooru","minimum_short_side":800});
+    let submitted = ok(&s, "download_submit", input.clone());
+    assert_eq!(
+        ok(&s, "download_submit", input)["download_id"],
+        submitted["download_id"]
+    );
+    let id = submitted["download_id"].as_i64().unwrap();
+    ok(
+        &s,
+        "download_control",
+        json!({"download_id":id,"action":"pause"}),
+    );
+    assert_eq!(
+        ok(&s, "download_status", json!({"download_id":id}))["state"],
+        "paused"
+    );
+    ok(
+        &s,
+        "download_control",
+        json!({"download_id":id,"action":"resume"}),
+    );
+    assert_eq!(
+        ok(&s, "download_status", json!({"download_id":id}))["state"],
+        "queued"
+    );
+    assert_eq!(f.repo.list_jobs().unwrap().len(), 1);
+}
+
+#[test]
+fn complete_annotation_is_skipped_and_job_status_pages_keep_full_counts() {
+    let (f, _, m) = fixture();
+    let (s, item, _) = start_work(&f, m.id, "annotate");
+    ok(&s, "work_view", leased_input(&item, "v", json!({})));
+    ok(
+        &s,
+        "work_annotate",
+        leased_input(
+            &item,
+            "save",
+            json!({"caption":"A flat blue square.","reason":"Test","model":"test"}),
+        ),
+    );
+    let submitted = ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"skip","media_ids":[m.id],"mode":"annotate","outputs":["caption"]}),
+    );
+    ok(&s, "jobs_tick", json!({}));
+    let state = ok(&s, "job_status", json!({"job_id":submitted["job_id"]}));
+    assert_eq!(state["counts"]["completed"], 1);
+    assert!(ok(
+        &s,
+        "work_claim",
+        json!({"owner":"test","job_id":submitted["job_id"]})
+    )["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    // Synthetic catalog rows exercise pagination without downloading or writing
+    // hundreds of image copies. Only list/status operations use these rows.
+    let mut ids = vec![m.id];
+    for index in 0..129 {
+        f.repo
+            .connection
+            .execute(
+                "INSERT INTO media(md5,metadata,keep) SELECT ?2,metadata,0 FROM media WHERE id=?1",
+                rusqlite::params![m.id, format!("synthetic-page-{index}")],
+            )
+            .unwrap();
+        let id = f.repo.connection.last_insert_rowid();
+        f.repo
+            .connection
+            .execute(
+                "UPDATE media SET metadata=json_set(metadata,'$.id',?1) WHERE id=?1",
+                [id],
+            )
+            .unwrap();
+        ids.push(id);
+    }
+    let submitted = ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"pages","media_ids":ids,"mode":"bucket"}),
+    );
+    let mut after = 0;
+    let mut seen = BTreeSet::new();
+    loop {
+        let page = ok(
+            &s,
+            "job_status",
+            json!({"job_id":submitted["job_id"],"after_id":after,"limit":17}),
+        );
+        assert_eq!(page["counts"]["local"], 130);
+        assert!(page["plan"]["items"].is_null());
+        let rows = page["items"].as_array().unwrap();
+        assert!(rows.len() <= 17);
+        for row in rows {
+            assert!(seen.insert(row["work_id"].as_i64().unwrap()));
+        }
+        let Some(next) = page["next_after_id"].as_i64() else {
+            break;
+        };
+        after = next;
+    }
+    assert_eq!(seen.len(), 130);
+}
+
+#[test]
+fn export_job_runs_one_batch_and_reports_ineligible_images_as_deferred() {
+    let (f, _, m) = fixture();
+    let s = service(&f, true);
+    let destination = f.directory.path().join("flat-export");
+    let submitted = ok(
+        &s,
+        "job_submit",
+        json!({"request_id":"export","mode":"export","media_ids":[m.id],"destination":destination,"text_kind":"caption"}),
+    );
+    ok(&s, "jobs_tick", json!({}));
+    let state = ok(&s, "job_status", json!({"job_id":submitted["job_id"]}));
+    assert_eq!(state["counts"]["deferred"], 1);
+    assert_eq!(state["items"][0]["result"]["exported"], false);
+    assert_eq!(
+        f.repo
+            .list_workflows()
+            .unwrap()
+            .iter()
+            .filter(|j| j.kind == "export")
+            .count(),
+        1
+    );
+    assert!(!destination.join(format!("media_{}.png", m.id)).exists());
 }
 fn view(repo: &mut SqliteCatalog, settings: &Settings, id: i64) {
     tools::view(
@@ -331,7 +816,11 @@ fn read_only_and_library_boundary_are_enforced_and_mcp_tools_are_discoverable() 
         false,
     )
     .unwrap();
-    assert_eq!(server.tool_router.list_all().len(), 10);
+    assert!(server
+        .tool_router
+        .list_all()
+        .iter()
+        .any(|t| t.name == "bdm_agent"));
 }
 
 #[test]
@@ -351,9 +840,8 @@ fn media_mutation_lock_is_an_os_file_lock_not_only_a_process_mutex() {
 
 #[test]
 fn collection_and_image_pages_are_bounded_and_can_be_traversed_without_dropped_ids() {
-    fn text(result: rmcp::model::CallToolResult) -> serde_json::Value {
-        let value = serde_json::to_value(result).unwrap();
-        serde_json::from_str(value["content"][0]["text"].as_str().unwrap()).unwrap()
+    fn text(result: ServiceReply) -> serde_json::Value {
+        result.metadata
     }
     let (mut f, settings, m) = fixture();
     let mut after = 0;
@@ -386,8 +874,8 @@ fn collection_and_image_pages_are_bounded_and_can_be_traversed_without_dropped_i
     assert_eq!(page["next_after_id"], m.id);
 }
 
-fn payload(result: &rmcp::model::CallToolResult) -> serde_json::Value {
-    serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap()
+fn payload(result: &ServiceReply) -> serde_json::Value {
+    result.metadata.clone()
 }
 
 fn annotation_args(m: &bdm_domain::ingest::StoredMedia) -> AnnotationArgs {
@@ -521,7 +1009,7 @@ fn view_supplies_usable_vocabulary_and_crop_errors_include_a_recovery_step() {
     assert!(response["next"].is_object());
     let error = tools::crop(&mut f.repo, &settings, crop_args(&m, true)).unwrap_err();
     let error = tools::error_result(error);
-    assert!(error.is_error.unwrap_or(false));
+    assert!(error.is_error);
     assert_eq!(payload(&error)["code"], "crop_preview_required");
     assert_eq!(payload(&error)["next"]["tool"], "bdm_crop");
     assert_eq!(payload(&error)["next"]["args"]["apply"], false);

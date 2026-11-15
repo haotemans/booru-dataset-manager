@@ -11,7 +11,9 @@ description: 使用 booru_dataset_manager MCP 为指定收藏生成、修正和�
 
 ## 最短调用路径
 
-1. 会话开始读取一次 `bdm_policy`。本 Skill 使用 `protocol=bdm-agent-v2`；旧版没有可用词表和保存回读时，报告需更新 MCP，不能宣称旧后端格式问题已解决。`model` 填实际客户端标识，不能确认填 `unknown`。
+长批次、跨会话续跑或联合筛选使用 [durable-work.md](references/durable-work.md) 的 v3 任务入口。服务端决定阶段、输出范围和覆盖策略，跟随 `next.operation`；不混用独立写入工具绕过任务租约。少量独立修正仍可走下面的两次调用路径。
+
+1. 会话开始读取一次 `bdm_policy`。当前任务协议是 `bdm-agent-v3`；v2 可用于已有独立打标路径。需要任务续跑时检查 `jobs`／`work_leases` 能力；旧版没有词表和保存回读时报告需更新，不能宣称旧后端格式问题已解决。`model` 填实际客户端标识，不能确认填 `unknown`。
 2. 用 `bdm_collections` 找到目标，`bdm_list_media(collection=返回的tag)` 分页，沿用 `next_after_id`。不反复查询收藏；正常续跑跳过所需标注已完成的图，修正任务仅重做指定项。
 3. 每张先 `bdm_view_image(media_id, original=false)` 看完整当前图，复用返回的 SHA、`tag_vocabulary` 和现有 `annotation_details`。同一 SHA 已看过完整图可复用本会话视觉依据；小字可疑才额外看局部 tile，不机械地给每张图切四角。
 4. 用户同时要求自然语言和标签时，用一次 `bdm_save_annotation` 一同提交。无裁剪、无可疑小字的图通常共两次调用。按返回的 `next` 在当前阶段内继续，不额外扩展任务。

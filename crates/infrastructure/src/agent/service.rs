@@ -1,0 +1,197 @@
+//! Transport-independent operations used by the headless CLI and MCP adapter.
+use super::{params::*, tools, Settings, POLICY};
+use crate::catalog::SqliteCatalog;
+use bdm_ports::IngestError;
+use serde_json::{json, Value};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+#[derive(Debug)]
+pub struct ServiceReply {
+    pub metadata: Value,
+    pub image_png: Option<Vec<u8>>,
+    pub is_error: bool,
+}
+impl ServiceReply {
+    pub fn success(metadata: Value) -> Self {
+        Self {
+            metadata,
+            image_png: None,
+            is_error: false,
+        }
+    }
+    pub fn error(metadata: Value) -> Self {
+        Self {
+            metadata,
+            image_png: None,
+            is_error: true,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AgentService {
+    pub(super) catalog: PathBuf,
+    pub(super) settings: Arc<Settings>,
+}
+impl AgentService {
+    pub(super) fn runtime_probe(&self) -> Value {
+        use std::io::Read;
+        use std::process::Stdio;
+        let mut child=match crate::visual::python_command().args(["-c","import importlib.util,json; print(json.dumps({name:importlib.util.find_spec(name) is not None for name in ['torch','timm','PIL','numpy']}))"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn(){Ok(c)=>c,Err(_)=>return json!({"python_ready":false,"reason":"unavailable"})};
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let mut text = String::new();
+                    if let Some(stdout) = child.stdout.take() {
+                        let _ = stdout.take(4096).read_to_string(&mut text);
+                    }
+                    return json!({"python_ready":status.success(),"modules":serde_json::from_str::<Value>(&text).unwrap_or(Value::Null),"model_loaded":false});
+                }
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(25))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return json!({"python_ready":false,"reason":"timeout_or_exit"});
+                }
+            }
+        }
+    }
+    pub fn open(
+        catalog: &Path,
+        project_root: &Path,
+        library_root: &Path,
+        writes: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if !catalog.is_absolute()
+            || !project_root.is_absolute()
+            || !library_root.is_absolute()
+            || !catalog.is_file()
+        {
+            return Err("Existing catalog and absolute project/library paths required".into());
+        }
+        let repo = SqliteCatalog::connect_existing(catalog, !writes)?;
+        if writes {
+            repo.connection.execute_batch(super::jobs::SCHEMA)?;
+            repo.connection.execute_batch(super::downloads::SCHEMA)?;
+            repo.connection.execute_batch("CREATE INDEX IF NOT EXISTS collection_tag_page ON collections(tag,id); CREATE INDEX IF NOT EXISTS media_collections_page ON collection_media(media_id,collection_id);")?;
+        }
+        Ok(Self {
+            catalog: catalog.canonicalize()?,
+            settings: Arc::new(Settings {
+                project_root: project_root.canonicalize()?,
+                library_root: library_root.canonicalize()?,
+                writes,
+                permit: None,
+                seen: Default::default(),
+                previews: Default::default(),
+            }),
+        })
+    }
+    pub(super) fn connection(&self, read_only: bool) -> Result<SqliteCatalog, IngestError> {
+        SqliteCatalog::connect_existing(&self.catalog, read_only || !self.settings.writes)
+            .map_err(|_| IngestError::Storage)
+    }
+    pub fn policy(&self) -> ServiceReply {
+        ServiceReply::success(
+            json!({"protocol":"bdm-agent-v3","instructions":POLICY,"writes_enabled":self.settings.writes,
+        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging"],
+        "image_retention":{"original":1,"current":1,"thumbnail":1},"next":{"action":"resolve_scope_then_submit_or_inspect"}}),
+        )
+    }
+    pub fn execute(&self, operation: &str, input: Value) -> ServiceReply {
+        match self.try_execute(operation, input.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                let mut reply = tools::error_result(e);
+                if operation.starts_with("work_") {
+                    reply.metadata["next"]["tool"] = json!("bdm_agent");
+                    reply.metadata["next"]["operation"] = json!(operation);
+                    reply.metadata["next"]["work_id"] = input["work_id"].clone();
+                }
+                reply
+            }
+        }
+    }
+    fn try_execute(&self, operation: &str, input: Value) -> Result<ServiceReply, IngestError> {
+        macro_rules! args {($t:ty)=>{serde_json::from_value::<$t>(input.clone()).map_err(|e|IngestError::StorageDetails(json!({"code":"invalid_arguments","message":e.to_string(),"next":{"action":"check_schema"}}).to_string()))?};}
+        let read_only = matches!(
+            operation,
+            "collections"
+                | "list"
+                | "view"
+                | "bucket_plan"
+                | "doctor"
+                | "status"
+                | "jobs_list"
+                | "job_status"
+                | "job_plan"
+                | "policy"
+                | "download_status"
+                | "describe"
+        );
+        let mut repo = self.connection(read_only)?;
+        let settings = &self.settings;
+        match operation {
+            "describe" => {
+                let name = input["operation"].as_str().unwrap_or("");
+                let mut schema=match name.trim_start_matches("work_") {
+                    "view"=>serde_json::to_value(rmcp::schemars::schema_for!(ViewArgs)),
+                    "preview"|"apply"|"crop"=>serde_json::to_value(rmcp::schemars::schema_for!(CropArgs)),
+                    "annotate"=>serde_json::to_value(rmcp::schemars::schema_for!(AnnotationArgs)),
+                    "assess"=>serde_json::to_value(rmcp::schemars::schema_for!(AssessArgs)),
+                    _=>return Ok(ServiceReply::success(json!({"operation":name,"hint":"See policy and docs/agent-control-plane.md for job and download envelopes."}))),
+                }.map_err(|_|IngestError::Storage)?;
+                if name.starts_with("work_") {
+                    for key in [
+                        "media_id",
+                        "expected_sha256",
+                        "overwrite",
+                        "require_final_assessment",
+                        "apply",
+                    ] {
+                        if let Some(props) = schema["properties"].as_object_mut() {
+                            props.remove(key);
+                        }
+                        if let Some(required) = schema["required"].as_array_mut() {
+                            required.retain(|v| v != key);
+                        }
+                    }
+                }
+                Ok(ServiceReply::success(
+                    json!({"operation":name,"payload_schema":schema,"work_envelope":{"required":["work_id","lease_token","generation"],"writes_also_require":["request_id","expected_sha256","payload"]},"server_owned":["media_id","overwrite","require_final_assessment","apply"]}),
+                ))
+            }
+            "policy" => Ok(self.policy()),
+            "collections" => tools::collections(&mut repo, settings, args!(ListArgs)),
+            "list" => tools::list(&mut repo, settings, args!(ListArgs)),
+            "view" => tools::view(&mut repo, settings, args!(ViewArgs)),
+            "crop" => tools::crop(&mut repo, settings, args!(CropArgs)),
+            "restore" => tools::restore(&mut repo, settings, args!(RestoreArgs)),
+            "annotate" => tools::annotate(&mut repo, settings, args!(AnnotationArgs)),
+            "assess" => tools::assess(&mut repo, settings, args!(AssessArgs)),
+            "scan" => tools::scan(&mut repo, settings, args!(ScanArgs)),
+            "pair" => tools::pair(&mut repo, settings, args!(PairArgs)),
+            "download_submit" | "download_control" | "download_status" => {
+                super::downloads::dispatch(self, &mut repo, operation, input)
+            }
+            "bucket_plan" => {
+                let id = input["media_id"]
+                    .as_i64()
+                    .ok_or(IngestError::InvalidMedia)?;
+                let m = repo.media_by_id(id)?.ok_or(IngestError::InvalidMedia)?;
+                let choices =
+                    bdm_domain::training::bucket_choices(m.dimensions().0, m.dimensions().1);
+                Ok(ServiceReply::success(
+                    json!({"media_id":id,"sha256":m.sha256,"choices":choices,"native_pixels_unchanged":true,"next":{"tool":"bdm_view_image","hint":"Planning is geometry only; inspect composition before selecting a crop."}}),
+                ))
+            }
+            _ => super::jobs::dispatch(self, &mut repo, operation, input),
+        }
+    }
+}

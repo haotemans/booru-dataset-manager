@@ -1,10 +1,9 @@
+use super::service::ServiceReply;
 use super::{params::*, state, Settings};
 use crate::{ai, catalog::SqliteCatalog, editing, ingest::storage};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use bdm_domain::{editing::CropRect, ingest::StoredMedia};
-use bdm_ports::{CollectionRepository, IngestError};
+use bdm_ports::IngestError;
 use image::{DynamicImage, GenericImageView, ImageFormat};
-use rmcp::model::{CallToolResult, ContentBlock};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::Digest;
@@ -18,20 +17,21 @@ use std::{
 fn fail(message: &str) -> IngestError {
     IngestError::StorageDetails(message.into())
 }
-pub(super) fn result(value: Value) -> CallToolResult {
-    CallToolResult::success(vec![ContentBlock::text(value.to_string())])
+pub(super) fn result(value: Value) -> ServiceReply {
+    ServiceReply::success(value)
 }
 fn guidance_error(code: &str, message: &str, next: Value) -> IngestError {
     fail(&json!({"status":"error","code":code,"message":message,"next":next}).to_string())
 }
-pub(super) fn error_result(error: IngestError) -> CallToolResult {
-    let value = match &error {
+pub(super) fn error_result(error: IngestError) -> ServiceReply {
+    let mut value = match &error {
         IngestError::StorageDetails(details) => serde_json::from_str::<Value>(details)
             .ok().filter(|v| v["code"].is_string()),
         _ => None,
     }.unwrap_or_else(|| json!({"status":"error","code":"tool_failed","message":error.to_string(),
         "next":{"action":"correct_request_or_report","hint":"Check tool schema and the error. Do not repeat unchanged inputs or start another workflow."}}));
-    CallToolResult::error(vec![ContentBlock::text(value.to_string())])
+    value["status"] = json!("error");
+    ServiceReply::error(value)
 }
 fn writes(settings: &Settings) -> Result<(), IngestError> {
     if settings.writes {
@@ -82,7 +82,7 @@ fn checked_path(path: &Path, settings: &Settings) -> Result<PathBuf, IngestError
     }
     Ok(path)
 }
-fn media(
+pub(super) fn media(
     repo: &SqliteCatalog,
     settings: &Settings,
     id: i64,
@@ -96,6 +96,33 @@ fn media(
         )
     })?;
     checked_path(&m.path, settings)?;
+    if expected.is_some() {
+        let exists: bool = storage(repo.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='agent_work')",
+            [],
+            |r| r.get(0),
+        ))?;
+        if exists {
+            let active:Option<(i64,String,i64)>=storage(repo.connection.query_row("SELECT id,lease,generation FROM agent_work WHERE media_id=?1 AND lease IS NOT NULL AND expires>?2",params![id,super::jobs::now()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional())?;
+            if active.is_some() && active != settings.permit {
+                return Err(guidance_error(
+                    "media_leased",
+                    "This image is owned by an active work lease; submit through that work item.",
+                    json!({"operation":"work_claim","hint":"Do not bypass the task plan with standalone mutation tools."}),
+                ));
+            }
+            if let Some((work_id, _, _)) = &settings.permit {
+                let revision: String = storage(repo.connection.query_row(
+                    "SELECT revision FROM agent_work WHERE id=?1",
+                    [work_id],
+                    |r| r.get(0),
+                ))?;
+                if revision != super::jobs::annotation_revision(repo, &m)? {
+                    return Err(guidance_error("annotation_conflict","Annotation or sidecar changed after planning; preserve the newer text and inspect it before submitting a new plan.",json!({"action":"replan_after_review"})));
+                }
+            }
+        }
+    }
     if expected.is_some_and(|sha| sha != m.sha256) || editing::hash(&m.path)? != m.sha256 {
         return Err(guidance_error(
             "stale_image",
@@ -147,7 +174,10 @@ fn artifacts(
             .and_then(|rows| rows.collect()),
     )
 }
-fn annotation_details(repo: &SqliteCatalog, id: i64) -> Result<ai::AnnotationDetails, IngestError> {
+pub(super) fn annotation_details(
+    repo: &SqliteCatalog,
+    id: i64,
+) -> Result<ai::AnnotationDetails, IngestError> {
     let raw: Option<String> = storage(
         repo.connection
             .query_row(
@@ -195,7 +225,7 @@ fn info(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
 fn review_summary(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
     Ok(repo.agent_review_value(m.id)?.map(|r|json!({"decision":r["decision"],"current":r["image_sha256"]==m.sha256,"stage":r["report"]["stage"],"crop_candidate":r["report"]["crop_candidate"],"requires_final_assessment":r["report"]["stage"]=="preliminary","aesthetic":r["report"]["aesthetic"],"training_suitability":r["report"]["training_suitability"],"reason":r["report"]["reason"].as_str().unwrap_or("").chars().take(160).collect::<String>()})).unwrap_or(Value::Null))
 }
-fn page(mut rows: Vec<Value>, field: &str) -> CallToolResult {
+fn page(mut rows: Vec<Value>, field: &str) -> ServiceReply {
     while rows.len() > 1 && serde_json::to_vec(&rows).is_ok_and(|b| b.len() > 7800) {
         rows.pop();
     }
@@ -209,17 +239,18 @@ fn page(mut rows: Vec<Value>, field: &str) -> CallToolResult {
     };
     result(json!({(field):rows,"next_after_id":next,"next":action}))
 }
-fn picture(image: DynamicImage, mut data: Value) -> Result<CallToolResult, IngestError> {
+fn picture(image: DynamicImage, mut data: Value) -> Result<ServiceReply, IngestError> {
     let native = image.dimensions();
     let display = image.thumbnail(1024, 1024);
     data["native_view_dimensions"] = json!(native);
     data["display_dimensions"] = json!(display.dimensions());
     let mut bytes = std::io::Cursor::new(Vec::new());
     storage(display.write_to(&mut bytes, ImageFormat::Png))?;
-    Ok(CallToolResult::success(vec![
-        ContentBlock::text(data.to_string()),
-        ContentBlock::image(STANDARD.encode(bytes.into_inner()), "image/png"),
-    ]))
+    Ok(ServiceReply {
+        metadata: data,
+        image_png: Some(bytes.into_inner()),
+        is_error: false,
+    })
 }
 fn rect(bbox: [u32; 4], dims: (u32, u32)) -> Result<CropRect, IngestError> {
     let [x1, y1, x2, y2] = bbox;
@@ -250,61 +281,53 @@ pub(super) fn collections(
     repo: &mut SqliteCatalog,
     _: &Settings,
     args: ListArgs,
-) -> Result<CallToolResult, IngestError> {
-    let media = repo.list_media()?;
-    let mut collections = repo.list().map_err(|_| IngestError::Storage)?;
-    collections.sort_by_key(|c| c.id);
+) -> Result<ServiceReply, IngestError> {
     let needle = args.collection.unwrap_or_default().to_lowercase();
-    let rows = collections
-        .into_iter()
-        .filter(|c| c.id > args.after_id && c.name.to_lowercase().contains(&needle))
-        .take(args.limit.unwrap_or(32).clamp(1, 64))
-        .map(|c| {
-            let count = media
-                .iter()
-                .filter(|m| m.collections.contains(&c.id))
-                .count();
-            let kind = match c.kind {
-                bdm_domain::catalog::CollectionKind::Artist => "artist",
-                bdm_domain::catalog::CollectionKind::Character => "character",
-                bdm_domain::catalog::CollectionKind::Query => "query",
-            };
-            json!({"id":c.id,"tag":c.name,"kind":kind,"provider":c.provider,"images":count})
-        })
-        .collect::<Vec<_>>();
+    let mut query=storage(repo.connection.prepare("SELECT c.id,c.tag,c.category,c.provider,(SELECT count(*) FROM collection_media cm WHERE cm.collection_id=c.id) FROM collections c WHERE c.id>?1 AND instr(lower(c.tag),?2)>0 ORDER BY c.id LIMIT ?3"))?;
+    let rows=storage(query.query_map(params![args.after_id,needle,args.limit.unwrap_or(32).clamp(1,64)],|r| {
+        let category:i64=r.get(2)?;
+        Ok(json!({"id":r.get::<_,i64>(0)?,"tag":r.get::<_,String>(1)?,"kind":match category{0=>"query",1=>"artist",4=>"character",_=>"unknown"},"provider":r.get::<_,String>(3)?,"images":r.get::<_,i64>(4)?}))
+    }).and_then(|rows|rows.collect::<rusqlite::Result<Vec<_>>>()))?;
     Ok(page(rows, "collections"))
 }
 pub(super) fn list(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: ListArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     let limit = args.limit.unwrap_or(12).clamp(1, 24);
-    let collection = if let Some(tag) = args.collection {
-        Some(
-            repo.list()
-                .map_err(|_| IngestError::Storage)?
-                .into_iter()
-                .filter(|c| c.name == tag)
-                .map(|c| c.id)
-                .collect::<BTreeSet<_>>(),
-        )
+    let ids: Vec<i64> = if let Some(tag) = args.collection {
+        let mut q=storage(repo.connection.prepare("SELECT DISTINCT cm.media_id FROM collections c JOIN collection_media cm ON cm.collection_id=c.id WHERE c.tag=?1 AND cm.media_id>?2 ORDER BY cm.media_id LIMIT ?3"))?;
+        storage(
+            q.query_map(params![tag, args.after_id, limit], |r| r.get(0))
+                .and_then(|r| r.collect()),
+        )?
     } else {
-        None
+        let mut q = storage(
+            repo.connection
+                .prepare("SELECT id FROM media WHERE id>?1 ORDER BY id LIMIT ?2"),
+        )?;
+        storage(
+            q.query_map(params![args.after_id, limit], |r| r.get(0))
+                .and_then(|r| r.collect()),
+        )?
     };
-    let all = repo.list_media()?;
-    let artifacts = repo.list_artifacts()?;
-    let rows=all.iter().filter(|m|m.id>args.after_id && collection.as_ref().is_none_or(|ids|!ids.is_disjoint(&m.collections))).take(limit).map(|m|{
-        let path_ok=checked_path(&m.path,settings).is_ok();
-        Ok(json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"keep":m.keep,"artist":m.post.tag_string_artist,"in_configured_library":path_ok,"caption_complete":artifacts.iter().any(|a|a.media_id==m.id&&a.kind=="caption"&&a.state=="complete"&&!a.content.is_empty()),"tags_generated":artifacts.iter().any(|a|a.media_id==m.id&&a.kind=="tags"&&a.is_generated_output()),"agent_review":review_summary(repo,m)?}))
-    }).collect::<Result<Vec<_>,IngestError>>()?;
+    let mut rows = Vec::new();
+    for id in ids {
+        let Some(m) = repo.media_by_id(id)? else {
+            continue;
+        };
+        let existing = artifacts(repo, id)?;
+        rows.push(json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"keep":m.keep,"artist":m.post.tag_string_artist,"in_configured_library":checked_path(&m.path,settings).is_ok(),"caption_complete":existing.iter().any(|a|a.kind=="caption"&&a.state=="complete"&&!a.content.is_empty()),"tags_generated":existing.iter().any(|a|a.kind=="tags"&&a.is_generated_output()),"tags_complete":existing.iter().any(|a|a.kind=="tags"&&a.state=="complete"&&a.is_generated_output()),"agent_review":review_summary(repo,&m)?}));
+    }
     Ok(page(rows, "images"))
 }
+
 pub(super) fn view(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: ViewArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     let m = media(repo, settings, args.media_id, None)?;
     let path = if args.original {
         original(&m, settings)?
@@ -334,6 +357,12 @@ pub(super) fn view(
     });
     data["tile_bbox_1000_xyxy"] = json!(args.bbox_1000_xyxy);
     if !args.original && args.bbox_1000_xyxy.is_none() {
+        data["bucket_recommendation"] = json!(bdm_domain::training::best_bucket(
+            m.dimensions().0,
+            m.dimensions().1,
+            "original"
+        )
+        .ok());
         data["tag_vocabulary"] = tag_vocabulary(&m, &tag_rules(repo, &m)?);
         data["annotation_details"] =
             storage(serde_json::to_value(annotation_details(repo, m.id)?))?;
@@ -356,11 +385,31 @@ pub(super) fn crop(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: CropArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     provenance(&args.reason, &args.model)?;
     let m = media(repo, settings, args.media_id, Some(&args.expected_sha256))?;
     seen(settings, &m.sha256)?;
-    let selection = rect(args.bbox_1000_xyxy, m.dimensions())?;
+    let mut selection = rect(args.bbox_1000_xyxy, m.dimensions())?;
+    // Leased curation plans use the actual Kohya geometry. The exact native
+    // pixels removed by this adjustment are visible in the preview before apply.
+    let bucket = if settings.permit.is_some() {
+        let choice =
+            bdm_domain::training::best_bucket(selection.width, selection.height, "original")
+                .map_err(|message| {
+                    guidance_error(
+                        "bucket_unavailable",
+                        message,
+                        json!({"action":"adjust_crop"}),
+                    )
+                })?;
+        selection.x += choice.native_crop[0];
+        selection.y += choice.native_crop[1];
+        selection.width = choice.native_crop[2];
+        selection.height = choice.native_crop[3];
+        Some(choice)
+    } else {
+        None
+    };
     let key = (m.id, m.sha256.clone(), args.bbox_1000_xyxy);
     if args.apply {
         writes(settings)?;
@@ -395,7 +444,7 @@ pub(super) fn crop(
             .map_err(|_| IngestError::Storage)?
             .remove(&key);
         Ok(result(
-            json!({"saved":true,"media":info(repo,&saved)?,"next":{"tool":"bdm_view_image","args":{"media_id":m.id,"original":false},"hint":"Inspect the saved pixels; use the new hash before annotation."}}),
+            json!({"saved":true,"media":info(repo,&saved)?,"bucket_plan":bucket,"next":{"tool":"bdm_view_image","args":{"media_id":m.id,"original":false},"hint":"Inspect the saved pixels; use the new hash before annotation."}}),
         ))
     } else {
         settings
@@ -405,7 +454,7 @@ pub(super) fn crop(
             .insert(key);
         picture(
             storage(image::open(&preview.image))?,
-            json!({"saved":false,"media_id":m.id,"expected_sha256":m.sha256,"selection":selection,"training":preview.training,"bbox_1000_xyxy":args.bbox_1000_xyxy,
+            json!({"saved":false,"media_id":m.id,"expected_sha256":m.sha256,"selection":selection,"training":preview.training,"bucket_plan":bucket,"preview_sha256":editing::hash(&preview.image)?,"bbox_1000_xyxy":args.bbox_1000_xyxy,
                 "next":{"tool":"bdm_crop","args":{"media_id":m.id,"expected_sha256":m.sha256,"bbox_1000_xyxy":args.bbox_1000_xyxy,"apply":true},"hint":"Apply only if this preview improves composition; retain reason and model. Otherwise revise preview or keep unchanged."}}),
         )
     }
@@ -414,7 +463,7 @@ pub(super) fn restore(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: RestoreArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     writes(settings)?;
     provenance(&args.reason, &args.model)?;
     let m = media(repo, settings, args.media_id, Some(&args.expected_sha256))?;
@@ -445,7 +494,7 @@ pub(super) fn annotate(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: AnnotationArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     writes(settings)?;
     let source = provenance(&args.reason, &args.model)?;
     let lock = repo.media_lock.clone();
@@ -464,7 +513,16 @@ pub(super) fn annotate(
                 json!({"tool":"bdm_assess","args":{"media_id":m.id,"expected_sha256":m.sha256,"stage":"final"},"hint":"Resolve any pending crop first. Standalone annotation may omit require_final_assessment."})));
         }
     }
-    if args.caption.is_none() && args.tags.is_none() && args.review_reasons.is_none() {
+    let regions_only = args.caption.is_none()
+        && args.tags.is_none()
+        && (args.text_regions.is_some()
+            || args.visual_regions.is_some()
+            || args.special_elements.is_some());
+    if args.caption.is_none()
+        && args.tags.is_none()
+        && args.review_reasons.is_none()
+        && !regions_only
+    {
         return Err(guidance_error(
             "empty_annotation",
             "Supply caption and/or tags, or review_reasons for a review-only decision.",
@@ -630,7 +688,7 @@ pub(super) fn annotate(
         repo.write_artifact_locked(&m, kind, &content, &source, "complete", true)?;
         saved.push(kind);
     }
-    if !saved.is_empty() && details_requested {
+    if (!saved.is_empty() || regions_only) && details_requested {
         details.schema_version = "agent-regions-v1".into();
         details.image_sha256 = Some(m.sha256.clone());
         details.user_hint = Some(args.reason.clone());
@@ -655,7 +713,8 @@ pub(super) fn annotate(
             )?;
         }
     }
-    let details_saved = (!saved.is_empty() && details_requested) || args.review_reasons.is_some();
+    let details_saved =
+        ((!saved.is_empty() || regions_only) && details_requested) || args.review_reasons.is_some();
     if details_saved {
         repo.save_annotation_details(m.id, &details)?;
     }
@@ -712,7 +771,7 @@ pub(super) fn assess(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: AssessArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     writes(settings)?;
     provenance(&args.reason, &args.model)?;
     if [
@@ -829,7 +888,7 @@ pub(super) fn scan(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: ScanArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     writes(settings)?;
     let ids = args.media_ids.into_iter().collect::<BTreeSet<_>>();
     if ids.len() < 2
@@ -843,10 +902,8 @@ pub(super) fn scan(
     for id in &ids {
         media(repo, settings, *id, None)?;
     }
-    // Agent scans are analysis-only; serialize image mutations while features
-    // are being computed so their hashes cannot silently become stale.
-    let lock = repo.media_lock.clone();
-    let _guard = lock.lock().map_err(|_| IngestError::Storage)?;
+    // Analysis runs outside the media mutation lock. visual::run revalidates
+    // and commits under a short lock for each analyzed image.
     let mut job = repo.new_workflow("agent-dedup", ids.iter().copied().collect())?;
     job.dismissed = true;
     job.review_similarity = Some(args.similarity.unwrap_or(0.95));
@@ -877,7 +934,7 @@ pub(super) fn pair(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: PairArgs,
-) -> Result<CallToolResult, IngestError> {
+) -> Result<ServiceReply, IngestError> {
     writes(settings)?;
     provenance(&args.reason, &args.model)?;
     if args.first_id == args.second_id

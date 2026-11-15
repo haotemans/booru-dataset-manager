@@ -413,6 +413,31 @@ pub fn run(
                 job.deferred.push(id);
             }
             incomplete |= vector.is_none();
+            // Agent analysis may run concurrently with cropping. Hold the OS
+            // media lock only after inference, and refuse a stale feature write.
+            // Legacy GUI runs already hold their own mutation lock.
+            let lock = repo.media_lock.clone();
+            let _commit_guard = if job.kind == "agent-dedup" {
+                Some(lock.lock().map_err(|_| IngestError::Storage)?)
+            } else {
+                None
+            };
+            if job.kind == "agent-dedup"
+                && (repo
+                    .media_by_id(id)?
+                    .is_none_or(|current| current.sha256 != media.sha256)
+                    || crate::editing::hash(&media.path)? != media.sha256)
+            {
+                job.analysis_errors
+                    .entry(id)
+                    .or_default()
+                    .push("Image changed during inference; features were not saved".into());
+                job.deferred.push(id);
+                job.cursor += 1;
+                repo.save_workflow(job)?;
+                report(job);
+                continue;
+            }
             let keys = buckets(hash, vector.as_deref());
             // One bounded SQLite write transaction per image instead of a
             // separate durable transaction for every embedding/bucket insert.

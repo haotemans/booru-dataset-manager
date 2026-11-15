@@ -1,6 +1,16 @@
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
+/// Bounded control-plane operations. Business payloads use the same schemas as
+/// the standalone tools; lease credentials never belong inside payload.
+#[derive(Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OperationArgs {
+    pub operation: String,
+    #[serde(default)]
+    pub input: serde_json::Value,
+}
+
 #[derive(Clone, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ListArgs {

@@ -3,6 +3,110 @@ use serde::{Deserialize, Serialize};
 
 pub const RESOLUTIONS: [u32; 4] = [768, 1024, 1536, 2048];
 pub const STEP: u32 = 32;
+pub const RATIOS: [(&str, u32, u32); 17] = [
+    ("21:9", 21, 9),
+    ("2:1", 2, 1),
+    ("16:9", 16, 9),
+    ("16:10", 16, 10),
+    ("3:2", 3, 2),
+    ("7:5", 7, 5),
+    ("4:3", 4, 3),
+    ("5:4", 5, 4),
+    ("1:1", 1, 1),
+    ("4:5", 4, 5),
+    ("3:4", 3, 4),
+    ("5:7", 5, 7),
+    ("2:3", 2, 3),
+    ("10:16", 10, 16),
+    ("9:16", 9, 16),
+    ("1:2", 1, 2),
+    ("9:21", 9, 21),
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BucketChoice {
+    pub ratio: String,
+    /// Native-pixel candidate, centered within the supplied region. No resizing.
+    pub native_crop: [u32; 4],
+    pub resolution: u32,
+    pub training: TrainingCrop,
+    pub retained_fraction: f64,
+    pub training_resize_required: bool,
+    pub extra_training_crop: bool,
+}
+
+/// Use the actual no-upscale BucketManager geometry, not a tier label alone.
+/// The Agent chooses composition; this pure function never touches image files.
+pub fn best_bucket(width: u32, height: u32, ratio: &str) -> Result<BucketChoice, &'static str> {
+    let (w, h) = if ratio == "original" {
+        (width / STEP * STEP, height / STEP * STEP)
+    } else {
+        let (_, rw, rh) = RATIOS
+            .iter()
+            .find(|(name, _, _)| *name == ratio)
+            .ok_or("未知比例；请使用现有比例。")?;
+        if u64::from(width) * u64::from(*rh) > u64::from(height) * u64::from(*rw) {
+            (
+                (u64::from(height) * u64::from(*rw) / u64::from(*rh)) as u32 / STEP * STEP,
+                height / STEP * STEP,
+            )
+        } else {
+            (
+                width / STEP * STEP,
+                (u64::from(width) * u64::from(*rh) / u64::from(*rw)) as u32 / STEP * STEP,
+            )
+        }
+    };
+    if w.min(h) < 576 || u64::from(w) * u64::from(h) < 550_000 {
+        return Err("选区不足短边 576 px／0.55 MP，不会放大。");
+    }
+    let mut tiers = RESOLUTIONS;
+    let area = f64::from(w) * f64::from(h);
+    tiers.sort_by(|a, b| {
+        (area / f64::from(*a).powi(2))
+            .ln()
+            .abs()
+            .total_cmp(&(area / f64::from(*b).powi(2)).ln().abs())
+    });
+    for tier in tiers {
+        let mut best: Option<BucketChoice> = None;
+        for dx in 0..=16_u32.min((w - 576) / STEP) {
+            for dy in 0..=16_u32.min((h - 576) / STEP) {
+                let (cw, ch) = (w - dx * STEP, h - dy * STEP);
+                let Ok(training) = plan(cw, ch, tier) else {
+                    continue;
+                };
+                if training.resized != training.output {
+                    continue;
+                }
+                let fraction =
+                    f64::from(cw) * f64::from(ch) / (f64::from(width) * f64::from(height));
+                if best.as_ref().is_none_or(|b| fraction > b.retained_fraction) {
+                    best = Some(BucketChoice {
+                        ratio: ratio.into(),
+                        native_crop: [(width - cw) / 2, (height - ch) / 2, cw, ch],
+                        resolution: tier,
+                        training_resize_required: training.resized != [cw, ch],
+                        training,
+                        retained_fraction: fraction,
+                        extra_training_crop: false,
+                    });
+                }
+            }
+        }
+        if let Some(choice) = best {
+            return Ok(choice);
+        }
+    }
+    Err("当前选区未找到可复核的分桶方案；请调整现有比例或选区，不会自动缩放原像素图片。")
+}
+
+pub fn bucket_choices(width: u32, height: u32) -> Vec<BucketChoice> {
+    std::iter::once("original")
+        .chain(RATIOS.iter().map(|r| r.0))
+        .filter_map(|r| best_bucket(width, height, r).ok())
+        .collect()
+}
 
 /// Native crop: preserve every retained pixel and trim only for 32 alignment.
 /// Resolution is informational; explicit export variants use `plan` instead.
@@ -112,6 +216,49 @@ pub fn plan(width: u32, height: u32, resolution: u32) -> Result<TrainingCrop, &'
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn geometry_matches_outputs_from_local_sd_scripts() {
+        for line in include_str!("../tests/fixtures/kohya-no-upscale32.csv")
+            .lines()
+            .filter(|s| !s.starts_with('#') && !s.is_empty())
+        {
+            let v: Vec<u32> = line.split(',').map(|s| s.parse().unwrap()).collect();
+            let p = geometry(v[0], v[1], v[2]).unwrap();
+            assert_eq!(p.output, [v[3], v[4]], "{line}");
+            assert_eq!(p.resized, [v[5], v[6]], "{line}");
+        }
+    }
+    #[test]
+    fn recommended_native_crops_match_kohya_without_another_crop() {
+        for (w, h) in [
+            (800, 800),
+            (2160, 1509),
+            (2702, 4096),
+            (8507, 3902),
+            (9746, 5482),
+        ] {
+            let original = best_bucket(w, h, "original").unwrap();
+            assert!(original.retained_fraction > 0.7);
+            for choice in bucket_choices(w, h) {
+                let [x, y, cw, ch] = choice.native_crop;
+                assert!(x + cw <= w && y + ch <= h);
+                assert_eq!([cw % 32, ch % 32], [0, 0]);
+                assert!(cw.min(ch) >= 576 && u64::from(cw) * u64::from(ch) >= 550_000);
+                let actual = plan(cw, ch, choice.resolution).unwrap();
+                assert_eq!(actual, choice.training);
+                assert_eq!(actual.resized, actual.output);
+                assert!(actual.output[0] <= cw && actual.output[1] <= ch);
+                assert_eq!(
+                    plan(actual.output[0], actual.output[1], choice.resolution)
+                        .unwrap()
+                        .output,
+                    actual.output
+                );
+            }
+        }
+        assert!(best_bucket(512, 512, "original").is_err());
+        assert!(best_bucket(4096, 4096, "unknown").is_err());
+    }
     use super::*;
 
     #[test]

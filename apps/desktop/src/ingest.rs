@@ -866,7 +866,26 @@ impl BdmApp {
                 }
                 let (state, color) = task_state(&job.state);
                 let active = self.ingest_active();
-                let action = if active && job.state == "running" {
+                let managed = self
+                    .catalog
+                    .path
+                    .as_deref()
+                    .and_then(|path| {
+                        bdm_infrastructure::catalog::SqliteCatalog::connect_existing(path, true)
+                            .ok()
+                    })
+                    .is_some_and(|repo| {
+                        bdm_infrastructure::agent::jobs::managed_download(&repo, job.id)
+                    });
+                let action = if managed {
+                    if matches!(job.state.as_str(), "running" | "queued") {
+                        Some("暂停")
+                    } else if job.state == "pausing" {
+                        None
+                    } else {
+                        Some("继续")
+                    }
+                } else if active && job.state == "running" {
                     Some("暂停")
                 } else if !active && job.state != "completed" {
                     Some("继续")
@@ -920,7 +939,31 @@ impl BdmApp {
                     self.dismiss_dashboard_task(true, job.id);
                 }
                 if clicked {
-                    if active {
+                    if managed {
+                        let result = (|| {
+                            let path = self.catalog.path.as_deref().ok_or("本地数据库未打开")?;
+                            let mut repo =
+                                bdm_infrastructure::catalog::SqliteCatalog::connect_existing(
+                                    path, false,
+                                )
+                                .map_err(|e| e.to_string())?;
+                            bdm_infrastructure::agent::jobs::control_download(
+                                &mut repo,
+                                job.id,
+                                if matches!(job.state.as_str(), "running" | "queued") {
+                                    "pause"
+                                } else {
+                                    "resume"
+                                },
+                            )
+                            .map_err(|e| e.to_string())?;
+                            self.ingest.jobs = repo.list_jobs().map_err(|e| e.to_string())?;
+                            Ok::<_, String>(())
+                        })();
+                        if let Err(error) = result {
+                            self.ingest.error = Some(error);
+                        }
+                    } else if active {
                         if let Some(cancel) = &self.ingest.cancel {
                             cancel.store(true, Ordering::Relaxed);
                         }
