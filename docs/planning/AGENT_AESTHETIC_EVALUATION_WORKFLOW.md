@@ -1,6 +1,6 @@
 # ADR-004: Aesthetic evaluation as a first-class independent Agent workflow
 
-**Status:** PROPOSED FOR DISCUSSION. The owner explicitly requested that aesthetic judgment be covered as its own flow. Numeric rubric/profile defaults, tools and decisions below are not yet accepted.
+**Status:** PARTIALLY ACCEPTED. The owner approved **shared aesthetic dimensions + style-specific, versioned Profile extensions** on 2026-11-15. Concrete scoring calibration, profile auto-selection, execution defaults and review decisions are still **proposals pending discussion**.
 **PR:** #11, draft / docs only; no runtime or existing review decisions changed.
 **Related:** [ADR-003: composable workflow and node catalog](AGENT_WORKFLOW_NODE_CATALOG.md), [ADR-002: Agent-pull leases](AGENT_PULL_LEASE_PROTOCOL.md), [existing visual identity design](../features/DINOV3_VISUAL_IDENTITY.md).
 
@@ -155,8 +155,107 @@ Existing `docs/features/DINOV3_VISUAL_IDENTITY.md` establishes aesthetic appeal/
 
 ## 9. Decisions still to settle with owner
 
-1. Aesthetic rubric and default profile: universal balanced baseline vs explicit user style preferences vs collection-specific profile.
+1. **ACCEPTED: common base rubric + style-specific versioned Profiles.** Pending: exact bundled Profile definitions, default-selection policy and calibrated weights.
 2. Assessment behavior: score-only as default (recommended); whether to optionally emit non-binding keep/defer/review recommendations.
 3. Confidence and fairness: when to request a second review or human confirmation, and when to refuse to compare dissimilar styles.
 4. Full workflow combination: fuse aesthetics with one vision-pass annotation by default if selected; can be disabled independently.
 5. Dataset curation thresholds and profile-specific representative ranking policy; never assume one cutoff applies across all art.
+
+## 10. Accepted aesthetic Profile architecture; proposed operational contract
+
+### 10.1 Accepted principle
+
+All art types share one stable report schema and **baseline evaluation dimensions**, but the evaluation criteria must be interpreted through an explicitly versioned **style Profile**. The Profile changes the artistic questions, examples, and permitted explanatory signals; it must **not** redefine the meaning of core persisted fields, make unsupported identity claims, or implicitly authorize file operations.
+
+Core dimensions:
+- `composition`: compositional hierarchy, focal point, figure/background relationship, intentional framing/negative space.
+- `color_and_light`: palette harmony, visual depth, lighting/color atmosphere, intentional contrast.
+- `artistic_execution`: craft appropriate to the visual language (not "more pixels or realism is better").
+- `completeness`: whether the execution is coherent and sufficiently finished **for its intended style**.
+- `expressive_impact`: impact, emotional readability, distinctive visual intention.
+- `visual_distractions`: **separate descriptive findings**, because text, blank space, strong texture, and overlays can be intentional.
+
+Return `overall_aesthetic` as a holistic subjective 0-10 judgement (or null when unsupported), with separate optional dimension scores and evidence. There is **no adopted universal weighted formula or score cutoff**. `training_suitability` and any source technical-quality score remain separate artifacts.
+
+### 10.2 Initial Profile candidates (proposed, not frozen)
+
+| Profile ID candidate | Additional style-specific review | Avoid incorrect penalties |
+| --- | --- | --- |
+| `general-illustration@1` | figure/scene integration, composition, illustrative craft, color rhythm, atmosphere | deliberate stylization, sparse backgrounds, limited detail |
+| `pixel-art@1` | pixel clustering, silhouette/readability, palette control, deliberate dithering, coherent grid and animation readability when applicable | low native resolution, limited shades, hard pixel edges, minimalist detail |
+| `watercolor@1` | pigment/wash hierarchy, transparent layering, wet/dry edge control, paper texture and atmospheric transitions | bleeding/pooling or loose strokes that are deliberate |
+| `galgame-cg@1` | narrative framing, character expression, pose/background consistency, scene lighting, design appeal | intentionally stylized anatomy, dialogue overlays or compositional framing when contextually intentional |
+
+A future `collection:<id>/<profile>@N` or user-defined Profile is a preset of **declared evaluation preferences**, not an authority to rewrite protected artist/character names, original tags, image crops, or review decisions. Do not infer a specific copyrighted artist identity or source solely from image style.
+
+### 10.3 Profile selection and comparison (proposed defaults)
+
+1. In a standalone request the user/Agent may supply `profile_id` and `profile_version`. In a workflow, the profile is frozen in its immutable job snapshot.
+2. If no Profile is provided, use a generic baseline Profile and record that fallback. Optional suggested style classification is **advisory**, never a silent authoritative switch, especially when styles are ambiguous or mixed.
+3. Comparisons default to the same Profile, rubric version, model/prompt configuration and comparable review purpose. Do not rank values across disparate profiles/models as if they are globally calibrated.
+4. A project-specific Profile may add *criteria* and user-expressed preferences, but cannot silently change the default deletion/review approval policy or discard original source.
+5. A profile edit is a new version. Existing scores persist with their original profile, model, prompt/policy fingerprint, image SHA, and calibration identifier (if any); selectively reevaluate outdated items when explicitly requested.
+6. Establish calibration samples spanning each style and difficult edge cases; compare with human paired-image preferences and record agreement/drift before adopting automatic cutoffs or weighted aggregate formulas.
+
+### 10.4 Proposed typed input and output
+
+~~~json
+{
+  "node_type": "aesthetic.evaluate",
+  "node_version": 1,
+  "scope": { "media_ids": [123, 124] },
+  "profile": { "id": "pixel-art", "version": 1 },
+  "outputs": ["overall", "dimensions", "evidence", "confidence"],
+  "comparison": { "mode": "absolute", "eligible_group_id": null },
+  "apply_review_decisions": false,
+  "apply_edits": false
+}
+~~~
+
+Output per image:
+~~~json
+{
+  "media_id": 123,
+  "image_revision": 7,
+  "image_sha256": "actual-current-sha256",
+  "aesthetic_profile": "pixel-art@1",
+  "overall_aesthetic": 8.5,
+  "dimension_scores": {
+    "composition": 8.2,
+    "color_and_light": 8.7,
+    "artistic_execution": 8.4,
+    "completeness": 8.0,
+    "expressive_impact": 8.6
+  },
+  "observations": {
+    "strengths": ["readable silhouette and deliberate palette"],
+    "weaknesses": ["minor unintended pixel clustering"],
+    "visual_distractions": []
+  },
+  "confidence": "medium",
+  "training_suitability": null,
+  "review_decision": null
+}
+~~~
+
+Numbers/observations above are **illustrative placeholders**, not image-specific factual findings.
+
+### 10.5 Standalone vs composite behavior (proposed)
+
+- **Single node**: `aesthetic.evaluate` can evaluate one media ID or a collection range. The daemon creates durable work and Agents pull leases. A score-only run **does not** create a caption, modify image/crop, alter normalized tags, set Keep/Reject/Defer, delete, or export.
+- **Full curation**: when the job explicitly selects both aesthetic assessment and caption/tags, the *same Agent vision pass* may produce them together; the daemon persists separate artifacts and validates each target. A failure in one artifact must not imply success in another.
+- **Relative preference**: separately request a pair or eligible interchangeable difference-set ranking, with a human/source-confirmed comparison group. The output is a non-destructive ranking recommendation; no auto-collapse of same-character alternative artworks.
+- **Human review**: if `confidence=low` or style is ambiguous, surface rationale and `needs_review`. Do not treat low confidence as low aesthetic quality.
+- **Post-edit**: crop/restore changes current image revision; old report remains historical, and a new current-image report requires a new full-frame inspection if requested.
+
+### 10.6 v1 acceptance and performance requirements (proposed)
+
+- Input/output schemas and CLI/MCP versioning match generic `node.run` and `work.submit` contracts.
+- Score-only path demonstrably has **zero** mutation of `media.keep`, deletion queues, media bytes, `.tags.txt`, `.raw_tags.txt` or `.txt`.
+- Cross-version and cross-style results are not mixed by default; missing/ambiguous Profile is visible, not hidden.
+- Batch leases and per-image atomic commits follow ADR-002, with stale SHA, expiry and duplicate idempotency tests.
+- Aesthetic work queues use Agent capacity budgets, not long held database/media locks. Compare single-pass combined scoring+caption to separate calls on fixed fixtures, and track human disagreement and uncertain rates.
+- Run edge-case test sets for intentional minimalism, painterly brushwork, limited-palette pixel art, Galgame scene framing, text/watermarks, unusual perspectives, and low-resolution high-quality work.
+- No automatic rejection, deletion or representative policy is enabled merely by configuring a Profile.
+
+**Still open for further owner review:** exact Profile prompt/rubric contents, whether to support custom Profile authoring in v1, how to collect human calibration labels, and whether aesthetic assessments should offer a separate *non-binding* curation recommendation.
