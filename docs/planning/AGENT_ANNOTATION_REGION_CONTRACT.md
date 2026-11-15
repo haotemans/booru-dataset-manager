@@ -97,7 +97,19 @@ Coordinates in multiresolution export must either be transformed to the variant 
 
 The established artist whitelist, 2020–2026 source upload years and aesthetic/dataset eligibility policies remain separate workflow inputs. Running annotation alone does not claim they were executed, and no proposed score bands become approved thresholds through this ADR.
 
-## 8. Acceptance scenarios for the implementation PR
+## 8. Confirmed crop/bucket scope: reuse existing ratios and four tiers
+
+The owner confirmed that **training preparation includes crop/bucket adaptation**. It is not an optional watermark-removal feature. Reuse the application's existing ratio choices and the existing **768 / 1024 / 1536 / 2048** tiers; do not introduce another aspect-ratio catalog or ask the owner to choose a tier for every image. See the existing [crop options](../../apps/desktop/src/image_editor/crop.rs), [geometry code](../../crates/domain/src/training.rs) and [retention/export requirements](../features/TRAINING_CROPS.md).
+
+Select the best eligible tier and actual bucket for **each image's usable crop**, considering its native pixel capacity, aspect ratio and retained composition. The owner's common use of 1024 training is not permission to process all images at 1024. Existing no-upscale, source-retention, PNG, 32-alignment and native-size flat-export constraints remain in force; a tier recommendation alone cannot authorize downsampling or a change to export layout.
+
+The Agent proposes the composition within this existing geometry space; the deterministic planner computes dimensions, and the local sd-scripts BucketManager is the reference for validation. A nearest-equivalent-area tier label plus a 32-aligned edge trim is not by itself proof that best-tier/bucket preparation has been implemented. Persist the selected tier, actual geometry, crop coordinates and validation inputs/results. Cross-script acceptance must distinguish actual output geometry from an informational tier label and from later trainer resizing.
+
+Prefer a crop that removes a watermark **when it preserves the image's expression**: subjects/actions, important props, scene relationships, light and intentional negative space. Removing a watermark is not a reason to discard meaningful content or force an unsuitable ratio. If safe removal is impossible, retain and describe the remaining watermark. An image already meeting the selected geometry can finish the required planning stage with a validated no-change result rather than arbitrary extra trimming.
+
+Preview before applying; inspect the actual final image, refresh hashes and regenerate only affected caption/tag/region outputs. Watermark content absent from the final crop must not return through source-tag hints. Raw source evidence stays immutable. These are confirmed functional requirements for a follow-up implementation, not new runtime changes in this draft.
+
+## 9. Acceptance scenarios for the implementation PR
 
 | Scenario | Required observable outcome |
 | --- | --- |
@@ -108,6 +120,8 @@ The established artist whitelist, 2020–2026 source upload years and aesthetic/
 | Regions-only / caption-only / tags-only | Unselected targets remain byte-identical, including preexisting OCR/special metadata. |
 | Omitted/null vs explicit empty regions | Preserve vs clear is deterministic and independently acknowledged. |
 | Crop/restore race or human edit | Old revision/region evidence cannot modify the new image; no silent hash relabelling. |
+| Automatic crop/bucket preparation | Uses existing ratios/four tiers, selects per-image geometry without forced 1024, respects retained-pixel/export constraints and validates against the local training script. |
+| Watermark at a removable edge vs essential composition | Prefer safe removal; preserve expression when removal is harmful. Final annotation reflects actual remaining pixels. |
 | Separate inset, internal overlay, magnified detail and narrative panels | Correctly distinct typed structure; no blanket comic or anatomy inference. |
 | Uncertain admission | Review-only route works without text generation; premium export stays blocked until the concern is resolved. |
 | Restart at sidecar/index write boundary | Journal reconciles data/receipt without duplicate effects or lost human edits. |
