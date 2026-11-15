@@ -263,6 +263,8 @@ Numbers/observations above are **illustrative placeholders**, not image-specific
 
 **Still open for further owner review:** exact Profile prompt/rubric contents, whether to support custom Profile authoring in v1, how to collect human calibration labels, and whether aesthetic assessments should offer a separate *non-binding* curation recommendation.
 
+**Integration note (ADR-005):** W16 / `aesthetic.evaluate` remains score-only and does not directly change deletion reviews. In the **composite illustration-curation workflow**, a separate `content.classify` -> `review.route` path **adds confirmed imported comics to the existing pending deletion-review collection**, with current SHA, reason and evidence. No immediate file deletion; user confirmation follows the existing GUI flow. Pre-download comic-tag exclusions have no managed media ID and therefore cannot be queued as library deletions. See [ADR-005](COMIC_PAGE_EXCLUSION_AND_OPTIONAL_LABELING.md).
+
 ## 11. Deferred comic/manga aesthetic assessment (accepted scope limit)
 
 **Decision:** Comic/manga aesthetics are **not** an initial W16 supported evaluation Profile. A manga/comic page often depends on narrative continuity, panel transitions, visual hierarchy across pages, lettering and pacing; a single-image generic illustration score would incorrectly reward or penalize editorial choices. Avoid creating or improvising a scoring rubric until a separate, calibrated multi-panel/page-context flow is explicitly approved.
