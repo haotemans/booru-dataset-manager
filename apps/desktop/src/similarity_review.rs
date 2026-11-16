@@ -427,7 +427,7 @@ impl BdmApp {
         }
         let mut close = false;
         let mut switch_to = None;
-        let screen = ctx.screen_rect();
+        let screen = crate::window_chrome::content_rect(ctx);
         let size = screen.size() - vec2(24.0, 32.0);
         egui::Window::new("相似图审核")
             .id("similarity_review_fullscreen".into())
@@ -442,8 +442,9 @@ impl BdmApp {
             .show(ctx, |ui| {
                 let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
                 let header = Rect::from_min_size(rect.min, vec2(rect.width(), 64.0));
+                let footer_height = if self.similarity_review.error.is_some() { 136.0 } else { 96.0 };
                 let footer =
-                    Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 112.0), rect.max);
+                    Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - footer_height), rect.max);
                 let body = Rect::from_min_max(
                     egui::pos2(rect.left(), header.bottom() + 8.0),
                     egui::pos2(rect.right(), footer.top() - 8.0),
@@ -868,7 +869,9 @@ mod tests {
                 assert_eq!(buttons.len(), 3);
                 for stage in &stages {
                     assert!(stage.width() > size.x * 0.4);
-                    assert!(stage.height() > size.y * 0.5);
+                    assert!(
+                        stage.height() > crate::window_chrome::content_rect(&ctx).height() * 0.5
+                    );
                 }
                 for button in &buttons {
                     assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(*button));

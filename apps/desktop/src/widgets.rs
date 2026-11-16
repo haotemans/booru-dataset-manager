@@ -696,8 +696,12 @@ pub fn sample_art(ui: &Ui, rect: Rect, seed: usize) {
 
 pub fn count_card(ui: &mut Ui, count: usize, title: &str, kind: &str) -> Response {
     egui::Frame::none()
+        .fill(NAV)
+        .stroke(Stroke::new(1.0_f32, LINE))
+        .rounding(8.0)
         .inner_margin(16.0)
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.spacing_mut().interact_size.y = 20.0;
             ui.set_min_height(64.0);
             ui.horizontal(|ui| {

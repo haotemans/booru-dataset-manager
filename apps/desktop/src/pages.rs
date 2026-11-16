@@ -48,11 +48,11 @@ impl BdmApp {
                 }
             }
         });
-        ui.add_space(30.0);
-        let gap = 32.0;
+        ui.add_space(24.0);
+        let gap = 24.0;
         let width = ui.available_width();
-        let left = (width - gap) * 0.68;
-        let right = width - gap - left;
+        let right = (width * 0.30).clamp(260.0, 360.0);
+        let left = width - gap - right;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             ui.allocate_ui_with_layout(
@@ -133,7 +133,7 @@ impl BdmApp {
                 |ui| {
                     ui.set_width(right);
                     ui.add_space(10.0);
-                    section(ui, "文本", "");
+                    section(ui, "标注覆盖", "");
                     ui.add_space(26.0);
                     let counts = self.library.coverage();
                     let total = self.library.media.len();
@@ -141,7 +141,7 @@ impl BdmApp {
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = 16.0;
                             for i in row {
-                                let label = ["原始标签", "优化标签", "自然语言", "齐全"][i];
+                                let label = ["原始标签", "优化标签", "自然语言", "三份齐全"][i];
                                 let hint = [
                                     "原始标签",
                                     "优化标签（含待确认结果）",
@@ -180,8 +180,25 @@ impl BdmApp {
             card().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    section(ui, &profile.name, &profile.model);
-                    icon_button(ui, "info", "配置已保存，连接未验证", false);
+                    let identity_width = (ui.available_width() - 320.0).max(120.0);
+                    ui.allocate_ui_with_layout(
+                        vec2(identity_width, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_width(identity_width);
+                            ui.add(
+                                egui::Label::new(RichText::new(&profile.name).font(medium(15.0)))
+                                    .truncate(),
+                            )
+                            .on_hover_text(&profile.name);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&profile.model).size(13.0).color(MUTED),
+                                )
+                                .wrap(),
+                            );
+                        },
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("移除").clicked() {
                             remove = Some(index);
@@ -295,9 +312,11 @@ impl BdmApp {
         self.gelbooru_settings_card(ui);
         ui.add_space(16.0);
         egui::CollapsingHeader::new("Danbooru 来源设置")
-            .default_open(
-                self.prefs.download_source == bdm_domain::sources::DownloadSource::Danbooru,
-            )
+            .default_open(matches!(
+                self.prefs.download_source,
+                bdm_domain::sources::DownloadSource::Danbooru
+                    | bdm_domain::sources::DownloadSource::Safebooru
+            ))
             .show(ui, |ui| self.danbooru_settings_card(ui));
         ui.add_space(16.0);
         card().show(ui, |ui| {

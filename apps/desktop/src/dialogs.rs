@@ -38,10 +38,12 @@ impl BdmApp {
         };
         egui::Area::new("dialog_backdrop".into())
             .order(egui::Order::Middle)
-            .fixed_pos(ctx.screen_rect().min)
+            .fixed_pos(crate::window_chrome::content_rect(ctx).min)
             .show(ctx, |ui| {
-                let (rect, _) =
-                    ui.allocate_exact_size(ctx.screen_rect().size(), Sense::click_and_drag());
+                let (rect, _) = ui.allocate_exact_size(
+                    crate::window_chrome::content_rect(ctx).size(),
+                    Sense::click_and_drag(),
+                );
                 ui.painter()
                     .rect_filled(rect, 0.0, Color32::BLACK.gamma_multiply(0.15));
             });

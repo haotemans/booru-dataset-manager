@@ -220,7 +220,7 @@ impl BdmApp {
                 self.load_review_original(ctx, id);
             }
         }
-        let screen = ctx.screen_rect();
+        let screen = crate::window_chrome::content_rect(ctx);
         self.image_editor.reset(id);
         self.editor_poll(ctx);
         let size = screen.size() - vec2(16.0, 16.0);

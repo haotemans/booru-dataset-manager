@@ -300,8 +300,13 @@ impl BdmApp {
                     }
                 });
             });
+        let page_margin = if ctx.screen_rect().width() < 1200.0 {
+            24.0
+        } else {
+            32.0
+        };
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(BG).inner_margin(32.0))
+            .frame(egui::Frame::none().fill(BG).inner_margin(page_margin))
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt(("page", self.prefs.page as u8, self.gallery))
@@ -1129,6 +1134,7 @@ impl eframe::App for BdmApp {
             // Native snapshots represent idle pages, without accidental cursor hover/tooltips.
             ctx.input_mut(|input| input.pointer = Default::default());
         }
+        crate::window_chrome::show(ctx);
         self.shell(ctx);
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

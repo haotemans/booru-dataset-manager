@@ -25,6 +25,7 @@ mod tags;
 mod theme;
 mod thumbnails;
 mod widgets;
+mod window_chrome;
 mod workflows;
 
 use eframe::egui;
@@ -121,6 +122,9 @@ fn main() -> eframe::Result<()> {
             ),
             persist_window: !capture && !compact,
             viewport: egui::ViewportBuilder::default()
+                .with_decorations(!cfg!(target_os = "windows"))
+                .with_minimize_button(true)
+                .with_maximize_button(true)
                 .with_inner_size(if compact {
                     [1050.0, 720.0]
                 } else {
