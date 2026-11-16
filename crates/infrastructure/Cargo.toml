@@ -8,6 +8,7 @@ rust-version.workspace = true
 bdm-domain = { path = "../domain" }
 bdm-ports = { path = "../ports" }
 bdm-config = { path = "../config" }
+bdm-application = { path = "../application" }
 base64 = "0.22"
 thiserror.workspace = true
 serde.workspace = true
@@ -21,9 +22,6 @@ tempfile = "3"
 rmcp = { version = "=3.10.0", default-features = false, features = ["server", "transport-io", "macros"] }
 tokio = { version = "1", features = ["rt", "io-std"] }
 fs2 = "0.4"
-
-[dev-dependencies]
-bdm-application = { path = "../application" }
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }

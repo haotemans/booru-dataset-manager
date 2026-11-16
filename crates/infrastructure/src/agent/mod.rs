@@ -1,7 +1,11 @@
 //! Local stdio MCP adapter. The client supplies the vision/reasoning model.
+pub(crate) mod downloads;
+pub mod jobs;
 mod params;
+pub mod service;
 mod state;
 mod tools;
+pub use service::{AgentService, ServiceReply};
 pub use state::{snapshot, AgentSnapshot};
 #[cfg(test)]
 mod tests;
@@ -17,24 +21,38 @@ use rmcp::{
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Mutex,
 };
+
+fn mcp_reply(reply: ServiceReply) -> CallToolResult {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let mut contents = vec![ContentBlock::text(reply.metadata.to_string())];
+    if let Some(png) = reply.image_png {
+        contents.push(ContentBlock::image(STANDARD.encode(png), "image/png"));
+    }
+    if reply.is_error {
+        CallToolResult::error(contents)
+    } else {
+        CallToolResult::success(contents)
+    }
+}
 
 pub const POLICY: &str = include_str!("policy.txt");
 
 #[derive(Clone)]
 pub struct AgentServer {
-    repo: Arc<Mutex<SqliteCatalog>>,
-    settings: Arc<Settings>,
+    service: AgentService,
     tool_router: ToolRouter<Self>,
 }
 
+type CropPreviews = std::collections::BTreeMap<(i64, String, [u32; 4]), (String, String)>;
 struct Settings {
     project_root: PathBuf,
     library_root: PathBuf,
     writes: bool,
+    permit: Option<(i64, String, i64)>,
     seen: Mutex<std::collections::BTreeSet<String>>,
-    previews: Mutex<std::collections::BTreeSet<(i64, String, [u32; 4])>>,
+    previews: Mutex<CropPreviews>,
 }
 
 impl AgentServer {
@@ -44,44 +62,39 @@ impl AgentServer {
         library_root: &Path,
         writes: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        if !catalog.is_absolute()
-            || !project_root.is_absolute()
-            || !library_root.is_absolute()
-            || !catalog.is_file()
-        {
-            return Err(
-                "MCP requires an existing catalog and absolute project/library paths".into(),
-            );
-        }
         Ok(Self {
-            repo: Arc::new(Mutex::new(SqliteCatalog::open(catalog)?)),
-            settings: Arc::new(Settings {
-                project_root: project_root.canonicalize()?,
-                library_root: library_root.canonicalize()?,
-                writes,
-                seen: Mutex::default(),
-                previews: Mutex::default(),
-            }),
+            service: AgentService::open(catalog, project_root, library_root, writes)?,
             tool_router: Self::tool_router(),
         })
     }
 
-    async fn task<F>(&self, task: F) -> CallToolResult
+    async fn task<F>(&self, read_only: bool, task: F) -> CallToolResult
     where
-        F: FnOnce(&mut SqliteCatalog, &Settings) -> Result<CallToolResult, IngestError>
+        F: FnOnce(&mut SqliteCatalog, &Settings) -> Result<ServiceReply, IngestError>
             + Send
             + 'static,
     {
-        let repo = self.repo.clone();
-        let settings = self.settings.clone();
+        let service = self.service.clone();
         let outcome = tokio::task::spawn_blocking(move || {
-            let mut repo = repo.lock().map_err(|_| IngestError::Storage)?;
-            task(&mut repo, &settings)
+            let mut repo = service.connection(read_only)?;
+            let settings = &service.settings;
+            let outcome = task(&mut repo, settings);
+            if let Err(error) = &outcome {
+                // Keep validation failures diagnosable without recording pixels,
+                // credentials or the full submitted training text.
+                if settings.writes {
+                    let _ = repo.audit(
+                        "agent_tool_error",
+                        &json!({"error":error.to_string()}).to_string(),
+                    );
+                }
+            }
+            outcome
         })
         .await;
         match outcome {
-            Ok(Ok(result)) => result,
-            Ok(Err(error)) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
+            Ok(Ok(result)) => mcp_reply(result),
+            Ok(Err(error)) => mcp_reply(tools::error_result(error)),
             Err(_) => CallToolResult::error(vec![ContentBlock::text(
                 "Local tool failed; inspect the image again before retrying.",
             )]),
@@ -92,13 +105,63 @@ impl AgentServer {
 #[tool_router]
 impl AgentServer {
     #[tool(
+        description = "Durable jobs and leased work. Read policy first; describe input {operation:work_annotate|work_assess|work_preview|work_view} returns exact payload schema once. operation: describe, character_repair, doctor, download_submit, download_status, download_control, bucket_plan, job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick, work_claim, work_view, work_preview, work_apply, work_assess, work_annotate, work_heartbeat, work_release. job_plan/submit input: mode curate|annotate|bucket|export, media_ids OR collection, outputs [caption,tags,regions], overwrite=false; submit also request_id. work_claim: owner, optional job_id/limit<=16. Other work_*: work_id, lease_token, generation, expected_sha256, payload (standalone tool schema without media_id/hash); writes also request_id. character_repair input: media_ids (1..64), apply=false preview or true to repair saved identity prefixes under verified rules; raw data and prose remain untouched. Follow next_stage; server enforces ordering. job_control: job_id, action pause|resume|retry|cancel. Export additionally destination absolute, text_kind caption|tags. download_submit input: request_id, existing collection_id, source automatic|danbooru|gelbooru, minimum_short_side (default800). download_status/control use download_id; control action pause|resume|retry. Local preflight via daemon or jobs_tick; model calls remain client-owned."
+    )]
+    async fn bdm_agent(&self, Parameters(args): Parameters<OperationArgs>) -> CallToolResult {
+        if !matches!(
+            args.operation.as_str(),
+            "describe"
+                | "character_repair"
+                | "doctor"
+                | "download_submit"
+                | "download_status"
+                | "download_control"
+                | "bucket_plan"
+                | "job_plan"
+                | "job_submit"
+                | "jobs_list"
+                | "job_status"
+                | "job_control"
+                | "jobs_tick"
+                | "work_claim"
+                | "work_view"
+                | "work_preview"
+                | "work_apply"
+                | "work_assess"
+                | "work_annotate"
+                | "work_heartbeat"
+                | "work_release"
+        ) {
+            return mcp_reply(ServiceReply::error(
+                json!({"error":{"code":"unknown_operation","message":"Use one of the documented control-plane operations"}}),
+            ));
+        }
+        let service = self.service.clone();
+        match tokio::task::spawn_blocking(move || {
+            service.execute(
+                &args.operation,
+                if args.input.is_null() {
+                    json!({})
+                } else {
+                    args.input
+                },
+            )
+        })
+        .await
+        {
+            Ok(reply) => mcp_reply(reply),
+            Err(_) => mcp_reply(ServiceReply::error(
+                json!({"error":{"code":"worker_failed","message":"Inspect job status before retrying a write"}}),
+            )),
+        }
+    }
+
+    #[tool(
         description = "Read dataset workflow and mandatory preservation rules before acting.",
         annotations(read_only_hint = true)
     )]
     fn bdm_policy(&self) -> CallToolResult {
-        tools::result(
-            json!({"instructions":POLICY,"writes_enabled":self.settings.writes,"image_retention":{"original":1,"current":1,"thumbnail":1}}),
-        )
+        mcp_reply(self.service.policy())
     }
 
     #[tool(
@@ -106,8 +169,10 @@ impl AgentServer {
         annotations(read_only_hint = true)
     )]
     async fn bdm_collections(&self, Parameters(args): Parameters<ListArgs>) -> CallToolResult {
-        self.task(move |repo, settings| tools::collections(repo, settings, args))
-            .await
+        self.task(true, move |repo, settings| {
+            tools::collections(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
@@ -115,8 +180,10 @@ impl AgentServer {
         annotations(read_only_hint = true)
     )]
     async fn bdm_list_media(&self, Parameters(args): Parameters<ListArgs>) -> CallToolResult {
-        self.task(move |repo, settings| tools::list(repo, settings, args))
-            .await
+        self.task(true, move |repo, settings| {
+            tools::list(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
@@ -124,16 +191,20 @@ impl AgentServer {
         annotations(read_only_hint = true)
     )]
     async fn bdm_view_image(&self, Parameters(args): Parameters<ViewArgs>) -> CallToolResult {
-        self.task(move |repo, settings| tools::view(repo, settings, args))
-            .await
+        self.task(true, move |repo, settings| {
+            tools::view(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
-        description = "Preview or APPLY a crop of the CURRENT image using normalized left/top/right/bottom coordinates. apply=false previews only. apply=true saves native-pixel PNG with 32 alignment and preserves the complete original. Inspect preview and use the fresh hash."
+        description = "Propose a crop AFTER visually inspecting the current image. Choose ratio from policy.crop_ratios and bbox in current-image 0..1000 coordinates, with a composition-specific reason. apply=false returns exact PNG preview and preview_sha256; inspect it before apply=true. Native PNG pixels are retained with 32 alignment, original preserved. Prefer removing a safely removable edge watermark; retain/BBox embedded text or watermarks when removal harms composition."
     )]
     async fn bdm_crop(&self, Parameters(args): Parameters<CropArgs>) -> CallToolResult {
-        self.task(move |repo, settings| tools::crop(repo, settings, args))
-            .await
+        self.task(!args.apply, move |repo, settings| {
+            tools::crop(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
@@ -143,35 +214,43 @@ impl AgentServer {
         &self,
         Parameters(args): Parameters<RestoreArgs>,
     ) -> CallToolResult {
-        self.task(move |repo, settings| tools::restore(repo, settings, args))
-            .await
+        self.task(false, move |repo, settings| {
+            tools::restore(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
-        description = "Save visual caption/tags for the CURRENT image. Artist and character prefixes are merged locally; successful/manual text is preserved unless overwrite=true. Never changes raw API/TXT source data or calls another paid API."
+        description = "Save caption/tags and optional rich text/visual regions for an inspected CURRENT image, or submit review_reasons only to defer it. Use view.tag_vocabulary; identities merge locally. Invalid terms have per-tag reasons and do not discard valid caption. Same-call readback, verification and next. Omitted region fields preserve; [] clears. overwrite=false preserves successful/manual TXT."
     )]
     async fn bdm_save_annotation(
         &self,
         Parameters(args): Parameters<AnnotationArgs>,
     ) -> CallToolResult {
-        self.task(move |repo, settings| tools::annotate(repo, settings, args))
-            .await
+        self.task(false, move |repo, settings| {
+            tools::annotate(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
-        description = "Record explainable aesthetic/training scores and keep/reject/defer decision for an inspected image. Reject queues the image for final deletion review; it does not delete the original."
+        description = "Assess inspected current pixels. Preliminary crop_candidate=true defers routing until a useful crop is previewed and the final image reassessed. Do not force previews when no composition-preserving watermark removal is feasible. Final KEEP in durable curation requires retained_elements (text/watermark/sticker/overlay/logo/signature, [] only after inspection found none); matching final-image BBoxes are required when annotating. crop_outcome=applied/not_improved needs real edit/preview evidence. Reject only queues human review."
     )]
     async fn bdm_assess(&self, Parameters(args): Parameters<AssessArgs>) -> CallToolResult {
-        self.task(move |repo, settings| tools::assess(repo, settings, args))
-            .await
+        self.task(false, move |repo, settings| {
+            tools::assess(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
         description = "Run local pHash/DINOv3 candidate analysis on up to 64 explicit image IDs. Never automatically deletes anything. Visually inspect candidate pairs before resolving; similar characters alone are not duplicates."
     )]
     async fn bdm_scan_duplicates(&self, Parameters(args): Parameters<ScanArgs>) -> CallToolResult {
-        self.task(move |repo, settings| tools::scan(repo, settings, args))
-            .await
+        self.task(false, move |repo, settings| {
+            tools::scan(repo, settings, args)
+        })
+        .await
     }
 
     #[tool(
@@ -181,8 +260,10 @@ impl AgentServer {
         &self,
         Parameters(args): Parameters<PairArgs>,
     ) -> CallToolResult {
-        self.task(move |repo, settings| tools::pair(repo, settings, args))
-            .await
+        self.task(false, move |repo, settings| {
+            tools::pair(repo, settings, args)
+        })
+        .await
     }
 }
 

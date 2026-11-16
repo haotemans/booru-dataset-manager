@@ -8,6 +8,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+mod annotations;
 #[cfg(test)]
 mod tests;
 
@@ -97,7 +98,12 @@ pub fn run(
                 if job.mode == "tags" {
                     bdm_domain::tags::filter_character_tags(&text.content, true, &rules)
                 } else {
-                    text.content.clone()
+                    bdm_domain::tags::filter_caption_characters(
+                        &text.content,
+                        &media.post.tag_string_artist,
+                        &media.post.tag_string_character,
+                        &rules,
+                    )
                 }
             });
             let directory = destination.join(&base);
@@ -194,6 +200,7 @@ pub fn run(
             report(job);
         }
         if job.cursor == job.ids.len() {
+            annotations::write_index(repo, job, destination)?;
             if job.export_layout == "flat" && !job.accepted.is_empty() {
                 write_training_config(destination, 1024, false)?;
             } else if job.export_layout == "multi-resolution" {

@@ -31,6 +31,19 @@ absolute and the catalog/library must already exist. Omit `--allow-writes` for
 inspection-only use. The server itself exposes no network listener. Client
 permission prompts remain controlled by Antigravity's permission mode.
 
+## Durable jobs and optional headless CLI
+
+Protocol v3 adds `bdm_agent` for durable batches, leased work, job controls, operation-schema discovery, download queues, bucket planning and local health checks. Existing configuration above remains valid. The optional `bdm.exe mcp-serve` entry serves the same tools without linking the desktop UI; `bdm.exe --help` documents standalone JSON commands. See [the implemented control-plane contract](../agent-control-plane.md) for exact commands, restart behavior and current limits.
+
+## Project annotation skill
+
+The workspace skill [booru-visual-annotation](../../.agents/skills/booru-visual-annotation/SKILL.md)
+guides visual evidence, caption/tag separation, text-region inspection and saved-result
+verification. Open this repository as the Antigravity workspace and request
+`Use booru-visual-annotation to annotate the selected collection` in a new conversation.
+It includes a read-only local audit helper; it does not replace visual review or fix
+server-side formatting bugs. Creating/loading the skill does not itself run annotation.
+
 ## Tools
 
 | Tool | Purpose |
@@ -81,6 +94,88 @@ Only the complete original, current edited PNG and thumbnail are retained.
 Crop previews are temporary and removed automatically. Decision reports contain
 metadata, not image backups. Missing DINOv3 weights/runtime are reported; a
 pHash-only result is not labelled successful DINO analysis.
+
+## Annotation protocol `bdm-agent-v2`
+
+Read `bdm_policy.protocol` once after refreshing the MCP server. For annotation,
+the normal path is one full `bdm_view_image` and one `bdm_save_annotation` per
+image. The view includes `tag_vocabulary.source_general` (locally accepted
+candidates, still requiring visual evidence) and existing `annotation_details`.
+No network category lookup or extra model API is used. Detail tiles are optional
+when small text needs inspection. After a crop, inspect the new current image.
+
+Save returns `status`, `saved`, `preserved`, `accepted_tags`, individual
+`tag_rejections` codes, `readback` content/hashes/truncation and sidecar
+verification in the same response. A rejected unknown term no longer discards
+a valid caption. `partial` means some output saved; `needs_correction` means no
+new output saved. Saved tag text consists of artists, characters, then accepted
+generic terms; source meta/protected terms are not copied back. Omitted
+`text_regions` and `special_elements` preserve prior values independently;
+explicit `[]` clears the selected field. Do not resend already saved caption
+just to correct tags. Replacing saved tags requires deliberate `overwrite=true`
+and resubmitting the complete desired generic tag array.
+
+All tool responses include compact `next` guidance. Validation errors carry
+`code`, `message`, and a recovery step. `unknown_category` requires a verified
+term or prose instead; retrying the same unknown word cannot succeed. Existing
+successful/manual outputs preserved by `overwrite=false` are not failures.
+Readback validates structure/storage, not visual truth. Only fetch full TXT when
+truncation prevents review; do not repeat full view/list calls to confirm a save.
+
+The new behavior requires the rebuilt executable and an MCP server refresh.
+Loading the updated Skill alone does not upgrade an already running old server.
+
+### Rich regions and dataset index
+
+Check `bdm_policy.capabilities` for `rich_text_regions`, `visual_regions`,
+`review_reasons`, and `dataset_jsonl`. Text regions additionally support optional
+`language`, `appearance`, and subjective `confidence` (null or 0..1). Legibility
+is `readable`, `partial`, `unreadable`, or `decorative`; the last two require the
+exact text sentinel `unreadable text`. Partial text contains only recognized
+original characters. Do not infer missing words from source tags.
+
+`visual_regions` records important subjects/backgrounds, stickers, overlays,
+embedded images, `detail_inset`, `x_ray` and `cross_section` regions. Each has a
+normalized full-current-image box, `description`, `relation` to the main frame,
+and optional confidence. A separate cutaway and an internal view superimposed
+on the subject are different structures, not interchangeable tag spellings.
+Protocol enums use underscores; verified Danbooru tags normally use the
+hyphenated `x-ray` and `cross-section`. No automatic per-image network lookup is
+introduced. All optional region fields share the existing save call.
+
+Nonempty `review_reasons` defers the image and removes training approval while
+preserving files. It can be submitted without caption/tags (`review_saved`), so
+uncertain content need not be annotated before deferral. Unresolved reasons
+block automatic keep decisions. Clearing reasons does not itself approve it.
+Region snapshots include the inspected image hash; stale structured data must
+be replaced or cleared after inspecting a changed crop. Audit events retain
+saved structures so later corrections are traceable without image backups.
+
+On export, a single root-level `annotations.jsonl` includes region/OCR data,
+confidence, source, image/text hashes and recorded agent/human review history.
+Existing training TXT naming/layout remains unchanged. Repeated exports update
+rows by image path, preserve other rows and protect user-modified index files.
+For multiresolution variants, coordinates explicitly refer to the source current
+image and the record includes its scale/crop transform. Existing legacy records
+with no coordinate hash are marked unknown, not silently treated as verified.
+
+## Crop-first quality curation
+
+Capability `crop_first_assessment` adds optional `stage` (default `final`),
+`crop_candidate` (default false) and `crop_outcome` to `bdm_assess`. Preliminary
+assessment always defers; a correctable crop candidate cannot be rejected or
+reset before it is resolved. Apply a previewed crop, inspect the new current
+image, then assess with `stage=final,crop_outcome=applied`. If a preview does not
+improve expression, keep the original and assess it with `not_improved`.
+Edit-parent or preview evidence is checked by the server. Preview receipts are
+connection-local; applied edit provenance and pending assessment persist.
+
+For selected full curation, `bdm_save_annotation(require_final_assessment=true)`
+requires a current final KEEP result. Standalone annotation defaults false.
+Final rejection removes training approval and queues existing human deletion
+review; no source file is deleted. Assessment state, keep flag and audit commit
+in one SQLite transaction. This does not implement the proposed scheduler or
+automatic best-tier/bucket optimization.
 
 ## Example instruction for Antigravity
 

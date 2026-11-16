@@ -17,6 +17,38 @@ pub struct SqliteCatalog {
 }
 
 impl SqliteCatalog {
+    /// Fast operation connection for an initialized catalog: no migration,
+    /// whole-database integrity scan, implicit file creation or backup.
+    pub fn connect_existing(path: &Path, read_only: bool) -> Result<Self, CatalogError> {
+        let flags = if read_only {
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+        } else {
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+        };
+        let connection =
+            Connection::open_with_flags(path, flags).map_err(|_| CatalogError::Storage)?;
+        connection
+            .busy_timeout(Duration::from_secs(3))
+            .map_err(|_| CatalogError::Storage)?;
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(|_| CatalogError::Schema)?;
+        if version != 6 {
+            return Err(CatalogError::Schema);
+        }
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(|_| CatalogError::Storage)?;
+        if read_only {
+            connection
+                .pragma_update(None, "query_only", true)
+                .map_err(|_| CatalogError::Storage)?;
+        }
+        Ok(Self {
+            connection,
+            media_lock: crate::coordination::media_lock(path),
+        })
+    }
     pub fn open(path: &Path) -> Result<Self, CatalogError> {
         if let Some(parent) = path
             .parent()
@@ -224,6 +256,11 @@ impl SqliteCatalog {
         );",
         )
         .map_err(|_| CatalogError::Schema)?;
+        tx.execute_batch("CREATE INDEX IF NOT EXISTS collection_tag_page ON collections(tag,id); CREATE INDEX IF NOT EXISTS media_collections_page ON collection_media(media_id,collection_id);").map_err(|_|CatalogError::Schema)?;
+        tx.execute_batch(crate::agent::jobs::SCHEMA)
+            .map_err(|_| CatalogError::Schema)?;
+        tx.execute_batch(crate::agent::downloads::SCHEMA)
+            .map_err(|_| CatalogError::Schema)?;
         let broken: bool = tx
             .prepare("PRAGMA foreign_key_check")
             .and_then(|mut query| Ok(query.query([])?.next()?.is_some()))

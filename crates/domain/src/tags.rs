@@ -135,11 +135,23 @@ impl TagRules {
             return BTreeSet::new();
         }
         let present: BTreeSet<_> = names.into_iter().map(|name| self.canonical(name)).collect();
-        self.characters
-            .iter()
-            .filter(|r| r.verified && present.contains(&self.canonical(&r.variant)))
-            .map(|r| self.canonical(&r.base))
-            .collect()
+        let mut parents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for r in self.characters.iter().filter(|r| r.verified) {
+            parents
+                .entry(self.canonical(&r.variant))
+                .or_default()
+                .insert(self.canonical(&r.base));
+        }
+        let mut redundant = BTreeSet::new();
+        let mut pending = present;
+        while let Some(name) = pending.pop_first() {
+            for parent in parents.get(&name).into_iter().flatten() {
+                if redundant.insert(parent.clone()) {
+                    pending.insert(parent.clone());
+                }
+            }
+        }
+        redundant
     }
 
     pub fn validate_characters(&self) -> Result<(), &'static str> {
@@ -200,6 +212,84 @@ pub fn filter_character_tags(content: &str, comma_separated: bool, rules: &TagRu
     }
 }
 
+/// Filter only the locally formatted identity prefix, never comma-delimited
+/// fragments inside the visual prose. Kept spans retain their exact bytes.
+pub fn filter_caption_characters(
+    content: &str,
+    artists: &str,
+    characters: &str,
+    rules: &TagRules,
+) -> String {
+    let artists: BTreeSet<_> = artists
+        .split_whitespace()
+        .map(|n| rules.canonical(n))
+        .collect();
+    let characters: BTreeSet<_> = characters
+        .split_whitespace()
+        .map(|n| rules.canonical(n))
+        .collect();
+    let mut prefix = Vec::new();
+    let mut offset = 0;
+    let mut seen = BTreeSet::new();
+    for span in content.split_inclusive(',') {
+        let tag = span
+            .trim_end_matches(',')
+            .trim()
+            .trim_start_matches('\u{feff}');
+        let artist_mark = tag.starts_with("@artist ") || tag.starts_with("artist:");
+        let name = tag
+            .strip_prefix("@artist ")
+            .or_else(|| tag.strip_prefix("artist:"))
+            .or_else(|| tag.strip_prefix("character:"))
+            .unwrap_or_else(|| tag.trim_start_matches('@'));
+        let name = rules.canonical(
+            &name
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join("_")
+                .to_lowercase(),
+        );
+        let is_artist = artists.contains(&name);
+        let is_character = !artist_mark && characters.contains(&name) && !is_artist;
+        if !is_artist && !is_character {
+            break;
+        }
+        if !seen.insert((name.clone(), is_character)) {
+            break;
+        }
+        prefix.push((offset, offset + span.len(), name, is_character));
+        offset += span.len();
+        if prefix.len() >= artists.len() + characters.len() {
+            break;
+        }
+    }
+    let redundant =
+        rules.redundant_character_bases(prefix.iter().filter(|r| r.3).map(|r| r.2.as_str()));
+    let removed: Vec<_> = prefix
+        .iter()
+        .filter(|r| r.3 && redundant.contains(&r.2))
+        .collect();
+    if removed.is_empty() {
+        return content.to_owned();
+    }
+    let mut result = String::new();
+    let mut cursor = 0;
+    for span in &removed {
+        result.push_str(&content[cursor..span.0]);
+        cursor = span.1;
+    }
+    result.push_str(&content[cursor..]);
+    if removed[0].0 == 0 {
+        let bom = if content.starts_with('\u{feff}') {
+            "\u{feff}"
+        } else {
+            ""
+        };
+        return format!("{bom}{}", result.trim_start());
+    }
+    result
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NormalizedTags {
     pub tags: Vec<String>,
@@ -254,6 +344,79 @@ pub fn normalize(raw: &str, artists: &str, characters: &str, rules: &TagRules) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caption_prefix_prefers_verified_variant_without_editing_prose_or_other_people() {
+        let base = "kazusa_(blue_archive)";
+        let variant = "kazusa_(band)_(blue_archive)";
+        let mut rules = TagRules::default();
+        rules.characters.push(CharacterRelation {
+            base: base.into(),
+            variant: variant.into(),
+            verified: true,
+            exclusive_group: String::new(),
+            evidence: "user confirmed".into(),
+        });
+        let body =
+            "A singer, holding a bass.\r\nPrinted words remain unchanged, including punctuation.";
+        for prefix in ["@dusk ming", "artist:dusk ming", "dusk ming"] {
+            let text=format!("{prefix}, kazusa (band) (blue archive), kazusa (blue archive), another character, {body}");
+            assert_eq!(
+                filter_caption_characters(
+                    &text,
+                    "dusk_ming",
+                    &format!("{variant} {base} another_character"),
+                    &rules
+                ),
+                format!("{prefix}, kazusa (band) (blue archive), another character, {body}")
+            );
+        }
+        let lone = format!("@dusk ming, kazusa (blue archive), {body}");
+        assert_eq!(
+            filter_caption_characters(&lone, "dusk_ming", base, &rules),
+            lone
+        );
+        let narrative="@dusk ming, kazusa (band) (blue archive), kazusa (blue archive), A printed label reads, kazusa (blue archive), beside the figure.";
+        assert_eq!(filter_caption_characters(narrative,"dusk_ming",&format!("{base} {variant}"),&rules),"@dusk ming, kazusa (band) (blue archive), A printed label reads, kazusa (blue archive), beside the figure.");
+        rules.characters[0].verified = false;
+        assert_eq!(
+            filter_caption_characters(narrative, "dusk_ming", &format!("{base} {variant}"), &rules),
+            narrative
+        );
+    }
+
+    #[test]
+    fn verified_descendant_suppresses_ancestor_when_intermediate_tag_is_absent() {
+        let mut rules = TagRules::default();
+        for (base, variant) in [("base", "costume"), ("costume", "anniversary")] {
+            rules.characters.push(CharacterRelation {
+                base: base.into(),
+                variant: variant.into(),
+                verified: true,
+                exclusive_group: String::new(),
+                evidence: "confirmed".into(),
+            });
+        }
+        assert_eq!(
+            normalize(
+                "base anniversary another_person",
+                "",
+                "base anniversary another_person",
+                &rules
+            )
+            .characters,
+            vec!["anniversary", "another_person"]
+        );
+        assert_eq!(
+            filter_caption_characters(
+                "base, anniversary, another person, A scene.",
+                "",
+                "base anniversary another_person",
+                &rules
+            ),
+            "anniversary, another person, A scene."
+        );
+    }
 
     #[test]
     fn character_filter_keeps_a_lone_base_and_only_removes_confirmed_redundancy() {

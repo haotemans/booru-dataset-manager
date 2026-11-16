@@ -1,0 +1,17 @@
+[package]
+name = "bdm-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "bdm"
+path = "src/main.rs"
+
+[dependencies]
+bdm-infrastructure = { path = "../../crates/infrastructure" }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

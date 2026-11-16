@@ -335,6 +335,33 @@ impl BdmApp {
         if self.demo || self.is_capture() || !self.ingest.stored.contains_key(&id) {
             return;
         }
+        // A native PNG edit in another process can replace the cached JPEG path.
+        // Retry against current catalog metadata instead of repeatedly decoding
+        // a filename that no longer exists. Leave an active local edit alone.
+        let stale_or_failed = self
+            .ingest
+            .stored
+            .get(&id)
+            .is_some_and(|m| !m.path.is_file())
+            || self
+                .ingest
+                .detail_error
+                .as_ref()
+                .is_some_and(|(failed, _)| *failed == id);
+        if stale_or_failed
+            && self.catalog.path.is_some()
+            && !self.ingest_active()
+            && !self.workflow_active()
+            && !self.image_editor.active()
+            && !self.image_editor.visible
+        {
+            if let Err(error) = self.reload_media() {
+                self.clear_review_original();
+                self.ingest.detail_requested = Some(id);
+                self.ingest.detail_error = Some((id, format!("无法刷新图片路径：{error}")));
+                return;
+            }
+        }
         self.clear_review_original();
         self.ingest.detail_requested = Some(id);
         self.review_texture(ctx, id);
@@ -358,8 +385,8 @@ impl BdmApp {
             return Ok(());
         }
         let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
-        let repo =
-            bdm_infrastructure::catalog::SqliteCatalog::open(&path).map_err(|e| e.to_string())?;
+        let repo = bdm_infrastructure::catalog::SqliteCatalog::connect_existing(&path, true)
+            .map_err(|e| e.to_string())?;
         let stored = repo.list_media().map_err(|e| e.to_string())?;
         let records = bdm_ports::CollectionRepository::list(&repo).map_err(|e| e.to_string())?;
         self.refresh_collection_records(records)
@@ -866,7 +893,26 @@ impl BdmApp {
                 }
                 let (state, color) = task_state(&job.state);
                 let active = self.ingest_active();
-                let action = if active && job.state == "running" {
+                let managed = self
+                    .catalog
+                    .path
+                    .as_deref()
+                    .and_then(|path| {
+                        bdm_infrastructure::catalog::SqliteCatalog::connect_existing(path, true)
+                            .ok()
+                    })
+                    .is_some_and(|repo| {
+                        bdm_infrastructure::agent::jobs::managed_download(&repo, job.id)
+                    });
+                let action = if managed {
+                    if matches!(job.state.as_str(), "running" | "queued") {
+                        Some("暂停")
+                    } else if job.state == "pausing" {
+                        None
+                    } else {
+                        Some("继续")
+                    }
+                } else if active && job.state == "running" {
                     Some("暂停")
                 } else if !active && job.state != "completed" {
                     Some("继续")
@@ -920,7 +966,31 @@ impl BdmApp {
                     self.dismiss_dashboard_task(true, job.id);
                 }
                 if clicked {
-                    if active {
+                    if managed {
+                        let result = (|| {
+                            let path = self.catalog.path.as_deref().ok_or("本地数据库未打开")?;
+                            let mut repo =
+                                bdm_infrastructure::catalog::SqliteCatalog::connect_existing(
+                                    path, false,
+                                )
+                                .map_err(|e| e.to_string())?;
+                            bdm_infrastructure::agent::jobs::control_download(
+                                &mut repo,
+                                job.id,
+                                if matches!(job.state.as_str(), "running" | "queued") {
+                                    "pause"
+                                } else {
+                                    "resume"
+                                },
+                            )
+                            .map_err(|e| e.to_string())?;
+                            self.ingest.jobs = repo.list_jobs().map_err(|e| e.to_string())?;
+                            Ok::<_, String>(())
+                        })();
+                        if let Err(error) = result {
+                            self.ingest.error = Some(error);
+                        }
+                    } else if active {
                         if let Some(cancel) = &self.ingest.cancel {
                             cancel.store(true, Ordering::Relaxed);
                         }

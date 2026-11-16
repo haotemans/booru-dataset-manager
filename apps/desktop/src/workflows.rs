@@ -834,9 +834,12 @@ impl BdmApp {
                 .is_some_and(|kind| kind.starts_with("dedup"))
     }
     fn workflow_repo(&self) -> Result<bdm_infrastructure::catalog::SqliteCatalog, String> {
-        bdm_infrastructure::catalog::SqliteCatalog::open(
-            self.catalog.path.as_deref().ok_or("本地数据库未打开。")?,
-        )
+        let path = self.catalog.path.as_deref().ok_or("本地数据库未打开。")?;
+        if path.is_file() {
+            bdm_infrastructure::catalog::SqliteCatalog::connect_existing(path, false)
+        } else {
+            bdm_infrastructure::catalog::SqliteCatalog::open(path)
+        }
         .map_err(|e| e.to_string())
     }
     pub fn model_directory(&self) -> PathBuf {
@@ -1496,6 +1499,8 @@ impl BdmApp {
                     ("layers", "去重")
                 } else if job.kind == "export" {
                     ("download", "导出")
+                } else if job.kind == "agent-curation" {
+                    ("spark", "Agent 数据处理")
                 } else {
                     ("spark", "文本优化")
                 };
@@ -1517,7 +1522,13 @@ impl BdmApp {
                     }
                 });
                 let active = self.workflow_active();
-                let action = if active
+                let action = if job.kind == "agent-curation" {
+                    if job.state == "running" {
+                        Some("暂停")
+                    } else {
+                        Some("继续")
+                    }
+                } else if active
                     && job.state == "running"
                     && self.workflows.active_kind.as_deref() == Some(&job.kind)
                 {
@@ -1579,7 +1590,29 @@ impl BdmApp {
                     self.dismiss_dashboard_task(false, job.id);
                 }
                 if clicked {
-                    if active {
+                    if job.kind == "agent-curation" {
+                        let result = (|| {
+                            let mut repo = self.workflow_repo()?;
+                            bdm_infrastructure::agent::jobs::control_id(
+                                &mut repo,
+                                if job.state == "running" {
+                                    "pause"
+                                } else if job.state == "failed" {
+                                    "retry"
+                                } else {
+                                    "resume"
+                                },
+                                job.id,
+                            )
+                            .map_err(|e| e.to_string())?;
+                            self.workflows.jobs =
+                                repo.list_workflows().map_err(|e| e.to_string())?;
+                            Ok::<_, String>(())
+                        })();
+                        if let Err(error) = result {
+                            self.workflows.error = Some(error);
+                        }
+                    } else if active {
                         self.pause_processing();
                     } else if let Err(error) =
                         self.start_workflow(ui.ctx(), &job.kind, Vec::new(), Some(job.id))

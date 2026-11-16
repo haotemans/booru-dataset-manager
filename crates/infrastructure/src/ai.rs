@@ -19,7 +19,7 @@ mod images;
 mod protocol;
 #[cfg(test)]
 mod tests;
-pub use protocol::{AnnotationDetails, TextRegion};
+pub use protocol::{AnnotationDetails, TextRegion, VisualRegion};
 use protocol::{BatchResponse, ItemResult};
 
 /// Approval belongs to one explicit dispatch scope and is never saved as a profile preference.
@@ -1203,6 +1203,8 @@ pub fn run(
                                         special_elements: joint.special_elements.clone(),
                                         user_hint: (!user_hint.is_empty())
                                             .then(|| user_hint.clone()),
+                                        image_sha256: Some(media.sha256.clone()),
+                                        ..Default::default()
                                     },
                                 )?;
                                 job.accepted.insert(id);

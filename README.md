@@ -1,5 +1,7 @@
 # Booru Dataset Manager
 
+The optional headless `bdm.exe` provides JSON CLI commands and stdio MCP using the same local operations as the desktop. Durable Agent jobs, download queues, inspection leases, bucket planning and failure recovery boundaries are documented in [Agent control plane v3](docs/agent-control-plane.md).
+
 A Windows desktop application for managing booru-sourced image datasets, visual identity, metadata sidecars, dataset export, and versioned ModelScope backups.
 
 > **Project status:** Danbooru static-original download, SQLite v3 media/source persistence, character hierarchy, protected tag normalization, text-only AI optimization, local pHash/DINOv3 candidate analysis and dual-signal deduplication, coordinated deletion and basic dataset export are connected. See [implementation status](docs/planning/IMPLEMENTATION_STATUS.md) for verification and remaining work.
