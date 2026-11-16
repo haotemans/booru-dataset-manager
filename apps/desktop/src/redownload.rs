@@ -96,6 +96,15 @@ impl BdmApp {
         }
         let path = self.catalog.path.clone().ok_or("本地数据库未打开。")?;
         let source = self.ingest.stored[&id].post.provider;
+        let source_mode = self.prefs.download_source;
+        if source_mode == bdm_domain::sources::DownloadSource::Safebooru
+            && source == bdm_domain::sources::SourceProvider::Danbooru
+            && self.ingest.stored[&id].post.rating != "g"
+        {
+            return Err(
+                "当前选择 Safebooru，仅支持 General 图片；重新下载这张原图请切换 Danbooru。".into(),
+            );
+        }
         let credentials = match source {
             bdm_domain::sources::SourceProvider::Danbooru => self.saved_danbooru_credentials(),
             bdm_domain::sources::SourceProvider::Gelbooru => self.saved_gelbooru_credentials(),
@@ -111,8 +120,11 @@ impl BdmApp {
                         .map_err(|error| error.to_string())?;
                     let provider: Box<dyn bdm_ports::MediaProvider> = match source {
                         bdm_domain::sources::SourceProvider::Danbooru => Box::new(
-                            bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
-                                .map_err(|e| e.to_string())?,
+                            bdm_infrastructure::danbooru::DanbooruProvider::for_source(
+                                credentials,
+                                source_mode,
+                            )
+                            .map_err(|e| e.to_string())?,
                         ),
                         bdm_domain::sources::SourceProvider::Gelbooru => Box::new(
                             bdm_infrastructure::gelbooru::GelbooruProvider::new(credentials)

@@ -697,21 +697,14 @@ impl BdmApp {
                         )
                         .map_err(|e| e.to_string())?;
                     job.source_mode = self.prefs.download_source;
-                    job.provider = match job.source_mode {
-                        bdm_domain::sources::DownloadSource::Danbooru => {
-                            bdm_domain::sources::SourceProvider::Danbooru
-                        }
-                        bdm_domain::sources::DownloadSource::Gelbooru => {
-                            bdm_domain::sources::SourceProvider::Gelbooru
-                        }
-                        bdm_domain::sources::DownloadSource::Automatic => c.provider,
-                    };
+                    job.provider = job.source_mode.initial_provider(c.provider);
                     bdm_ports::IngestRepository::save_job(&mut repo, &job)
                         .map_err(|e| e.to_string())?;
                     Ok::<_, String>(job)
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
+        let source_mode = jobs.first().map(|job| job.source_mode).unwrap_or_default();
         let cancel = Arc::new(AtomicBool::new(false));
         let signal = cancel.clone();
         let (sender, receiver) = mpsc::channel();
@@ -719,14 +712,18 @@ impl BdmApp {
         std::thread::Builder::new()
             .name("image-ingestion".into())
             .spawn(move || {
-                let danbooru: Box<dyn bdm_ports::MediaProvider> = match credentials
-                    .and_then(bdm_infrastructure::danbooru::DanbooruProvider::new)
-                {
-                    Ok(provider) => Box::new(provider),
-                    Err(error) => {
-                        Box::new(bdm_infrastructure::providers::UnavailableProvider(error))
-                    }
-                };
+                let danbooru: Box<dyn bdm_ports::MediaProvider> =
+                    match credentials.and_then(|credentials| {
+                        bdm_infrastructure::danbooru::DanbooruProvider::for_source(
+                            credentials,
+                            source_mode,
+                        )
+                    }) {
+                        Ok(provider) => Box::new(provider),
+                        Err(error) => {
+                            Box::new(bdm_infrastructure::providers::UnavailableProvider(error))
+                        }
+                    };
                 let gelbooru: Box<dyn bdm_ports::MediaProvider> = match gelbooru_credentials
                     .and_then(bdm_infrastructure::gelbooru::GelbooruProvider::new)
                 {
@@ -756,7 +753,7 @@ impl BdmApp {
                         .into();
                         job.error = Some(format!(
                             "{}：{}",
-                            job.provider.label(),
+                            job.source_label(),
                             job.error
                                 .as_deref()
                                 .map(str::to_owned)
@@ -928,7 +925,7 @@ impl BdmApp {
                         title: &job.tag,
                         subtitle: &format!(
                             "{} · 短边 ≥ {} px",
-                            job.provider.label(),
+                            job.source_label(),
                             job.minimum_short_side
                         ),
                         state,

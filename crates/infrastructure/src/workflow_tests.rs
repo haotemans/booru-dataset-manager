@@ -654,6 +654,137 @@ fn unavailable_primary_switches_once_and_preserves_independent_cursor_and_resume
 }
 
 #[test]
+fn safe_source_policy_rejects_non_general_pages_and_saved_retries_before_import() {
+    use bdm_domain::sources::{DownloadSource, SourceProvider};
+    for (provider, rating, pending) in [
+        (SourceProvider::Danbooru, "e", false),
+        (SourceProvider::Danbooru, "s", true),
+        (SourceProvider::Gelbooru, "g", true),
+    ] {
+        let mut f = fixture();
+        f.post.provider = provider;
+        f.post.rating = rating.into();
+        f.provider.posts = vec![f.post.clone()];
+        let mut job = f
+            .repo
+            .new_job(
+                f.collection,
+                "character".into(),
+                f.directory.path().join("library"),
+                800,
+            )
+            .unwrap();
+        job.source_mode = DownloadSource::Safebooru;
+        if pending {
+            job.failed_posts.push(f.post.clone());
+        }
+        let result = bdm_application::ingest::run_with_fallback(
+            &f.provider,
+            &f.provider,
+            &mut f.repo,
+            &mut job,
+            &AtomicBool::new(false),
+            |_| {},
+        );
+        assert_eq!(result, Err(bdm_ports::CatalogError::InvalidResponse.into()));
+        assert!(f.repo.list_media().unwrap().is_empty());
+        assert_eq!(f.provider.calls.get(), 0);
+        assert_eq!(job.provider, SourceProvider::Danbooru);
+        assert!(job.fallback_reason.is_none());
+    }
+}
+
+#[test]
+fn safe_entry_reuses_danbooru_posts_and_never_falls_back_on_outage_or_empty_results() {
+    use bdm_domain::sources::{DownloadSource, SourceProvider};
+    let mut f = fixture();
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &AtomicBool::new(false),
+            &f.provider,
+        )
+        .unwrap();
+    let mut job = f
+        .repo
+        .new_job(
+            f.collection,
+            "character".into(),
+            f.directory.path().join("library"),
+            800,
+        )
+        .unwrap();
+    job.source_mode = DownloadSource::Safebooru;
+    bdm_application::ingest::run_with_fallback(
+        &f.provider,
+        &f.provider,
+        &mut f.repo,
+        &mut job,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(job.progress.duplicates, 1);
+    assert_eq!(f.provider.calls.get(), 1);
+    assert_eq!(f.repo.list_media().unwrap().len(), 1);
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row("SELECT count(*) FROM media_sources", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let mut failed = f
+        .repo
+        .new_job(
+            f.collection,
+            "character".into(),
+            f.directory.path().join("library"),
+            800,
+        )
+        .unwrap();
+    failed.source_mode = DownloadSource::Safebooru;
+    let result = bdm_application::ingest::run_with_fallback(
+        &crate::providers::UnavailableProvider(bdm_ports::CatalogError::Service),
+        &f.provider,
+        &mut f.repo,
+        &mut failed,
+        &AtomicBool::new(false),
+        |_| {},
+    );
+    assert_eq!(result, Err(bdm_ports::CatalogError::Service.into()));
+    assert_eq!(failed.provider, SourceProvider::Danbooru);
+    assert!(failed.fallback_reason.is_none());
+    let mut empty = f
+        .repo
+        .new_job(
+            f.collection,
+            "character".into(),
+            f.directory.path().join("library"),
+            800,
+        )
+        .unwrap();
+    empty.source_mode = DownloadSource::Safebooru;
+    f.provider.posts.clear();
+    bdm_application::ingest::run_with_fallback(
+        &f.provider,
+        &crate::providers::UnavailableProvider(bdm_ports::CatalogError::Service),
+        &mut f.repo,
+        &mut empty,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(empty.state, "completed");
+    assert_eq!(empty.provider, SourceProvider::Danbooru);
+    assert!(empty.fallback_reason.is_none());
+}
+
+#[test]
 fn identical_remote_ids_are_independent_while_identical_bytes_share_media_without_overwriting_source_text(
 ) {
     use bdm_domain::sources::SourceProvider;

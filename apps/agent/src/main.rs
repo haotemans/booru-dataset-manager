@@ -13,6 +13,7 @@ job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick,
 download_submit, download_status, download_control,
 work_claim, work_view, work_preview, work_apply, work_assess, work_annotate,
 work_heartbeat, work_release, daemon-serve, daemon_stop, mcp-serve, init.
+download_submit source: automatic|danbooru|safebooru|gelbooru. Safebooru uses safebooru.donmai.us (General only, shared Danbooru account/IDs).
 Readonly by default. Inputs are JSON objects; '-' reads stdin. View image bytes
 are written only to an explicit --output path. No GUI or hosted model is started.
 Examples: bdm job_plan ... --input plan.json

@@ -156,3 +156,9 @@ pub struct IngestJob {
     #[serde(default)]
     pub failed_posts: Vec<SourcePost>,
 }
+
+impl IngestJob {
+    pub fn source_label(&self) -> &'static str {
+        self.source_mode.active_label(self.provider)
+    }
+}

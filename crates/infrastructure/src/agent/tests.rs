@@ -554,6 +554,69 @@ fn queued_download_reuses_existing_collection_and_is_idempotent_without_network(
 }
 
 #[test]
+fn safe_download_queue_keeps_its_route_on_resume_and_reuses_source_identity() {
+    use bdm_domain::{
+        catalog::{CollectionKind, SourceTag},
+        sources::{DownloadSource, SourceProvider},
+    };
+    let (mut f, _, _) = fixture();
+    let col = f
+        .repo
+        .add(
+            CollectionKind::Character,
+            &SourceTag {
+                provider: SourceProvider::Gelbooru,
+                id: 9,
+                name: "character".into(),
+                category: 4,
+                post_count: 5,
+            },
+        )
+        .unwrap()
+        .record
+        .id;
+    let s = service(&f, true);
+    let saved = ok(
+        &s,
+        "download_submit",
+        json!({"request_id":"safe-download","collection_id":col,"source":"safebooru"}),
+    );
+    let id = saved["download_id"].as_i64().unwrap();
+    let replay = ok(
+        &s,
+        "download_submit",
+        json!({"request_id":"safe-download","collection_id":col,"source":"safedanbooru"}),
+    );
+    assert_eq!(replay["download_id"], id);
+    drop(s);
+    let s = service(&f, true);
+    let state = ok(&s, "download_status", json!({"download_id":id}));
+    assert_eq!(state["provider"], "danbooru");
+    assert_eq!(state["source_mode"], "Safebooru");
+    assert_eq!(state["source_label"], "Safebooru");
+    ok(
+        &s,
+        "download_control",
+        json!({"download_id":id,"action":"pause"}),
+    );
+    ok(
+        &s,
+        "download_control",
+        json!({"download_id":id,"action":"resume"}),
+    );
+    let job = f
+        .repo
+        .list_jobs()
+        .unwrap()
+        .into_iter()
+        .find(|j| j.id == id)
+        .unwrap();
+    assert_eq!(job.source_mode, DownloadSource::Safebooru);
+    assert_eq!(job.provider, SourceProvider::Danbooru);
+    assert!(job.fallback_reason.is_none());
+}
+
+#[test]
 fn complete_annotation_is_skipped_and_job_status_pages_keep_full_counts() {
     let (f, _, m) = fixture();
     let (s, item, _) = start_work(&f, m.id, "annotate");

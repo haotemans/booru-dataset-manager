@@ -314,7 +314,7 @@ impl BdmApp {
         if self.tag_lookup_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("正在查询 Danbooru…");
+                ui.label(format!("正在查询 {}…", self.tag_lookup_source_label()));
             });
         }
         if let Some(tag) = &self.catalog.found {
@@ -322,7 +322,7 @@ impl BdmApp {
             ui.label(&tag.name);
             ui.label(format!(
                 "{} · {} · API 总数 {} · 本地图片 0",
-                tag.provider.label(),
+                self.tag_lookup_source_label(),
                 if tag.category == 1 {
                     "画师"
                 } else {
@@ -419,7 +419,10 @@ impl BdmApp {
                 )
             {
                 ui.add_space(8.0);
-                ui.hyperlink_to("在浏览器中检查 Danbooru", "https://danbooru.donmai.us/");
+                ui.hyperlink_to(
+                    format!("在浏览器中检查 {}", self.tag_lookup_source_label()),
+                    self.prefs.download_source.danbooru_base_url(),
+                );
             }
         }
         if !self.catalog.suggestions.is_empty() {

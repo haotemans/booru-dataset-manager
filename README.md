@@ -2,6 +2,8 @@
 
 The optional headless `bdm.exe` provides JSON CLI commands and stdio MCP using the same local operations as the desktop. Durable Agent jobs, download queues, inspection leases, bucket planning and failure recovery boundaries are documented in [Agent control plane v3](docs/agent-control-plane.md).
 
+Image sources are selectable in System Settings → 图片来源: Danbooru, Safebooru (`safebooru.donmai.us`, General-only with shared Danbooru IDs/account), and Gelbooru. The existing Automatic mode remains Danbooru → Gelbooru. See [provider integration and live verification limits](docs/integrations/SOURCE_PROVIDERS.md).
+
 A Windows desktop application for managing booru-sourced image datasets, visual identity, metadata sidecars, dataset export, and versioned ModelScope backups.
 
 > **Project status:** Danbooru static-original download, SQLite v3 media/source persistence, character hierarchy, protected tag normalization, text-only AI optimization, local pHash/DINOv3 candidate analysis and dual-signal deduplication, coordinated deletion and basic dataset export are connected. See [implementation status](docs/planning/IMPLEMENTATION_STATUS.md) for verification and remaining work.

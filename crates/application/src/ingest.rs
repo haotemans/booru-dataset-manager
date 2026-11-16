@@ -145,8 +145,14 @@ fn run_pages(
         return Err(bdm_ports::CatalogError::InvalidQuery.into());
     }
     let pending = job.failed_posts.clone();
+    if job.source_mode == DownloadSource::Safebooru && job.provider != SourceProvider::Danbooru {
+        return Err(bdm_ports::CatalogError::InvalidResponse.into());
+    }
     for post in pending {
-        if !bdm_domain::catalog::matches_download_query(&job.tag, &post.tag_string) {
+        if !bdm_domain::catalog::matches_download_query(&job.tag, &post.tag_string)
+            || (job.source_mode == DownloadSource::Safebooru
+                && (post.provider != SourceProvider::Danbooru || post.rating != "g"))
+        {
             return Err(bdm_ports::CatalogError::InvalidResponse.into());
         }
         let outcome = process_post(provider, repo, job, &post, cancel).inspect_err(|error| {
@@ -177,6 +183,7 @@ fn run_pages(
                 || post.provider != job.provider
                 || post.id >= previous
                 || !bdm_domain::catalog::matches_download_query(&job.tag, &post.tag_string)
+                || (job.source_mode == DownloadSource::Safebooru && post.rating != "g")
             {
                 return Err(bdm_ports::CatalogError::InvalidResponse.into());
             }

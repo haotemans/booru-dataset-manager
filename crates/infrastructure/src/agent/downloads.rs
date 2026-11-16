@@ -48,6 +48,8 @@ pub(super) fn dispatch(
         // Only publish counters and the sanitized provider error in this summary.
         value.as_object_mut().unwrap().remove("failed_posts");
         value.as_object_mut().unwrap().remove("root");
+        let job: IngestJob = serde_json::from_str(&raw).map_err(|_| IngestError::Storage)?;
+        value["source_label"] = json!(job.source_label());
         return Ok(ServiceReply::success(value));
     }
     if !service.settings.writes {
@@ -71,25 +73,25 @@ pub(super) fn dispatch(
         let mode = match source {
             "automatic" => DownloadSource::Automatic,
             "danbooru" => DownloadSource::Danbooru,
+            "safebooru" | "safedanbooru" => DownloadSource::Safebooru,
             "gelbooru" => DownloadSource::Gelbooru,
-            _ => return Err(fail("source: automatic/danbooru/gelbooru")),
+            _ => return Err(fail("source: automatic/danbooru/safebooru/gelbooru")),
+        };
+        let source = if mode == DownloadSource::Safebooru {
+            "safebooru"
+        } else {
+            source
         };
         let (tag, provider): (String, String) = storage(repo.connection.query_row(
             "SELECT tag,provider FROM collections WHERE id=?1",
             [collection],
             |r| Ok((r.get(0)?, r.get(1)?)),
         ))?;
-        let provider = match mode {
-            DownloadSource::Danbooru => SourceProvider::Danbooru,
-            DownloadSource::Gelbooru => SourceProvider::Gelbooru,
-            DownloadSource::Automatic => {
-                if provider == "gelbooru" {
-                    SourceProvider::Gelbooru
-                } else {
-                    SourceProvider::Danbooru
-                }
-            }
-        };
+        let provider = mode.initial_provider(if provider == "gelbooru" {
+            SourceProvider::Gelbooru
+        } else {
+            SourceProvider::Danbooru
+        });
         let fingerprint = format!(
             "{:x}",
             Sha256::digest(json!([collection, side, source]).to_string().as_bytes())
@@ -199,8 +201,9 @@ pub(super) fn tick(service: &AgentService, repo: &mut SqliteCatalog) -> Result<V
             let dan: Box<dyn bdm_ports::MediaProvider> = match dan
                 .load()
                 .map_err(|_| bdm_ports::CatalogError::Credentials)
-                .and_then(crate::danbooru::DanbooruProvider::new)
-            {
+                .and_then(|credentials| {
+                    crate::danbooru::DanbooruProvider::for_source(credentials, job.source_mode)
+                }) {
                 Ok(p) => Box::new(p),
                 Err(e) => Box::new(crate::providers::UnavailableProvider(e)),
             };

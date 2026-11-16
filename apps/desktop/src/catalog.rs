@@ -91,6 +91,34 @@ fn collection(record: &CollectionRecord) -> Result<Collection, CatalogError> {
 }
 
 impl BdmApp {
+    pub(crate) fn tag_lookup_source_label(&self) -> &'static str {
+        use bdm_domain::sources::SourceProvider;
+        if self.prefs.download_source != bdm_domain::sources::DownloadSource::Automatic {
+            return self.prefs.download_source.active_label(
+                self.prefs
+                    .download_source
+                    .initial_provider(SourceProvider::Danbooru),
+            );
+        }
+        let provider = self
+            .catalog
+            .pending
+            .as_ref()
+            .map(|p| {
+                if p.source.load(std::sync::atomic::Ordering::Relaxed) == 1 {
+                    SourceProvider::Gelbooru
+                } else {
+                    SourceProvider::Danbooru
+                }
+            })
+            .or(self.catalog.lookup_provider)
+            .unwrap_or_else(|| {
+                self.prefs
+                    .download_source
+                    .initial_provider(SourceProvider::Danbooru)
+            });
+        self.prefs.download_source.active_label(provider)
+    }
     pub fn tag_lookup_account_label(&self) -> &'static str {
         use bdm_domain::sources::{DownloadSource, SourceProvider};
         let gelbooru = self.prefs.download_source == DownloadSource::Gelbooru
@@ -362,7 +390,12 @@ impl BdmApp {
                     Err(CatalogError::Network)
                 } else {
                     credentials
-                        .and_then(bdm_infrastructure::danbooru::DanbooruProvider::new)
+                        .and_then(|credentials| {
+                            bdm_infrastructure::danbooru::DanbooruProvider::for_source(
+                                credentials,
+                                mode,
+                            )
+                        })
                         .and_then(|provider| {
                             let result =
                                 bdm_application::catalog::lookup_tag(&provider, kind, &name);
@@ -582,6 +615,19 @@ mod tests {
         assert_eq!(app.tag_lookup_account_label(), "使用已保存的 Gelbooru 账号");
         app.prefs.download_source = DownloadSource::Danbooru;
         assert_eq!(app.tag_lookup_account_label(), "公开查询 · 未配置账号");
+    }
+
+    #[test]
+    fn safe_lookup_uses_the_shared_danbooru_account_and_correct_label() {
+        use bdm_domain::sources::{DownloadSource, SourceProvider};
+        let mut app = app();
+        app.catalog.lookup_provider = Some(SourceProvider::Gelbooru);
+        app.prefs.download_source = DownloadSource::Safebooru;
+        app.danbooru.saved_username = Some("synthetic".into());
+        assert_eq!(app.tag_lookup_source_label(), "Safebooru");
+        assert_eq!(app.tag_lookup_account_label(), "使用已保存的 Danbooru 账号");
+        app.prefs.download_source = DownloadSource::Automatic;
+        assert_eq!(app.tag_lookup_source_label(), "Gelbooru");
     }
 
     #[test]

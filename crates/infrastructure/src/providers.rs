@@ -15,7 +15,9 @@ impl SourceTagCategories {
     ) -> Self {
         Self {
             mode,
-            danbooru: danbooru.and_then(crate::danbooru::DanbooruProvider::new),
+            danbooru: danbooru.and_then(|credentials| {
+                crate::danbooru::DanbooruProvider::for_source(credentials, mode)
+            }),
             gelbooru: gelbooru.and_then(crate::gelbooru::GelbooruProvider::new),
         }
     }
@@ -86,6 +88,19 @@ mod tests {
         assert_eq!(
             blocked.lookup_categories(&names),
             Err(CatalogError::Authentication)
+        );
+    }
+
+    #[test]
+    fn safe_category_lookup_does_not_fall_back_to_gelbooru() {
+        let provider = SourceTagCategories {
+            mode: DownloadSource::Safebooru,
+            danbooru: Err(CatalogError::Service),
+            gelbooru: Err(CatalogError::GelbooruCredentials),
+        };
+        assert_eq!(
+            provider.lookup_categories(&["scenery".into()]),
+            Err(CatalogError::Service)
         );
     }
 }

@@ -80,11 +80,15 @@ impl BdmApp {
             .ok_or_else(|| "请先保存 Danbooru 用户名和 API Key。".to_owned())?;
         let (sender, receiver) = mpsc::channel();
         let repaint = ctx.clone();
+        let source_mode = self.prefs.download_source;
         std::thread::Builder::new()
             .name("danbooru-account-verification".into())
             .spawn(move || {
-                let result = bdm_infrastructure::danbooru::DanbooruProvider::new(Some(credentials))
-                    .and_then(|provider| provider.verify_credentials());
+                let result = bdm_infrastructure::danbooru::DanbooruProvider::for_source(
+                    Some(credentials),
+                    source_mode,
+                )
+                .and_then(|provider| provider.verify_credentials());
                 let _ = sender.send(result);
                 repaint.request_repaint();
             })
@@ -125,7 +129,7 @@ impl BdmApp {
         );
     }
 
-    fn invalidate_danbooru_verification(&mut self) {
+    pub(crate) fn invalidate_danbooru_verification(&mut self) {
         self.danbooru.generation = self.danbooru.generation.wrapping_add(1);
         self.danbooru.verification = None;
         self.cancel_tag_lookup();
@@ -214,7 +218,7 @@ impl BdmApp {
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                section(ui, "Danbooru", "");
+                section(ui, "Danbooru / Safebooru", "");
                 let saved = self.danbooru.saved_username.as_deref()
                     == Some(self.danbooru.username.trim())
                     && self.danbooru.api_key.is_empty();
@@ -249,7 +253,10 @@ impl BdmApp {
                     },
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.hyperlink_to("获取 API Key ↗", "https://danbooru.donmai.us/profile");
+                    ui.hyperlink_to(
+                        "获取 API Key ↗",
+                        format!("{}/profile", self.prefs.download_source.danbooru_base_url()),
+                    );
                 });
             });
             ui.add_space(14.0);
@@ -313,10 +320,17 @@ impl BdmApp {
                         self.danbooru.error = Some(error);
                     }
                 }
-                ui.label(RichText::new("danbooru.donmai.us").size(12.0).color(MUTED))
-                    .on_hover_text(
-                        "验证连接检查已保存账号；在画师／角色页选择收藏后下载静态原图。",
-                    );
+                ui.label(
+                    RichText::new(
+                        self.prefs
+                            .download_source
+                            .danbooru_base_url()
+                            .trim_start_matches("https://"),
+                    )
+                    .size(12.0)
+                    .color(MUTED),
+                )
+                .on_hover_text("验证连接检查已保存账号；在画师／角色页选择收藏后下载静态原图。");
             });
             if let Some(error) = &self.danbooru.error {
                 ui.add(egui::Label::new(RichText::new(error).color(DANGER)).wrap());
@@ -371,7 +385,10 @@ impl BdmApp {
                     Err(error) => self.danbooru.error = Some(error),
                 }
             }
-            ui.hyperlink_to("获取 API Key ↗", "https://danbooru.donmai.us/profile");
+            ui.hyperlink_to(
+                "获取 API Key ↗",
+                format!("{}/profile", self.prefs.download_source.danbooru_base_url()),
+            );
         });
         if let Some(error) = &self.danbooru.error {
             ui.add(egui::Label::new(RichText::new(error).color(DANGER)).wrap());

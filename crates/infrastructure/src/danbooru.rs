@@ -12,10 +12,18 @@ pub struct DanbooruProvider {
     client: Client,
     credentials: Option<SourceCredentials>,
     media_client: Client,
+    safe_only: bool,
 }
 
 impl DanbooruProvider {
     pub fn new(credentials: Option<SourceCredentials>) -> Result<Self, CatalogError> {
+        Self::for_source(credentials, bdm_domain::sources::DownloadSource::Danbooru)
+    }
+
+    pub fn for_source(
+        credentials: Option<SourceCredentials>,
+        mode: bdm_domain::sources::DownloadSource,
+    ) -> Result<Self, CatalogError> {
         let client = Client::builder()
             .user_agent("BooruDatasetManager/0.1")
             .https_only(true)
@@ -35,19 +43,43 @@ impl DanbooruProvider {
                 .map_err(|_| CatalogError::Network)?,
             client,
             credentials,
+            safe_only: mode == bdm_domain::sources::DownloadSource::Safebooru,
         })
     }
 
     fn request(&self, path: &str) -> reqwest::blocking::RequestBuilder {
         let request = self
             .client
-            .get(format!("https://danbooru.donmai.us/{path}"))
+            .get(format!("{}/{path}", self.base_url()))
             .header(ACCEPT, "application/json");
         if let Some(credentials) = &self.credentials {
             request.basic_auth(&credentials.username, Some(&credentials.api_key))
         } else {
             request
         }
+    }
+
+    pub fn base_url(&self) -> &'static str {
+        if self.safe_only {
+            "https://safebooru.donmai.us"
+        } else {
+            "https://danbooru.donmai.us"
+        }
+    }
+
+    fn post_request(&self, tag: &str, before: Option<i64>) -> reqwest::blocking::RequestBuilder {
+        let page = before
+            .map(|id| format!("b{id}"))
+            .unwrap_or_else(|| "1".into());
+        let query = if self.safe_only {
+            format!("{tag} rating:g")
+        } else {
+            tag.to_owned()
+        };
+        self.request("posts.json").query(&[
+            ("tags",query.as_str()),("page",page.as_str()),("limit","100"),
+            ("only","id,md5,file_url,file_ext,file_size,image_width,image_height,tag_string,tag_string_artist,tag_string_character,tag_string_general,tag_string_copyright,tag_string_meta,rating,is_deleted"),
+        ])
     }
 
     fn send(request: reqwest::blocking::RequestBuilder) -> Result<Vec<u8>, CatalogError> {
@@ -129,7 +161,10 @@ impl DanbooruProvider {
 fn media_url(value: &str) -> Result<reqwest::Url, IngestError> {
     let url = reqwest::Url::parse(value).map_err(|_| IngestError::InvalidUrl)?;
     if url.scheme() != "https"
-        || !matches!(url.host_str(), Some("cdn.donmai.us" | "danbooru.donmai.us"))
+        || !matches!(
+            url.host_str(),
+            Some("cdn.donmai.us" | "danbooru.donmai.us" | "safebooru.donmai.us")
+        )
         || url.port().is_some_and(|port| port != 443)
         || !url.username().is_empty()
         || url.password().is_some()
@@ -148,13 +183,13 @@ impl MediaProvider for DanbooruProvider {
         tag: &str,
         before: Option<i64>,
     ) -> Result<Vec<bdm_domain::ingest::SourcePost>, IngestError> {
-        let page = before
-            .map(|id| format!("b{id}"))
-            .unwrap_or_else(|| "1".into());
-        let mut response = self.request("posts.json").query(&[
-            ("tags", tag), ("page", &page), ("limit", "100"),
-            ("only", "id,md5,file_url,file_ext,file_size,image_width,image_height,tag_string,tag_string_artist,tag_string_character,tag_string_general,tag_string_copyright,tag_string_meta,rating,is_deleted"),
-        ]).send().map_err(|error| if error.is_timeout() { CatalogError::Timeout } else { CatalogError::Network })?;
+        let mut response = self.post_request(tag, before).send().map_err(|error| {
+            if error.is_timeout() {
+                CatalogError::Timeout
+            } else {
+                CatalogError::Network
+            }
+        })?;
         if response.status().as_u16() == 429 {
             return Err(IngestError::RateLimited(retry_after(response.headers())));
         }
@@ -171,14 +206,7 @@ impl MediaProvider for DanbooruProvider {
         if bytes.len() as u64 > LIMIT {
             return Err(CatalogError::InvalidResponse.into());
         }
-        let mut posts: Vec<bdm_domain::ingest::SourcePost> =
-            serde_json::from_slice(&bytes).map_err(|_| CatalogError::InvalidResponse)?;
-        for post in &mut posts {
-            post.provider = bdm_domain::sources::SourceProvider::Danbooru;
-        }
-        if posts.len() > 100 {
-            return Err(CatalogError::InvalidResponse.into());
-        }
+        let posts = decode_posts(&bytes, self.safe_only)?;
         std::thread::sleep(Duration::from_millis(250));
         Ok(posts)
     }
@@ -190,6 +218,12 @@ impl MediaProvider for DanbooruProvider {
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<(), IngestError> {
         use std::{io::Write, sync::atomic::Ordering};
+        if self.safe_only
+            && (post.provider != bdm_domain::sources::SourceProvider::Danbooru
+                || post.rating != "g")
+        {
+            return Err(IngestError::InvalidMedia);
+        }
         if cancel.load(Ordering::Relaxed) {
             return Err(IngestError::Cancelled);
         }
@@ -249,6 +283,21 @@ impl MediaProvider for DanbooruProvider {
         std::thread::sleep(Duration::from_millis(250));
         Ok(())
     }
+}
+
+fn decode_posts(
+    bytes: &[u8],
+    safe_only: bool,
+) -> Result<Vec<bdm_domain::ingest::SourcePost>, CatalogError> {
+    let mut posts: Vec<bdm_domain::ingest::SourcePost> =
+        serde_json::from_slice(bytes).map_err(|_| CatalogError::InvalidResponse)?;
+    if posts.len() > 100 || (safe_only && posts.iter().any(|p| p.rating != "g")) {
+        return Err(CatalogError::InvalidResponse);
+    }
+    for post in &mut posts {
+        post.provider = bdm_domain::sources::SourceProvider::Danbooru;
+    }
+    Ok(posts)
 }
 
 fn retry_after(headers: &HeaderMap) -> u64 {
@@ -473,6 +522,116 @@ impl TagProvider for DanbooruProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn general_post() -> serde_json::Value {
+        serde_json::json!({"id":42,"md5":"0123456789abcdef0123456789abcdef","file_url":"https://cdn.donmai.us/original/example.png","file_ext":"png","file_size":4096,"image_width":1024,"image_height":1024,"tag_string":"scenery","tag_string_artist":"","tag_string_character":"","rating":"g","is_deleted":false})
+    }
+
+    #[test]
+    fn safebooru_uses_only_the_fixed_safe_origin_and_keeps_credentials_out_of_urls() {
+        use bdm_domain::sources::DownloadSource;
+        for value in ["Safebooru", "SafeDanbooru", "safebooru", "safedanbooru"] {
+            assert_eq!(
+                serde_json::from_value::<DownloadSource>(serde_json::json!(value)).unwrap(),
+                DownloadSource::Safebooru
+            );
+        }
+        let provider = DanbooruProvider::for_source(
+            Some(SourceCredentials {
+                username: "synthetic_user".into(),
+                api_key: "synthetic-secret".into(),
+            }),
+            DownloadSource::Safebooru,
+        )
+        .unwrap();
+        for path in [
+            "tags.json",
+            "profile.json",
+            "tag_aliases.json",
+            "tag_implications.json",
+        ] {
+            let request = provider.request(path).build().unwrap();
+            assert_eq!(request.url().host_str(), Some("safebooru.donmai.us"));
+            assert!(!request.url().as_str().contains("synthetic"));
+            assert!(request
+                .headers()
+                .contains_key(reqwest::header::AUTHORIZATION));
+        }
+        let request = provider
+            .post_request("scenery official_art", Some(500))
+            .build()
+            .unwrap();
+        let query = request
+            .url()
+            .query_pairs()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            query.get("tags").map(|s| s.as_ref()),
+            Some("scenery official_art rating:g")
+        );
+        assert_eq!(query.get("page").map(|s| s.as_ref()), Some("b500"));
+        let ordinary = DanbooruProvider::new(None)
+            .unwrap()
+            .post_request("scenery", None)
+            .build()
+            .unwrap();
+        assert_eq!(ordinary.url().host_str(), Some("danbooru.donmai.us"));
+        assert_eq!(
+            ordinary
+                .url()
+                .query_pairs()
+                .find(|(k, _)| k == "tags")
+                .unwrap()
+                .1,
+            "scenery"
+        );
+        assert!(!ordinary
+            .headers()
+            .contains_key(reqwest::header::AUTHORIZATION));
+        assert!(media_url("https://safebooru.donmai.us/original/example.png").is_ok());
+        assert!(media_url("https://safebooru.org/original/example.png").is_err());
+    }
+
+    #[test]
+    fn safe_response_and_retry_download_cannot_admit_other_ratings() {
+        use bdm_domain::sources::{DownloadSource, SourceProvider};
+        let json = serde_json::to_vec(&vec![general_post()]).unwrap();
+        let posts = decode_posts(&json, true).unwrap();
+        assert_eq!(posts[0].provider, SourceProvider::Danbooru);
+        assert_eq!(posts[0].id, 42);
+        let provider = DanbooruProvider::for_source(None, DownloadSource::Safebooru).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("must-not-download.png");
+        for rating in ["s", "q", "e", ""] {
+            let mut value = general_post();
+            value["rating"] = serde_json::json!(rating);
+            let bytes = serde_json::to_vec(&vec![value]).unwrap();
+            assert_eq!(
+                decode_posts(&bytes, true),
+                Err(CatalogError::InvalidResponse)
+            );
+            let post = decode_posts(&bytes, false).unwrap().remove(0);
+            assert_eq!(
+                provider.download(&post, &path, &std::sync::atomic::AtomicBool::new(false)),
+                Err(IngestError::InvalidMedia)
+            );
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit read-only anonymous live Safebooru metadata smoke"]
+    fn live_safebooru_public_metadata() {
+        let provider =
+            DanbooruProvider::for_source(None, bdm_domain::sources::DownloadSource::Safebooru)
+                .unwrap();
+        let tag = provider.lookup("scenery").unwrap().unwrap();
+        assert_eq!(tag.provider, bdm_domain::sources::SourceProvider::Danbooru);
+        let posts = provider.posts("scenery", None).unwrap();
+        assert!(!posts.is_empty());
+        assert!(posts.iter().all(|p| p.rating == "g"));
+        println!("Safebooru anonymous API verified: tag={}, General metadata records={}; no images downloaded",tag.name,posts.len());
+    }
 
     #[test]
     fn suggestions_are_bounded_literal_category_matches_and_not_aliases() {
@@ -727,5 +886,37 @@ mod tests {
             .unwrap()
             .verify_credentials()
             .unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "explicit read-only Safebooru verification with the configured Danbooru account"]
+    fn live_safebooru_saved_account_verification() {
+        use bdm_ports::SourceCredentialStore;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let store = if root.join("portable.flag").is_file() {
+            crate::credentials::NativeCredentialStore::danbooru_portable(root)
+        } else {
+            crate::credentials::NativeCredentialStore::danbooru()
+        };
+        let credentials = store
+            .load()
+            .map_err(|_| CatalogError::Credentials)
+            .unwrap()
+            .ok_or(CatalogError::Credentials)
+            .unwrap();
+        let provider = DanbooruProvider::for_source(
+            Some(credentials),
+            bdm_domain::sources::DownloadSource::Safebooru,
+        )
+        .unwrap();
+        provider.verify_credentials().unwrap();
+        let posts = provider.posts("scenery", None).unwrap();
+        assert!(!posts.is_empty() && posts.iter().all(|p| p.rating == "g"));
+        println!("Saved account and General-only metadata verified on Safebooru; no images downloaded or credentials changed.");
     }
 }

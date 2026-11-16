@@ -1,5 +1,17 @@
 # Source provider adapters
 
+## Safebooru: Danbooru safe entry
+
+`Safebooru` selects `https://safebooru.donmai.us`, the General-only entry to the Danbooru database, rather than the independent `safebooru.org` service. The desktop source selector offers Automatic, Danbooru, Safebooru (General), and Gelbooru. Safebooru shares Danbooru's username/API Key, collections, tag/post IDs and deduplication namespace; stored provider identity remains `danbooru`, while each task persists `source_mode: Safebooru` and reports a Safebooru source label.
+
+Tag lookup/suggestions, categories, aliases, character implications and account verification use the selected fixed API origin. Download queries add `rating:g`; metadata pages, cached retry records and original downloads are checked for General rating. A safe task never automatically falls back to Danbooru's unrestricted entry or Gelbooru. Its source mode and cursor survive pause/resume and client restart. Existing library images and the original Danbooru-to-Gelbooru automatic mode are unchanged.
+
+CLI/MCP `download_submit` accepts `source: "safebooru"` (`safedanbooru` is an alias) with an existing collection ID. Submission only queues the job; the daemon or `jobs_tick` starts the normal download pipeline. API tag counts come from the shared tag database and are not a promise that every counted post is General or eligible for import.
+
+Authentication remains Basic Auth on the exact selected HTTPS API origin, without redirects or plaintext key storage. Keys are never attached to CDN/original-file requests. The API contract follows the upstream [safe-mode host configuration](https://github.com/danbooru/danbooru/blob/master/config/danbooru_default_config.rb) and [General-only query policy](https://github.com/danbooru/danbooru/blob/master/app/logical/post_query_builder.rb).
+
+Live check on 2026-11-16: both anonymous Tag lookup and the saved-account profile check returned the site's Cloudflare website-verification response. No image download was attempted, no source credentials were changed, and successful live API access is not claimed. The UI reports `WebsiteVerification` and links to the selected safe origin; passing a browser check does not guarantee API availability.
+
 ## Gelbooru implementation (2026-11-06)
 
 The native adapter uses Gelbooru's official JSON DAPI for exact tag lookup, bulk tag categories and post listing, with bounded original-image downloads from validated Gelbooru image hosts. User ID and API Key are independent from Danbooru/AI credentials and are stored in Windows Credential Manager (with portable-folder isolation). Gelbooru requires credentials in the API query parameters; requests, response bodies and secret-bearing URLs must never be logged. Image requests receive no API credentials and follow no redirects.

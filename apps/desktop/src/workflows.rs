@@ -2155,13 +2155,17 @@ impl BdmApp {
             .collect();
         let (sender, receiver) = mpsc::channel();
         let repaint = ctx.clone();
+        let source_mode = self.prefs.download_source;
         std::thread::Builder::new()
             .name("character-relations".into())
             .spawn(move || {
                 use bdm_ports::TagProvider;
                 let result = (|| {
-                    let provider = bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
-                        .map_err(|e| e.to_string())?;
+                    let provider = bdm_infrastructure::danbooru::DanbooruProvider::for_source(
+                        credentials,
+                        source_mode,
+                    )
+                    .map_err(|e| e.to_string())?;
                     for name in names {
                         for base in provider
                             .character_implications(&name)
@@ -2227,13 +2231,17 @@ impl BdmApp {
             .collect();
         let (sender, receiver) = mpsc::channel();
         let repaint = ctx.clone();
+        let source_mode = self.prefs.download_source;
         std::thread::Builder::new()
             .name("tag-normalization".into())
             .spawn(move || {
                 use bdm_ports::TagProvider;
                 let result = (|| {
-                    let provider = bdm_infrastructure::danbooru::DanbooruProvider::new(credentials)
-                        .map_err(|e| e.to_string())?;
+                    let provider = bdm_infrastructure::danbooru::DanbooruProvider::for_source(
+                        credentials,
+                        source_mode,
+                    )
+                    .map_err(|e| e.to_string())?;
                     for name in names {
                         if rules.resolved_aliases.contains(&name) {
                             continue;

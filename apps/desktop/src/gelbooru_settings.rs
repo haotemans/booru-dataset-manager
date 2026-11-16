@@ -182,15 +182,16 @@ impl BdmApp {
     }
     pub fn gelbooru_settings_card(&mut self, ui: &mut egui::Ui) {
         card().show(ui,|ui| {
-            ui.set_width(ui.available_width());setting_header(ui,"download","图片来源与 Gelbooru 备用");ui.add_space(12.0);
+            ui.set_width(ui.available_width());setting_header(ui,"download","图片来源");ui.add_space(12.0);
             let before=self.prefs.download_source;
             egui::ComboBox::from_id_salt("download_source").width(300.0).selected_text(before.label()).show_ui(ui,|ui| {
-                for mode in [DownloadSource::Automatic,DownloadSource::Danbooru,DownloadSource::Gelbooru] {
+                for mode in [DownloadSource::Automatic,DownloadSource::Danbooru,DownloadSource::Safebooru,DownloadSource::Gelbooru] {
                     ui.selectable_value(&mut self.prefs.download_source,mode,mode.label());
                 }
-            });
-            if before!=self.prefs.download_source {self.cancel_tag_lookup();}
-            icon_label(ui,"reset","故障自动切换","自动模式在连接或服务异常经有限重试后切换备用源；认证失败、网站验证、限流不自动切换。设置只影响新任务，续传沿用已保存的来源与进度。");
+            }).response.on_hover_text("设置影响新任务；续传沿用任务已保存的来源与进度。");
+            if before!=self.prefs.download_source {self.invalidate_danbooru_verification();}
+            if self.prefs.download_source==DownloadSource::Safebooru {ui.label(RichText::new("仅 General · 共用 Danbooru 账号与收藏").size(12.0).color(MUTED));}
+            if self.prefs.download_source==DownloadSource::Automatic {icon_label(ui,"reset","故障自动切换","自动模式在连接或服务异常经有限重试后切换备用源；认证失败、网站验证、限流不自动切换。设置只影响新任务，续传沿用已保存的来源与进度。");}
             ui.add_space(12.0);
             ui.horizontal(|ui| {ui.label(RichText::new("Gelbooru").strong());ui.hyperlink_to("获取凭据 ↗","https://gelbooru.com/index.php?page=account&s=options");});
             ui.columns(2,|columns| {
