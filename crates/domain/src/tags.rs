@@ -197,6 +197,20 @@ impl TagRules {
 /// Apply confirmed character hierarchy to a view or export without rewriting its
 /// source artifact. A base survives whenever its specific variant is absent.
 pub fn filter_character_tags(content: &str, comma_separated: bool, rules: &TagRules) -> String {
+    filter_identity_tags(content, comma_separated, rules, "", None)
+}
+
+fn filter_identity_tags(
+    content: &str,
+    comma_separated: bool,
+    rules: &TagRules,
+    artists: &str,
+    allowed: Option<&BTreeSet<String>>,
+) -> String {
+    let source_artists: BTreeSet<_> = artists
+        .split_whitespace()
+        .map(|n| rules.canonical(n))
+        .collect();
     let tags: Vec<_> = if comma_separated {
         content.split(',').map(str::trim).collect()
     } else {
@@ -214,7 +228,22 @@ pub fn filter_character_tags(content: &str, comma_separated: bool, rules: &TagRu
     let retained: Vec<_> = tags
         .iter()
         .zip(&names)
-        .filter(|(tag, name)| !redundant.contains(*name) && !rules.is_excluded_artist(tag))
+        .filter(|(tag, name)| {
+            let artist_name = tag
+                .strip_prefix("@artist ")
+                .or_else(|| tag.strip_prefix("artist:"))
+                .unwrap_or(tag)
+                .trim_start_matches('@')
+                .replace(' ', "_");
+            let artist_name = rules.canonical(&artist_name);
+            let artist = tag.starts_with('@')
+                || tag.starts_with("artist:")
+                || source_artists.contains(&artist_name)
+                || rules.categories.get(&artist_name) == Some(&1);
+            !redundant.contains(*name)
+                && !rules.is_excluded_artist(tag)
+                && !allowed.is_some_and(|names| artist && !names.contains(&artist_name))
+        })
         .map(|(tag, _)| *tag)
         .collect();
     if retained.len() == tags.len() {
@@ -232,10 +261,21 @@ pub fn filter_caption_characters(
     characters: &str,
     rules: &TagRules,
 ) -> String {
-    let artists: BTreeSet<_> = artists
+    filter_caption_identities(content, artists, characters, rules, None)
+}
+
+fn filter_caption_identities(
+    content: &str,
+    artists: &str,
+    characters: &str,
+    rules: &TagRules,
+    allowed: Option<&BTreeSet<String>>,
+) -> String {
+    let mut artists: BTreeSet<_> = artists
         .split_whitespace()
         .map(|n| rules.canonical(n))
         .collect();
+    artists.extend(allowed.into_iter().flatten().cloned());
     let characters: BTreeSet<_> = characters
         .split_whitespace()
         .map(|n| rules.canonical(n))
@@ -261,8 +301,9 @@ pub fn filter_caption_characters(
                 .join("_")
                 .to_lowercase(),
         );
-        let excluded_artist = rules.is_excluded_artist(tag);
-        let is_artist = artists.contains(&name) || excluded_artist;
+        let is_artist = artists.contains(&name) || rules.is_excluded_artist(tag);
+        let excluded_artist = rules.is_excluded_artist(tag)
+            || (is_artist && allowed.is_some_and(|names| !names.contains(&name)));
         let is_character = !artist_mark && characters.contains(&name) && !is_artist;
         if !is_artist && !is_character {
             break;
@@ -307,6 +348,81 @@ pub fn filter_caption_characters(
         return format!("{bom}{}", result.trim_start());
     }
     result
+}
+
+fn allowed_artists(
+    media: &crate::ingest::StoredMedia,
+    rules: &TagRules,
+) -> Option<BTreeSet<String>> {
+    (!media.artist_scope.is_empty()).then(|| {
+        media
+            .artist_scope
+            .iter()
+            .map(|name| rules.canonical(name))
+            .filter(|name| !rules.is_excluded_artist(name))
+            .collect()
+    })
+}
+
+pub fn filter_media_tags(
+    content: &str,
+    comma_separated: bool,
+    media: &crate::ingest::StoredMedia,
+    rules: &TagRules,
+) -> String {
+    filter_identity_tags(
+        content,
+        comma_separated,
+        rules,
+        &media.post.tag_string_artist,
+        allowed_artists(media, rules).as_ref(),
+    )
+}
+
+pub fn filter_media_caption(
+    content: &str,
+    media: &crate::ingest::StoredMedia,
+    rules: &TagRules,
+) -> String {
+    filter_caption_identities(
+        content,
+        &media.post.tag_string_artist,
+        &media.post.tag_string_character,
+        rules,
+        allowed_artists(media, rules).as_ref(),
+    )
+}
+
+pub fn normalize_media_tags(
+    media: &crate::ingest::StoredMedia,
+    rules: &TagRules,
+) -> NormalizedTags {
+    let Some(allowed) = allowed_artists(media, rules) else {
+        return normalize(
+            &media.post.tag_string,
+            &media.post.tag_string_artist,
+            &media.post.tag_string_character,
+            rules,
+        );
+    };
+    let raw = filter_identity_tags(
+        &media.post.tag_string,
+        false,
+        rules,
+        &media.post.tag_string_artist,
+        Some(&allowed),
+    );
+    let raw = format!(
+        "{} {}",
+        raw,
+        allowed.iter().cloned().collect::<Vec<_>>().join(" ")
+    );
+    normalize(
+        &raw,
+        &allowed.iter().cloned().collect::<Vec<_>>().join(" "),
+        &media.post.tag_string_character,
+        rules,
+    )
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

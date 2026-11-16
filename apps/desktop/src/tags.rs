@@ -76,15 +76,10 @@ impl TagSummary {
             .stored
             .values()
             .flat_map(|media| {
-                bdm_domain::tags::normalize(
-                    &media.post.tag_string,
-                    &media.post.tag_string_artist,
-                    &media.post.tag_string_character,
-                    &app.workflows.rules,
-                )
-                .warnings
-                .into_iter()
-                .map(move |warning| (media.id as usize, warning))
+                bdm_domain::tags::normalize_media_tags(media, &app.workflows.rules)
+                    .warnings
+                    .into_iter()
+                    .map(move |warning| (media.id as usize, warning))
             })
             .collect();
         Self {

@@ -87,6 +87,10 @@ pub struct StoredMedia {
     #[serde(default)]
     pub source_sha256: String,
     pub collections: BTreeSet<i64>,
+    /// Explicit artist download targets. Empty keeps source-driven attribution
+    /// for character/query imports. Raw source artist metadata is never replaced.
+    #[serde(default)]
+    pub artist_scope: BTreeSet<String>,
     pub keep: bool,
     #[serde(default = "default_minimum_short_side")]
     pub minimum_short_side: u32,

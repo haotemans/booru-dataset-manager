@@ -733,12 +733,7 @@ pub fn run(
                 let mut images = Vec::new();
                 for id in &work {
                     if let Some(media) = all.get(id) {
-                        let normalized = bdm_domain::tags::normalize(
-                            &media.post.tag_string,
-                            &media.post.tag_string_artist,
-                            &media.post.tag_string_character,
-                            &rules,
-                        );
+                        let normalized = bdm_domain::tags::normalize_media_tags(media, &rules);
                         // Artist and character names are excluded; unknown/special terms remain local.
                         let paired_txt = if send_images {
                             match std::fs::read_to_string(media.path.with_extension("raw_tags.txt"))

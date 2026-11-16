@@ -6,7 +6,7 @@ use md5::Md5;
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{BufReader, Cursor, Read},
     path::{Path, PathBuf},
@@ -327,6 +327,7 @@ impl SqliteCatalog {
         &self,
         post: &SourcePost,
         collection: i64,
+        artist_scope: &BTreeSet<String>,
     ) -> Result<BTreeSet<i64>, IngestError> {
         let mut ids = BTreeSet::from([collection]);
         let rules = self.tag_rules()?;
@@ -338,6 +339,9 @@ impl SqliteCatalog {
             (&post.tag_string_character, 4),
         ] {
             for name in tags.split_whitespace() {
+                if category == 1 && !artist_scope.is_empty() {
+                    continue;
+                }
                 if category == 1 && rules.is_excluded_artist(name) {
                     continue;
                 }
@@ -351,6 +355,22 @@ impl SqliteCatalog {
             }
         }
         Ok(ids)
+    }
+
+    fn artist_scope_for_collection(
+        &self,
+        collection: i64,
+    ) -> Result<BTreeSet<String>, IngestError> {
+        let (category, tag): (u8, String) = storage(self.connection.query_row(
+            "SELECT category,tag FROM collections WHERE id=?1",
+            [collection],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ))?;
+        Ok(if category == 1 {
+            BTreeSet::from([tag])
+        } else {
+            BTreeSet::new()
+        })
     }
 
     fn commit_media(&mut self, media: &StoredMedia) -> Result<(), IngestError> {
@@ -377,6 +397,14 @@ impl SqliteCatalog {
                 "UPDATE media SET metadata=?2 WHERE id=?1",
                 params![id, storage(serde_json::to_string(&persisted))?],
             ))?;
+        } else {
+            let json: String =
+                storage(
+                    tx.query_row("SELECT metadata FROM media WHERE id=?1", [id], |r| r.get(0)),
+                )?;
+            let original: StoredMedia = storage(serde_json::from_str(&json))?;
+            persisted.artist_scope.extend(original.artist_scope);
+            storage(tx.execute("UPDATE media SET metadata=json_set(metadata,'$.artist_scope',json(?2)) WHERE id=?1",params![id,storage(serde_json::to_string(&persisted.artist_scope))?]))?;
         }
         storage(tx.execute(
             "INSERT OR IGNORE INTO media_sources(post_id,media_id,metadata,provider) VALUES(?1,?2,?3,?4)",
@@ -388,7 +416,7 @@ impl SqliteCatalog {
                 params![collection, id],
             ))?;
         }
-        attach_post_collections(&tx, &media.post, id)?;
+        attach_post_collections(&tx, &media.post, id, &persisted.artist_scope)?;
         storage(tx.execute(
             "INSERT OR IGNORE INTO analysis_jobs(media_id) VALUES(?1)",
             [id],
@@ -447,16 +475,22 @@ impl SqliteCatalog {
             self.connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
         )?;
+        backfill_artist_scopes(&tx)?;
         {
             let mut query = storage(
-                tx.prepare("SELECT media_id, metadata FROM media_sources ORDER BY media_id"),
+                tx.prepare("SELECT s.media_id,s.metadata,m.metadata FROM media_sources s JOIN media m ON s.media_id=m.id ORDER BY s.media_id"),
             )?;
             for row in storage(query.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             }))? {
-                let (id, json) = storage(row)?;
+                let (id, json, metadata) = storage(row)?;
                 let post: SourcePost = storage(serde_json::from_str(&json))?;
-                attach_post_collections(&tx, &post, id)?;
+                let media: StoredMedia = storage(serde_json::from_str(&metadata))?;
+                attach_post_collections(&tx, &post, id, &media.artist_scope)?;
             }
         }
         storage(tx.commit())
@@ -518,6 +552,7 @@ fn attach_post_collections(
     tx: &rusqlite::Transaction<'_>,
     post: &SourcePost,
     media: i64,
+    artist_scope: &BTreeSet<String>,
 ) -> Result<(), IngestError> {
     let json: String = storage(tx.query_row(
         "SELECT metadata FROM tag_rules WHERE id=1",
@@ -529,7 +564,7 @@ fn attach_post_collections(
         "INSERT OR IGNORE INTO collections(provider, category, tag) VALUES(?2, 1, ?1)",
     ))?;
     for name in post.tag_string_artist.split_whitespace() {
-        if rules.is_excluded_artist(name) {
+        if !artist_scope.is_empty() || rules.is_excluded_artist(name) {
             continue;
         }
         storage(insert.execute(params![name, post.provider.key()]))?;
@@ -540,7 +575,7 @@ fn attach_post_collections(
         (&post.tag_string_character, 4),
     ] {
         for name in tags.split_whitespace() {
-            if category == 1 && rules.is_excluded_artist(name) {
+            if category == 1 && (!artist_scope.is_empty() || rules.is_excluded_artist(name)) {
                 continue;
             }
             storage(attach.execute(params![media, category, name, post.provider.key()]))?;
@@ -560,6 +595,53 @@ fn attach_post_collections(
         if bdm_domain::catalog::matches_download_query(&query, &post.tag_string) {
             storage(attach_query.execute(params![collection, media]))?;
         }
+    }
+    if !artist_scope.is_empty() {
+        let mut query=storage(tx.prepare("SELECT c.id,c.tag FROM collection_media cm JOIN collections c ON cm.collection_id=c.id WHERE cm.media_id=?1 AND c.category=1"))?;
+        let rows: Vec<(i64, String)> = storage(
+            query
+                .query_map([media], |r| Ok((r.get(0)?, r.get(1)?)))
+                .and_then(|rows| rows.collect()),
+        )?;
+        drop(query);
+        for (id, tag) in rows {
+            if artist_scope.contains(&tag) {
+                continue;
+            }
+            storage(tx.execute(
+                "DELETE FROM collection_media WHERE collection_id=?1 AND media_id=?2",
+                params![id, media],
+            ))?;
+            storage(tx.execute("DELETE FROM collections WHERE id=?1 AND source_tag_id IS NULL AND NOT EXISTS(SELECT 1 FROM collection_media WHERE collection_id=?1) AND NOT EXISTS(SELECT 1 FROM ingest_jobs WHERE collection_id=?1)",[id]))?;
+        }
+    }
+    Ok(())
+}
+
+/// Upgrade only attribution proven by an actual artist download job, not by a
+/// source-discovered card or a coincidental co-occurring artist name.
+fn backfill_artist_scopes(tx: &rusqlite::Transaction<'_>) -> Result<(), IngestError> {
+    let mut scopes: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
+    let mut query=storage(tx.prepare("SELECT DISTINCT s.media_id,c.tag FROM ingest_outcomes o JOIN ingest_jobs j ON j.id=o.job_id JOIN collections c ON c.id=j.collection_id JOIN media_sources s ON s.provider=o.provider AND s.post_id=o.post_id JOIN media m ON m.id=s.media_id WHERE c.category=1 AND o.outcome IN ('imported','duplicate') AND NOT EXISTS(SELECT 1 FROM json_each(m.metadata,'$.artist_scope') a WHERE a.value=c.tag)"))?;
+    for row in storage(query.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))))?
+    {
+        let (id, tag) = storage(row)?;
+        scopes.entry(id).or_default().insert(tag);
+    }
+    drop(query);
+    for (id, scope) in scopes {
+        let json: String =
+            storage(tx.query_row("SELECT metadata FROM media WHERE id=?1", [id], |r| r.get(0)))?;
+        let mut media: StoredMedia = storage(serde_json::from_str(&json))?;
+        media.artist_scope.extend(scope);
+        storage(tx.execute(
+            "UPDATE media SET metadata=json_set(metadata,'$.artist_scope',json(?2)) WHERE id=?1",
+            params![id, storage(serde_json::to_string(&media.artist_scope))?],
+        ))?;
+        storage(tx.execute(
+            "INSERT INTO audit_log(action,metadata) VALUES('artist_scope_backfill',?1)",
+            [serde_json::json!({"media_id":id,"artist_scope":media.artist_scope}).to_string()],
+        ))?;
     }
     Ok(())
 }
@@ -665,11 +747,15 @@ impl SqliteCatalog {
             [id],
             |row| row.get(0),
         ))?;
-        let media: StoredMedia = storage(serde_json::from_str(&metadata))?;
+        let mut media: StoredMedia = storage(serde_json::from_str(&metadata))?;
         if !media.path.is_file() {
             return Err(IngestError::Storage);
         }
-        let associations = self.associations(post, collection)?;
+        let old_scope = media.artist_scope.clone();
+        media
+            .artist_scope
+            .extend(self.artist_scope_for_collection(collection)?);
+        let associations = self.associations(post, collection, &media.artist_scope)?;
         let tx = storage(
             self.connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
@@ -680,13 +766,16 @@ impl SqliteCatalog {
                 params![collection, id],
             ))?;
         }
-        attach_post_collections(&tx, post, id)?;
+        if media.artist_scope != old_scope {
+            storage(tx.execute("UPDATE media SET metadata=json_set(metadata,'$.artist_scope',json(?2)) WHERE id=?1",params![id,storage(serde_json::to_string(&media.artist_scope))?]))?;
+        }
+        attach_post_collections(&tx, post, id, &media.artist_scope)?;
         storage(tx.commit())?;
         let tags_missing: bool = storage(self.connection.query_row(
             "SELECT NOT EXISTS (SELECT 1 FROM text_artifacts WHERE media_id=?1 AND kind='tags' AND is_current=1)",
             [id], |row| row.get(0),
         ))?;
-        if tags_missing {
+        if tags_missing || media.artist_scope != old_scope {
             self.finish_import_tags(&media)?;
         }
         Ok(true)
@@ -813,11 +902,18 @@ impl SqliteCatalog {
                 return Err(IngestError::Integrity);
             }
             media.post = post.clone();
-            media.collections = self.associations(post, collection)?;
+            media
+                .artist_scope
+                .extend(self.artist_scope_for_collection(collection)?);
+            media.collections = self.associations(post, collection, &media.artist_scope)?;
             self.commit_media(&media)?;
+            if let Some(current) = self.media_by_id(media.id)? {
+                self.finish_import_tags(&current)?;
+            }
             return Ok(false);
         }
         let directory = root.join("originals").join(&post.md5);
+        let artist_scope = self.artist_scope_for_collection(collection)?;
         let media = StoredMedia {
             id: 0,
             post: post.clone(),
@@ -825,7 +921,8 @@ impl SqliteCatalog {
             thumbnail: directory.join("preview.png"),
             sha256: format!("{:x}", Sha256::digest(&stored_bytes)),
             source_sha256,
-            collections: self.associations(post, collection)?,
+            collections: self.associations(post, collection, &artist_scope)?,
+            artist_scope,
             keep: false,
             minimum_short_side,
             flatten_transparency,

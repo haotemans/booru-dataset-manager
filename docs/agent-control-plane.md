@@ -114,6 +114,8 @@ Caption instructions require coverage of all important visible subjects, clothin
 
 ## Local character prefix repair
 
+Artist downloads persist `StoredMedia.artist_scope` from the actual selected artist collection. Artist identity formatting, review/copy, API/MCP annotation and fresh export use those explicit targets; unrelated source artist tags do not create extra cards or training identities. An explicit download of the same bytes for another artist adds that actual target, including across providers. Character/query imports retain source-driven artist discovery while no artist target is selected. Original source artist metadata and raw TXT are immutable. Startup backfill uses recorded successful/reused artist-download outcomes, not inferred membership in auto-discovered cards; only empty automatic extra cards are cleaned up. The scope also participates in leased annotation revisions.
+
 Explicit local `TagRules.excluded_artists` corrections suppress known incorrect source artist tags in normalized identities, review/export output and MCP artist metadata. Automatic source collection discovery/attachment respects the same exclusions. Original source records and raw TXT remain unchanged; numerical spelling alone never makes an artist invalid. The existing bounded identity repair also removes excluded leading artist tokens while preserving visual prose and unrelated identities.
 
 Artist/character identities remain local. Confirmed base→variant relations apply to caption prefixes, optimized tags, copy/display, new writes and new exports; verified ancestor chains also work when an intermediate tag is absent. A base by itself and unrelated characters are retained. Relationships are never inferred from similar spelling or co-occurrence alone.

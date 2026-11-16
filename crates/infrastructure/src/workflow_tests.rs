@@ -6,6 +6,7 @@ use bdm_domain::{
 use bdm_ports::{CollectionRepository, IngestError, IngestRepository, MediaProvider};
 use md5::{Digest, Md5};
 use sha2::{Digest as Sha2Digest, Sha256};
+use std::collections::BTreeSet;
 use std::{cell::Cell, path::Path, sync::atomic::AtomicBool};
 
 pub(crate) struct Fixture {
@@ -275,6 +276,327 @@ fn explicitly_excluded_source_artist_is_not_rediscovered_and_raw_source_is_prese
         assert_eq!(f.repo.connection.query_row("SELECT count(*) FROM collections WHERE category=1 AND tag='1920x1080_(artist)'",[],|r|r.get::<_,i64>(0)).unwrap(),0);
         assert_eq!(f.repo.connection.query_row("SELECT count(*) FROM collection_media cm JOIN collections c ON cm.collection_id=c.id WHERE cm.media_id=?1 AND c.category=1 AND c.tag IN ('nvl','1234')",[media.id],|r|r.get::<_,i64>(0)).unwrap(),2);
     }
+}
+
+fn add_test_artist(
+    f: &mut Fixture,
+    name: &str,
+    provider: bdm_domain::sources::SourceProvider,
+    id: i64,
+) -> i64 {
+    f.repo
+        .add(
+            CollectionKind::Artist,
+            &SourceTag {
+                provider,
+                id,
+                name: name.into(),
+                category: 1,
+                post_count: 2,
+            },
+        )
+        .unwrap()
+        .record
+        .id
+}
+
+#[test]
+fn artist_download_scope_preserves_raw_authors_and_does_not_discover_unselected_artists() {
+    let mut f = fixture();
+    f.post.tag_string = "artist other_artist character scenery".into();
+    f.post.tag_string_artist = "artist other_artist".into();
+    let provider = f.post.provider;
+    let target = add_test_artist(&mut f, "artist", provider, 3001);
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            target,
+            800,
+            &AtomicBool::new(false),
+            &f.provider,
+        )
+        .unwrap();
+    let media = f.repo.list_media().unwrap().remove(0);
+    assert_eq!(media.artist_scope, BTreeSet::from(["artist".into()]));
+    assert_eq!(media.post.tag_string_artist, "artist other_artist");
+    assert!(media.collections.contains(&target));
+    assert!(media.collections.contains(&f.collection));
+    let raw = std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap();
+    assert_eq!(raw, f.post.tag_string.as_bytes());
+    assert!(
+        !std::fs::read_to_string(media.path.with_extension("tags.txt"))
+            .unwrap()
+            .contains("other_artist")
+    );
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row(
+                "SELECT count(*) FROM collections WHERE tag='other_artist'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    for _ in 0..2 {
+        f.repo.attach_known_collections().unwrap();
+    }
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row(
+                "SELECT count(*) FROM collections WHERE tag='other_artist'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    let rules = f.repo.tag_rules().unwrap();
+    assert_eq!(
+        bdm_domain::tags::filter_media_caption(
+            "@artist, @other artist, character, A scene, with colored light.",
+            &media,
+            &rules
+        ),
+        "@artist, character, A scene, with colored light."
+    );
+    assert_eq!(
+        bdm_domain::tags::filter_media_tags(
+            "artist other_artist character scenery",
+            false,
+            &media,
+            &rules
+        ),
+        "artist character scenery"
+    );
+    assert_eq!(
+        std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap(),
+        raw
+    );
+}
+
+#[test]
+fn legacy_artist_job_backfill_cleans_only_automatic_extra_cards_and_preserves_reviewed_caption() {
+    let mut f = fixture();
+    f.post.tag_string = "artist other_artist character scenery".into();
+    f.post.tag_string_artist = "artist other_artist".into();
+    // A character/query import still discovers all source artists.
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &AtomicBool::new(false),
+            &f.provider,
+        )
+        .unwrap();
+    let original = f.repo.list_media().unwrap().remove(0);
+    assert!(original.artist_scope.is_empty());
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row(
+                "SELECT count(*) FROM collections WHERE category=1",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        2
+    );
+    let caption = "@artist, @other artist, character, A detailed scene, with delicate shadows.";
+    f.repo
+        .write_artifact(&original, "caption", caption, "ai:test", "complete")
+        .unwrap();
+    f.repo.review_artifact(original.id, "caption").unwrap();
+    let raw = std::fs::read(original.path.with_extension("raw_tags.txt")).unwrap();
+    let source: String = f
+        .repo
+        .connection
+        .query_row(
+            "SELECT metadata FROM media_sources WHERE media_id=?1",
+            [original.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let provider = f.post.provider;
+    let target = add_test_artist(&mut f, "artist", provider, 3001);
+    let job = f
+        .repo
+        .new_job(
+            target,
+            "artist".into(),
+            f.directory.path().join("library"),
+            800,
+        )
+        .unwrap();
+    f.repo
+        .record_source_outcome(job.id, &f.post, "imported")
+        .unwrap();
+    f.repo.attach_known_collections().unwrap();
+    let media = f.repo.media_by_id(original.id).unwrap().unwrap();
+    assert_eq!(media.artist_scope, BTreeSet::from(["artist".into()]));
+    assert!(media.collections.contains(&target) && media.collections.contains(&f.collection));
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row(
+                "SELECT count(*) FROM collections WHERE tag='other_artist'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    let mut export = f.repo.new_workflow("export", vec![media.id]).unwrap();
+    export.mode = "caption".into();
+    f.repo.set_media_keep(media.id, true).unwrap();
+    let destination = f.directory.path().join("scoped-export");
+    crate::export::run(
+        &mut f.repo,
+        &mut export,
+        &destination,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(destination.join(format!("media_{0}/media_{0}.txt", media.id)))
+            .unwrap(),
+        "@artist, character, A detailed scene, with delicate shadows."
+    );
+    assert_eq!(
+        std::fs::read_to_string(media.path.with_extension("txt")).unwrap(),
+        caption
+    );
+    f.repo.repair_character_outputs(&[media.id], true).unwrap();
+    let repaired = f
+        .repo
+        .list_artifacts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.media_id == media.id && a.kind == "caption")
+        .unwrap();
+    assert!(repaired.reviewed);
+    assert_eq!(
+        repaired.content,
+        "@artist, character, A detailed scene, with delicate shadows."
+    );
+    assert_eq!(repaired.provenance, "ai:test");
+    assert_eq!(
+        std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap(),
+        raw
+    );
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row(
+                "SELECT metadata FROM media_sources WHERE media_id=?1",
+                [media.id],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        source
+    );
+    // An intentional download of the other artist is distinct from auto-discovery.
+    let other = add_test_artist(&mut f, "other_artist", provider, 3002);
+    assert!(!f
+        .repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            other,
+            800,
+            &AtomicBool::new(false),
+            &f.provider
+        )
+        .unwrap());
+    let both = f.repo.media_by_id(media.id).unwrap().unwrap();
+    assert_eq!(
+        both.artist_scope,
+        BTreeSet::from(["artist".into(), "other_artist".into()])
+    );
+    assert!(both.collections.contains(&target) && both.collections.contains(&other));
+    assert_eq!(
+        bdm_domain::tags::normalize_media_tags(&both, &f.repo.tag_rules().unwrap()).artists,
+        vec!["artist", "other_artist"]
+    );
+}
+
+#[test]
+fn identical_bytes_from_another_provider_union_explicit_targets_without_replacing_primary_source() {
+    let mut f = fixture();
+    let first = add_test_artist(
+        &mut f,
+        "artist",
+        bdm_domain::sources::SourceProvider::Danbooru,
+        3001,
+    );
+    f.repo
+        .import(
+            &f.post,
+            &f.directory.path().join("library"),
+            first,
+            800,
+            &AtomicBool::new(false),
+            &f.provider,
+        )
+        .unwrap();
+    let original = f.repo.list_media().unwrap().remove(0);
+    let original_raw = std::fs::read(original.path.with_extension("raw_tags.txt")).unwrap();
+    let mut alternate = f.post.clone();
+    alternate.provider = bdm_domain::sources::SourceProvider::Gelbooru;
+    alternate.tag_string = "second_artist unrelated character scenery".into();
+    alternate.tag_string_artist = "second_artist unrelated".into();
+    let second = add_test_artist(&mut f, "second_artist", alternate.provider, 3002);
+    assert!(!f
+        .repo
+        .import(
+            &alternate,
+            &f.directory.path().join("library"),
+            second,
+            800,
+            &AtomicBool::new(false),
+            &f.provider
+        )
+        .unwrap());
+    let media = f.repo.media_by_id(original.id).unwrap().unwrap();
+    assert_eq!(media.post, original.post);
+    assert_eq!(
+        media.artist_scope,
+        BTreeSet::from(["artist".into(), "second_artist".into()])
+    );
+    assert!(media.collections.contains(&first) && media.collections.contains(&second));
+    assert_eq!(
+        bdm_domain::tags::normalize_media_tags(&media, &f.repo.tag_rules().unwrap()).artists,
+        vec!["artist", "second_artist"]
+    );
+    assert_eq!(
+        f.repo
+            .connection
+            .query_row(
+                "SELECT count(*) FROM collections WHERE tag='unrelated'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        std::fs::read(media.path.with_extension("raw_tags.txt")).unwrap(),
+        original_raw
+    );
+    let mut legacy = serde_json::to_value(&media).unwrap();
+    legacy.as_object_mut().unwrap().remove("artist_scope");
+    assert!(
+        serde_json::from_value::<bdm_domain::ingest::StoredMedia>(legacy)
+            .unwrap()
+            .artist_scope
+            .is_empty()
+    );
 }
 
 #[test]

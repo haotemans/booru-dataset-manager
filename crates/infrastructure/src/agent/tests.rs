@@ -128,6 +128,24 @@ fn durable_work_survives_new_clients_and_replays_once_without_model_or_gui() {
 }
 
 #[test]
+fn artist_attribution_changes_fence_previously_planned_annotations() {
+    let (f, _, m) = fixture();
+    let (s, item, _) = start_work(&f, m.id, "annotate");
+    ok(&s, "work_view", leased_input(&item, "view", json!({})));
+    f.repo.connection.execute("UPDATE media SET metadata=json_set(metadata,'$.artist_scope',json('[\"artist\"]')) WHERE id=?1",[m.id]).unwrap();
+    let changed = s.execute(
+        "work_annotate",
+        leased_input(
+            &item,
+            "save",
+            json!({"caption":"A blue square.","reason":"Observed pixels","model":"test"}),
+        ),
+    );
+    assert!(changed.is_error);
+    assert_eq!(changed.metadata["code"], "annotation_conflict");
+}
+
+#[test]
 fn pause_fences_old_lease_and_cancel_cannot_be_revived() {
     let (f, _, m) = fixture();
     let (s, item, job) = start_work(&f, m.id, "annotate");

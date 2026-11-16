@@ -250,12 +250,8 @@ fn tag_reduction_is_large(baseline: usize, removed: usize) -> bool {
 }
 fn info(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
     let rules = repo.tag_rules()?;
-    let artists = m
-        .post
-        .tag_string_artist
-        .split_whitespace()
-        .filter(|name| !rules.is_excluded_artist(name))
-        .collect::<Vec<_>>()
+    let artists = bdm_domain::tags::normalize_media_tags(m, &rules)
+        .artists
         .join(" ");
     let artifacts=artifacts(repo,m.id)?.into_iter().map(|a|{
         let content=a.content.chars().take(1200).collect::<String>();
@@ -601,12 +597,7 @@ pub(super) fn annotate(
         ));
     }
     let rules = tag_rules(repo, &m)?;
-    let normalized = bdm_domain::tags::normalize(
-        &m.post.tag_string,
-        &m.post.tag_string_artist,
-        &m.post.tag_string_character,
-        &rules,
-    );
+    let normalized = bdm_domain::tags::normalize_media_tags(&m, &rules);
     let existing = artifacts(repo, m.id)?;
     let mut saved = Vec::new();
     let mut preserved = Vec::new();

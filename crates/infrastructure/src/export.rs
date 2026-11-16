@@ -96,14 +96,9 @@ pub fn run(
             }
             let content = text.map_or_else(String::new, |text| {
                 if job.mode == "tags" {
-                    bdm_domain::tags::filter_character_tags(&text.content, true, &rules)
+                    bdm_domain::tags::filter_media_tags(&text.content, true, media, &rules)
                 } else {
-                    bdm_domain::tags::filter_caption_characters(
-                        &text.content,
-                        &media.post.tag_string_artist,
-                        &media.post.tag_string_character,
-                        &rules,
-                    )
+                    bdm_domain::tags::filter_media_caption(&text.content, media, &rules)
                 }
             });
             let directory = destination.join(&base);

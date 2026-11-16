@@ -1124,13 +1124,9 @@ impl BdmApp {
                         });
                 }
                 if let Some(stored) = self.ingest.stored.get(&id).filter(|_| tab != 2) {
-                    let warnings = bdm_domain::tags::normalize(
-                        &stored.post.tag_string,
-                        &stored.post.tag_string_artist,
-                        &stored.post.tag_string_character,
-                        &self.workflows.rules,
-                    )
-                    .warnings;
+                    let warnings =
+                        bdm_domain::tags::normalize_media_tags(stored, &self.workflows.rules)
+                            .warnings;
                     if !warnings.is_empty() {
                         ui.separator();
                         egui::CollapsingHeader::new(format!("标签提示 · {}", warnings.len())).show(
@@ -1221,23 +1217,44 @@ impl BdmApp {
                         String::new()
                     }
                 });
-            return bdm_domain::tags::filter_character_tags(&source, false, &self.workflows.rules);
+            return self.ingest.stored.get(&media.id).map_or_else(
+                || bdm_domain::tags::filter_character_tags(&source, false, &self.workflows.rules),
+                |stored| {
+                    bdm_domain::tags::filter_media_tags(
+                        &source,
+                        false,
+                        stored,
+                        &self.workflows.rules,
+                    )
+                },
+            );
         }
         if let Some(artifact) = self.review_output(media.id, tab) {
             return if tab == 1 {
-                bdm_domain::tags::filter_character_tags(
-                    &artifact.content,
-                    true,
-                    &self.workflows.rules,
+                self.ingest.stored.get(&media.id).map_or_else(
+                    || {
+                        bdm_domain::tags::filter_character_tags(
+                            &artifact.content,
+                            true,
+                            &self.workflows.rules,
+                        )
+                    },
+                    |stored| {
+                        bdm_domain::tags::filter_media_tags(
+                            &artifact.content,
+                            true,
+                            stored,
+                            &self.workflows.rules,
+                        )
+                    },
                 )
             } else {
                 self.ingest.stored.get(&media.id).map_or_else(
                     || artifact.content.clone(),
                     |m| {
-                        bdm_domain::tags::filter_caption_characters(
+                        bdm_domain::tags::filter_media_caption(
                             &artifact.content,
-                            &m.post.tag_string_artist,
-                            &m.post.tag_string_character,
+                            m,
                             &self.workflows.rules,
                         )
                     },
@@ -2176,6 +2193,7 @@ mod tests {
         app.ingest.stored.insert(
             3,
             bdm_domain::ingest::StoredMedia {
+                artist_scope: Default::default(),
                 id: 3,
                 post: post.clone(),
                 path: Default::default(),

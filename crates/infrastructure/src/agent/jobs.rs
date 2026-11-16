@@ -80,12 +80,14 @@ pub(super) fn annotation_revision(
             .optional(),
     )?
     .flatten();
-    Ok(digest(&json!([
-        artifacts,
-        sidecar("txt")?,
-        sidecar("tags.txt")?,
-        regions
-    ])))
+    let mut revision = json!([artifacts, sidecar("txt")?, sidecar("tags.txt")?, regions]);
+    if !m.artist_scope.is_empty() {
+        revision
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"artist_scope":m.artist_scope}));
+    }
+    Ok(digest(&revision))
 }
 fn output_complete(
     repo: &SqliteCatalog,

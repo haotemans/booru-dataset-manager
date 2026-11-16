@@ -1011,6 +1011,7 @@ mod tests {
             app.ingest.stored.insert(
                 id,
                 bdm_domain::ingest::StoredMedia {
+                    artist_scope: Default::default(),
                     id: id as i64,
                     path,
                     thumbnail: directory.path().join("missing-preview.png"),

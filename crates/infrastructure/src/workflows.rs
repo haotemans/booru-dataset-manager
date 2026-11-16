@@ -290,14 +290,9 @@ impl SqliteCatalog {
         }
         let rules = self.tag_rules()?;
         let filtered = if kind == "caption" {
-            bdm_domain::tags::filter_caption_characters(
-                content,
-                &media.post.tag_string_artist,
-                &media.post.tag_string_character,
-                &rules,
-            )
+            bdm_domain::tags::filter_media_caption(content, media, &rules)
         } else {
-            bdm_domain::tags::filter_character_tags(content, true, &rules)
+            bdm_domain::tags::filter_media_tags(content, true, media, &rules)
         };
         let content = filtered.as_str();
         let tx = storage(
@@ -378,14 +373,9 @@ impl SqliteCatalog {
             drop(q);
             for artifact in artifacts {
                 let corrected = if artifact.kind == "caption" {
-                    bdm_domain::tags::filter_caption_characters(
-                        &artifact.content,
-                        &media.post.tag_string_artist,
-                        &media.post.tag_string_character,
-                        &rules,
-                    )
+                    bdm_domain::tags::filter_media_caption(&artifact.content, &media, &rules)
                 } else {
-                    bdm_domain::tags::filter_character_tags(&artifact.content, true, &rules)
+                    bdm_domain::tags::filter_media_tags(&artifact.content, true, &media, &rules)
                 };
                 if corrected == artifact.content {
                     continue;
@@ -450,12 +440,7 @@ impl SqliteCatalog {
         media: &StoredMedia,
     ) -> Result<NormalizedTags, IngestError> {
         let rules = self.tag_rules()?;
-        let result = bdm_domain::tags::normalize(
-            &media.post.tag_string,
-            &media.post.tag_string_artist,
-            &media.post.tag_string_character,
-            &rules,
-        );
+        let result = bdm_domain::tags::normalize_media_tags(media, &rules);
         let current: Option<String> = storage(self.connection.query_row(
             "SELECT provenance FROM text_artifacts WHERE media_id=?1 AND kind='tags' AND is_current=1",
             [media.id], |r| r.get(0),

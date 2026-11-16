@@ -36,6 +36,7 @@ mod tests {
         app.ingest.stored.insert(
             1,
             StoredMedia {
+                artist_scope: Default::default(),
                 id: 1,
                 path: path.clone(),
                 thumbnail,
