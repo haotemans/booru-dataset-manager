@@ -329,6 +329,7 @@ impl SqliteCatalog {
         collection: i64,
     ) -> Result<BTreeSet<i64>, IngestError> {
         let mut ids = BTreeSet::from([collection]);
+        let rules = self.tag_rules()?;
         let mut query = storage(self.connection.prepare_cached(
             "SELECT id FROM collections WHERE provider=?3 AND tag=?1 AND category=?2",
         ))?;
@@ -337,6 +338,9 @@ impl SqliteCatalog {
             (&post.tag_string_character, 4),
         ] {
             for name in tags.split_whitespace() {
+                if category == 1 && rules.is_excluded_artist(name) {
+                    continue;
+                }
                 for row in storage(
                     query.query_map(params![name, category, post.provider.key()], |row| {
                         row.get::<_, i64>(0)
@@ -515,10 +519,19 @@ fn attach_post_collections(
     post: &SourcePost,
     media: i64,
 ) -> Result<(), IngestError> {
+    let json: String = storage(tx.query_row(
+        "SELECT metadata FROM tag_rules WHERE id=1",
+        [],
+        |r| r.get(0),
+    ))?;
+    let rules: bdm_domain::tags::TagRules = storage(serde_json::from_str(&json))?;
     let mut insert = storage(tx.prepare_cached(
         "INSERT OR IGNORE INTO collections(provider, category, tag) VALUES(?2, 1, ?1)",
     ))?;
     for name in post.tag_string_artist.split_whitespace() {
+        if rules.is_excluded_artist(name) {
+            continue;
+        }
         storage(insert.execute(params![name, post.provider.key()]))?;
     }
     let mut attach = storage(tx.prepare_cached("INSERT OR IGNORE INTO collection_media(collection_id,media_id) SELECT id,?1 FROM collections WHERE provider=?4 AND category=?2 AND tag=?3"))?;
@@ -527,6 +540,9 @@ fn attach_post_collections(
         (&post.tag_string_character, 4),
     ] {
         for name in tags.split_whitespace() {
+            if category == 1 && rules.is_excluded_artist(name) {
+                continue;
+            }
             storage(attach.execute(params![media, category, name, post.provider.key()]))?;
         }
     }

@@ -246,6 +246,38 @@ pub(crate) fn fixture() -> Fixture {
 }
 
 #[test]
+fn explicitly_excluded_source_artist_is_not_rediscovered_and_raw_source_is_preserved() {
+    let mut f = fixture();
+    f.post.tag_string = "1920x1080_(artist) nvl 1234 character scenery special_term".into();
+    f.post.tag_string_artist = "1920x1080_(artist) nvl 1234".into();
+    let mut rules = f.repo.tag_rules().unwrap();
+    rules.excluded_artists.insert("1920x1080_(artist)".into());
+    f.repo.save_tag_rules(&rules).unwrap();
+    for _ in 0..2 {
+        f.repo
+            .import(
+                &f.post,
+                &f.directory.path().join("library"),
+                f.collection,
+                800,
+                &AtomicBool::new(false),
+                &f.provider,
+            )
+            .unwrap();
+        let media = f.repo.list_media().unwrap().remove(0);
+        let tags = std::fs::read_to_string(media.path.with_extension("tags.txt")).unwrap();
+        assert!(!tags.contains("1920x1080"));
+        assert!(tags.contains("@artist nvl"));
+        assert!(tags.contains("@artist 1234"));
+        let raw = std::fs::read_to_string(media.path.with_extension("raw_tags.txt")).unwrap();
+        assert!(raw.contains("1920x1080_(artist)"));
+        assert_eq!(media.post.tag_string_artist, f.post.tag_string_artist);
+        assert_eq!(f.repo.connection.query_row("SELECT count(*) FROM collections WHERE category=1 AND tag='1920x1080_(artist)'",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(f.repo.connection.query_row("SELECT count(*) FROM collection_media cm JOIN collections c ON cm.collection_id=c.id WHERE cm.media_id=?1 AND c.category=1 AND c.tag IN ('nvl','1234')",[media.id],|r|r.get::<_,i64>(0)).unwrap(),2);
+    }
+}
+
+#[test]
 fn unavailable_primary_switches_once_and_preserves_independent_cursor_and_resume_source() {
     use bdm_domain::sources::SourceProvider;
     let mut f = fixture();

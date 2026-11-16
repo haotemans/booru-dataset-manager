@@ -114,6 +114,8 @@ Caption instructions require coverage of all important visible subjects, clothin
 
 ## Local character prefix repair
 
+Explicit local `TagRules.excluded_artists` corrections suppress known incorrect source artist tags in normalized identities, review/export output and MCP artist metadata. Automatic source collection discovery/attachment respects the same exclusions. Original source records and raw TXT remain unchanged; numerical spelling alone never makes an artist invalid. The existing bounded identity repair also removes excluded leading artist tokens while preserving visual prose and unrelated identities.
+
 Artist/character identities remain local. Confirmed base→variant relations apply to caption prefixes, optimized tags, copy/display, new writes and new exports; verified ancestor chains also work when an intermediate tag is absent. A base by itself and unrelated characters are retained. Relationships are never inferred from similar spelling or co-occurrence alone.
 
 `character_repair` accepts explicit `media_ids` (1–64) and defaults to `apply:false` preview. With `apply:true` and `--allow-writes`, it repairs current caption/tag outputs under existing verified rules, preserves description-body bytes and reviewed/state/provenance flags, and records an audit event. It does not add character relationships, invoke a model, edit images or raw source data, or overwrite sidecars that differ from their recorded content. Active work leases block repair. Existing exported TXT preservation remains unchanged.

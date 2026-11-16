@@ -33,9 +33,21 @@ pub struct TagRules {
     pub rejected_characters: BTreeSet<(String, String)>,
     pub resolved_aliases: BTreeSet<String>,
     pub discovered_characters: BTreeSet<String>,
+    /// Explicit local corrections of mistaken source artist identities.
+    pub excluded_artists: BTreeSet<String>,
 }
 
 impl TagRules {
+    pub fn is_excluded_artist(&self, name: &str) -> bool {
+        let name = name.trim();
+        let name = name
+            .strip_prefix("@artist ")
+            .or_else(|| name.strip_prefix("artist:"))
+            .unwrap_or(name);
+        let key = name.trim_start_matches('@').replace(' ', "_");
+        self.excluded_artists.contains(&key)
+            || self.excluded_artists.contains(&self.canonical(&key))
+    }
     /// Called only with an active, exact-source implication. Character category checks
     /// and graph validation are required; implication does not establish exclusivity.
     pub fn accept_character_implication(&mut self, base: &str, variant: &str) -> bool {
@@ -202,7 +214,7 @@ pub fn filter_character_tags(content: &str, comma_separated: bool, rules: &TagRu
     let retained: Vec<_> = tags
         .iter()
         .zip(&names)
-        .filter(|(_, name)| !redundant.contains(*name))
+        .filter(|(tag, name)| !redundant.contains(*name) && !rules.is_excluded_artist(tag))
         .map(|(tag, _)| *tag)
         .collect();
     if retained.len() == tags.len() {
@@ -249,7 +261,8 @@ pub fn filter_caption_characters(
                 .join("_")
                 .to_lowercase(),
         );
-        let is_artist = artists.contains(&name);
+        let excluded_artist = rules.is_excluded_artist(tag);
+        let is_artist = artists.contains(&name) || excluded_artist;
         let is_character = !artist_mark && characters.contains(&name) && !is_artist;
         if !is_artist && !is_character {
             break;
@@ -257,9 +270,15 @@ pub fn filter_caption_characters(
         if !seen.insert((name.clone(), is_character)) {
             break;
         }
-        prefix.push((offset, offset + span.len(), name, is_character));
+        prefix.push((
+            offset,
+            offset + span.len(),
+            name,
+            is_character,
+            excluded_artist,
+        ));
         offset += span.len();
-        if prefix.len() >= artists.len() + characters.len() {
+        if prefix.len() >= artists.len() + characters.len() + rules.excluded_artists.len() {
             break;
         }
     }
@@ -267,7 +286,7 @@ pub fn filter_caption_characters(
         rules.redundant_character_bases(prefix.iter().filter(|r| r.3).map(|r| r.2.as_str()));
     let removed: Vec<_> = prefix
         .iter()
-        .filter(|r| r.3 && redundant.contains(&r.2))
+        .filter(|r| (r.3 && redundant.contains(&r.2)) || r.4)
         .collect();
     if removed.is_empty() {
         return content.to_owned();
@@ -305,7 +324,11 @@ pub fn normalize(raw: &str, artists: &str, characters: &str, rules: &TagRules) -
     let artist_names: BTreeSet<_> = artists.split_whitespace().map(canonical).collect();
     let character_names: BTreeSet<_> = characters.split_whitespace().map(canonical).collect();
     let protected_names: BTreeSet<_> = rules.protected.iter().map(|name| canonical(name)).collect();
-    let mut tags: Vec<_> = raw.split_whitespace().map(canonical).collect();
+    let mut tags: Vec<_> = raw
+        .split_whitespace()
+        .filter(|tag| !rules.is_excluded_artist(tag))
+        .map(canonical)
+        .collect();
     let mut seen = BTreeSet::new();
     tags.retain(|tag| seen.insert(tag.clone()));
     let mut result = NormalizedTags::default();
@@ -320,6 +343,9 @@ pub fn normalize(raw: &str, artists: &str, characters: &str, rules: &TagRules) -
     // Every specific character tag survives. Co-occurrence alone does not tell us
     // whether tags describe one depiction or several depictions in the same image.
     for tag in tags {
+        if rules.is_excluded_artist(&tag) {
+            continue;
+        }
         if artist_names.contains(&tag) || rules.categories.get(&tag) == Some(&1) {
             result.artists.push(tag.clone());
             result.tags.push(format!("@artist {tag}"));
@@ -344,6 +370,52 @@ pub fn normalize(raw: &str, artists: &str, characters: &str, rules: &TagRules) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_artist_exclusions_preserve_other_artists_and_visual_prose() {
+        let ignored = "1920x1080_(artist)";
+        let mut rules = TagRules::default();
+        rules.excluded_artists.insert(ignored.into());
+        rules.categories.insert(ignored.into(), 1);
+        rules.categories.insert("nvl".into(), 1);
+        rules.categories.insert("1234".into(), 1);
+        let raw = "1920x1080_(artist) nvl 1234 scenery character";
+        let normalized = normalize(raw, "1920x1080_(artist) nvl 1234", "character", &rules);
+        assert_eq!(normalized.artists, vec!["nvl", "1234"]);
+        assert!(!normalized.tags.iter().any(|t| t.contains("1920x1080")));
+        assert_eq!(
+            filter_character_tags(raw, false, &rules),
+            "nvl 1234 scenery character"
+        );
+        assert_eq!(
+            filter_character_tags("@artist 1920x1080_(artist), @nvl, scenery", true, &rules),
+            "@nvl, scenery"
+        );
+        let caption =
+            "@1920x1080 (artist), @nvl, character, A poster reads 1920x1080, beside a tree.";
+        assert_eq!(
+            filter_caption_characters(caption, "1920x1080_(artist) nvl", "character", &rules),
+            "@nvl, character, A poster reads 1920x1080, beside a tree."
+        );
+        assert!(normalize(
+            raw,
+            "1920x1080_(artist) nvl 1234",
+            "character",
+            &TagRules::default()
+        )
+        .artists
+        .contains(&ignored.into()));
+        rules.aliases.insert(ignored.into(), "nvl".into());
+        assert!(!rules.is_excluded_artist("nvl"));
+        assert_eq!(
+            normalize(raw, "1920x1080_(artist) nvl 1234", "character", &rules).artists,
+            vec!["nvl", "1234"]
+        );
+        assert_eq!(
+            filter_caption_characters(caption, "1920x1080_(artist) nvl", "character", &rules),
+            "@nvl, character, A poster reads 1920x1080, beside a tree."
+        );
+    }
 
     #[test]
     fn caption_prefix_prefers_verified_variant_without_editing_prose_or_other_people() {

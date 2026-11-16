@@ -249,13 +249,21 @@ fn tag_reduction_is_large(baseline: usize, removed: usize) -> bool {
     removed >= 5 && removed * 100 >= baseline * 30
 }
 fn info(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
+    let rules = repo.tag_rules()?;
+    let artists = m
+        .post
+        .tag_string_artist
+        .split_whitespace()
+        .filter(|name| !rules.is_excluded_artist(name))
+        .collect::<Vec<_>>()
+        .join(" ");
     let artifacts=artifacts(repo,m.id)?.into_iter().map(|a|{
         let content=a.content.chars().take(1200).collect::<String>();
         json!({"kind":a.kind,"state":a.state,"reviewed":a.reviewed,"content":content,"content_truncated":content.len()<a.content.len(),"generated":a.is_generated_output()})
     }).collect::<Vec<_>>();
     let edit=m.edit.as_ref().map(|e|json!({"operation":e.operation,"crop":e.crop,"training":e.training,"dimensions":e.dimensions,"verified_original":e.source_archive.as_ref().is_some_and(|a|a.downloaded_original)}));
     Ok(
-        json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"original_dimensions":[m.post.image_width,m.post.image_height],"keep":m.keep,"artists":m.post.tag_string_artist,"characters":m.post.tag_string_character,"general_tags":m.post.tag_string_general.chars().take(1000).collect::<String>(),"current_edit":edit,"text":artifacts,"agent_review":review_summary(repo,m)?}),
+        json!({"id":m.id,"sha256":m.sha256,"dimensions":m.dimensions(),"original_dimensions":[m.post.image_width,m.post.image_height],"keep":m.keep,"artists":artists,"characters":m.post.tag_string_character,"general_tags":m.post.tag_string_general.chars().take(1000).collect::<String>(),"current_edit":edit,"text":artifacts,"agent_review":review_summary(repo,m)?}),
     )
 }
 fn review_summary(repo: &SqliteCatalog, m: &StoredMedia) -> Result<Value, IngestError> {
