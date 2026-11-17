@@ -112,7 +112,8 @@ pub fn setup(ctx: &egui::Context) {
     style.spacing.interact_size.y = 34.0;
     style.spacing.scroll.foreground_color = true;
     style.spacing.scroll.bar_width = 6.0;
-    style.spacing.scroll.floating_width = 3.0;
+    style.spacing.scroll.floating_width = 2.0;
+    style.spacing.scroll.floating_allocated_width = 8.0;
     style.spacing.scroll.dormant_handle_opacity = 1.0;
     style.spacing.scroll.active_handle_opacity = 1.0;
     style.text_styles.insert(TextStyle::Heading, medium(22.0));

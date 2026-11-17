@@ -4,9 +4,11 @@ use eframe::egui::{
 };
 
 pub fn primary(ui: &mut Ui, label: &str) -> Response {
+    let enabled = ui.is_enabled();
     ui.add(
-        egui::Button::new(RichText::new(label).color(Color32::WHITE))
-            .fill(ACCENT)
+        egui::Button::new(RichText::new(label).color(if enabled { Color32::WHITE } else { MUTED }))
+            .fill(if enabled { INK } else { PANEL })
+            .stroke(Stroke::new(1.0_f32, if enabled { INK } else { LINE }))
             .rounding(7.0),
     )
 }
@@ -22,6 +24,7 @@ pub fn tool_icon(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Respon
 }
 
 fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool) -> Response {
+    let selected = selected && ui.is_enabled();
     let galley = ui
         .painter()
         .layout_no_wrap(text.into(), FontId::proportional(12.0), INK);
@@ -247,7 +250,7 @@ pub fn segment(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response
             label,
         )
     });
-    if selected {
+    if selected && ui.is_enabled() {
         ui.painter().rect_filled(rect, 5.0, INK);
     }
     if response.has_focus() || (response.hovered() && !selected) {
@@ -259,7 +262,7 @@ pub fn segment(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response
         Align2::CENTER_CENTER,
         label,
         FontId::proportional(12.0),
-        if selected {
+        if selected && ui.is_enabled() {
             Color32::WHITE
         } else if ui.is_enabled() {
             MUTED
