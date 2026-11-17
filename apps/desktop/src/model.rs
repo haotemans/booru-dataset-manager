@@ -29,7 +29,7 @@ impl Page {
             Self::Dashboard => "总览",
             Self::Artist => "画师",
             Self::Character => "角色",
-            Self::Downloads => "标签下载",
+            Self::Downloads => "标签合集",
             Self::Tags => "标签管理",
             Self::Api => "API 配置",
             Self::Logs => "运行日志",

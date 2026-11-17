@@ -309,8 +309,11 @@ impl BdmApp {
                     self.review_canvas(ui, &media, layout.image);
                 });
                 if let Some(info_rect) = layout.info {
-                    ui.painter()
-                        .rect(info_rect, 8.0, PANEL, egui::Stroke::new(1.0_f32, LINE));
+                    ui.painter().vline(
+                        info_rect.left(),
+                        info_rect.y_range(),
+                        egui::Stroke::new(1.0_f32, LINE),
+                    );
                     let info = info_rect.shrink(12.0);
                     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(info), |ui| {
                         ui.set_clip_rect(info);
@@ -468,6 +471,7 @@ impl BdmApp {
         let inpainting = self.image_editor.visible && !self.image_editor.cropping;
         let busy = self.image_editor.active() || self.image_editor.preview.is_some();
         ui.horizontal_centered(|ui| {
+            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
             ui.spacing_mut().item_spacing.x = 8.0;
             ui.spacing_mut().interact_size.y = 28.0;
             ui.spacing_mut().button_padding = vec2(8.0, 4.0);
@@ -699,12 +703,7 @@ impl BdmApp {
             None
         };
         let dimensions = self.review_dimensions(media);
-        ui.painter().rect(
-            stage,
-            8.0,
-            egui::Color32::from_rgb(237, 240, 244),
-            egui::Stroke::new(1.0_f32, LINE),
-        );
+        ui.painter().rect_filled(stage, 0.0, PANEL);
         let response = ui.interact(
             stage,
             ui.id().with(("review-canvas", media.id)),
@@ -809,26 +808,7 @@ impl BdmApp {
                     for (index, label) in ["原始标签", "优化标签", "自然语言"].iter().enumerate()
                     {
                         let selected = self.media_review.tab == index;
-                        if ui
-                            .add_sized(
-                                [width, 30.0],
-                                egui::Button::new(
-                                    RichText::new(*label).size(13.0).color(if selected {
-                                        INK
-                                    } else {
-                                        MUTED
-                                    }),
-                                )
-                                .fill(if selected {
-                                    PANEL
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                })
-                                .stroke(egui::Stroke::NONE)
-                                .rounding(4.0),
-                            )
-                            .clicked()
-                        {
+                        if crate::review_ui::choice(ui, label, selected, width).clicked() {
                             self.media_review.tab = index;
                         }
                     }
@@ -1348,12 +1328,7 @@ fn raw_review_tags(ui: &mut egui::Ui, tags: &[String], category: Option<usize>) 
     tag_chips(ui, tags, category, true);
 }
 fn tag_chips(ui: &mut egui::Ui, tags: &[String], category: Option<usize>, raw: bool) {
-    let color = match category {
-        Some(0) => egui::Color32::from_rgb(69, 92, 127),
-        Some(1) => egui::Color32::from_rgb(114, 82, 131),
-        Some(2) => egui::Color32::from_rgb(137, 104, 55),
-        _ => INK,
-    };
+    let color = INK;
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
         ui.spacing_mut().interact_size.y = 26.0;
@@ -2152,7 +2127,13 @@ mod tests {
                 .shapes
                 .iter()
                 .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill == NAV => Some(rect.rect),
+                    egui::Shape::Rect(rect)
+                        if rect.fill == NAV
+                            && rect.stroke == egui::Stroke::new(1.0_f32, LINE)
+                            && rect.rounding == egui::Rounding::same(4.0) =>
+                    {
+                        Some(rect.rect)
+                    }
                     _ => None,
                 })
                 .collect();

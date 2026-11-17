@@ -272,33 +272,38 @@ impl BdmApp {
             return;
         }
         egui::SidePanel::left("navigation")
-            .exact_width(72.0)
+            .exact_width(164.0)
             .resizable(false)
-            .frame(egui::Frame::none().fill(PANEL).inner_margin(16.0))
+            .frame(egui::Frame::none().fill(PANEL).inner_margin(12.0))
             .show(ctx, |ui| {
-                ui.add_space(8.0);
-                let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), egui::Sense::hover());
-                ui.painter().rect_filled(r.shrink(3.0), 9.0, INK);
-                icon(ui, r.shrink(11.0), "image", Color32::WHITE);
-                ui.add_space(34.0);
+                ui.add_space(14.0);
+                ui.label(RichText::new("资料库").size(11.0).color(MUTED));
+                ui.add_space(14.0);
                 for page in Page::ALL.into_iter().take(5) {
-                    if icon_button(ui, page.icon(), page.title(), self.prefs.page == page).clicked()
+                    if nav_button(ui, page.icon(), page.title(), self.prefs.page == page).clicked()
                     {
                         self.navigate(page);
                     }
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(8.0);
                     for page in Page::ALL.into_iter().skip(5).rev() {
-                        if icon_button(ui, page.icon(), page.title(), self.prefs.page == page)
+                        if nav_button(ui, page.icon(), page.title(), self.prefs.page == page)
                             .clicked()
                         {
                             self.navigate(page);
                         }
-                        ui.add_space(6.0);
+                        ui.add_space(4.0);
                     }
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("工作台").size(11.0).color(MUTED));
                 });
+                ui.painter().vline(
+                    ui.max_rect().right() + 11.0,
+                    ui.max_rect().y_range(),
+                    egui::Stroke::new(1.0_f32, LINE),
+                );
             });
         let page_margin = if ctx.screen_rect().width() < 1200.0 {
             24.0
@@ -338,7 +343,19 @@ impl BdmApp {
                                             Page::Api => "添加 API 配置",
                                             _ => "添加画师",
                                         };
-                                        if icon_button(ui, "plus", label, true).clicked() {
+                                        if primary(
+                                            ui,
+                                            match self.prefs.page {
+                                                Page::Artist => "+ 添加画师",
+                                                Page::Character => "+ 添加角色",
+                                                Page::Downloads => "+ 添加合集",
+                                                Page::Api => "+ 添加配置",
+                                                _ => "+ 添加收藏",
+                                            },
+                                        )
+                                        .on_hover_text(label)
+                                        .clicked()
+                                        {
                                             if self.prefs.page == Page::Api {
                                                 self.begin_api_profile(None);
                                             } else {
@@ -353,7 +370,7 @@ impl BdmApp {
                                 },
                             );
                         });
-                        ui.add_space(24.0);
+                        ui.add_space(20.0);
                         match self.prefs.page {
                             Page::Dashboard => self.dashboard(ui),
                             Page::Artist | Page::Character | Page::Downloads => {

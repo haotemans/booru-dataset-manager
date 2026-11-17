@@ -75,14 +75,12 @@ pub fn show(ctx: &egui::Context) {
                 ui.painter().rect(
                     button_rect,
                     5.0,
-                    if danger {
-                        DANGER
-                    } else if highlighted {
-                        LINE
+                    if danger { DANGER } else { PANEL },
+                    if highlighted {
+                        Stroke::new(1.0_f32, INK)
                     } else {
-                        SOFT
+                        Stroke::NONE
                     },
-                    Stroke::new(1.0_f32, if response.has_focus() { ACCENT } else { LINE }),
                 );
                 let center = button_rect.center();
                 let line = |a, b| {
@@ -99,11 +97,8 @@ pub fn show(ctx: &egui::Context) {
                                 0.0,
                                 Stroke::new(1.6_f32, color),
                             );
-                            ui.painter().rect_filled(
-                                square.translate(vec2(-1.0, 1.0)),
-                                0.0,
-                                if highlighted { LINE } else { SOFT },
-                            );
+                            ui.painter()
+                                .rect_filled(square.translate(vec2(-1.0, 1.0)), 0.0, PANEL);
                         }
                         ui.painter()
                             .rect_stroke(square, 0.0, Stroke::new(1.6_f32, color));

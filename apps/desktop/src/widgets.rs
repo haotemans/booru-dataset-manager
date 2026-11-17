@@ -7,7 +7,7 @@ pub fn primary(ui: &mut Ui, label: &str) -> Response {
     ui.add(
         egui::Button::new(RichText::new(label).color(Color32::WHITE))
             .fill(ACCENT)
-            .rounding(6.0),
+            .rounding(7.0),
     )
 }
 
@@ -33,10 +33,9 @@ fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool)
     let (rect, response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
-    let visuals = ui.style().interact(&response);
     let color = if ui.is_enabled() {
         if selected {
-            ACCENT
+            Color32::WHITE
         } else {
             INK
         }
@@ -46,13 +45,15 @@ fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool)
     ui.painter().rect(
         rect,
         6.0,
-        if selected { SOFT } else { visuals.weak_bg_fill },
+        if selected { INK } else { PANEL },
         Stroke::new(
             1.0_f32,
             if selected {
-                ACCENT
+                INK
+            } else if response.hovered() || response.has_focus() {
+                LINE
             } else {
-                visuals.bg_stroke.color
+                Color32::TRANSPARENT
             },
         ),
     );
@@ -164,6 +165,13 @@ pub fn icon_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Resp
     if selected || response.hovered() || response.has_focus() {
         ui.painter()
             .rect_filled(rect, 8.0, if selected { INK } else { NAV });
+        if !selected {
+            ui.painter().rect_stroke(
+                rect,
+                8.0,
+                Stroke::new(1.0_f32, if response.has_focus() { INK } else { LINE }),
+            );
+        }
     }
     let color = if !ui.is_enabled() {
         MUTED.gamma_multiply(0.45)
@@ -178,20 +186,108 @@ pub fn icon_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Resp
     response.on_hover_text(label)
 }
 
+pub fn nav_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+    if selected {
+        ui.painter().line_segment(
+            [
+                rect.left_center() - vec2(0.0, 8.0),
+                rect.left_center() + vec2(0.0, 8.0),
+            ],
+            Stroke::new(2.5_f32, INK),
+        );
+    }
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            6.0,
+            Stroke::new(1.0_f32, if response.has_focus() { INK } else { LINE }),
+        );
+    }
+    let color = if selected || response.hovered() {
+        INK
+    } else {
+        MUTED
+    };
+    icon(
+        ui,
+        Rect::from_center_size(rect.left_center() + vec2(20.0, 0.0), vec2(17.0, 17.0)),
+        kind,
+        color,
+    );
+    ui.painter().text(
+        rect.left_center() + vec2(40.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        if selected {
+            medium(13.0)
+        } else {
+            FontId::proportional(13.0)
+        },
+        color,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+pub fn segment(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+    if selected {
+        ui.painter().rect_filled(rect, 5.0, INK);
+    }
+    if response.has_focus() || (response.hovered() && !selected) {
+        ui.painter()
+            .rect_stroke(rect, 5.0, Stroke::new(1.0_f32, INK));
+    }
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(12.0),
+        if selected {
+            Color32::WHITE
+        } else if ui.is_enabled() {
+            MUTED
+        } else {
+            MUTED.gamma_multiply(0.5)
+        },
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
-    egui::Frame::none()
-        .fill(color.gamma_multiply(0.09))
-        .rounding(5.0)
-        .inner_margin(vec2(8.0, 4.0))
-        .show(ui, |ui| {
-            let width = ui
-                .painter()
-                .layout_no_wrap(text.into(), FontId::proportional(12.0), color)
-                .size()
-                .x;
-            ui.set_width(width);
-            ui.label(RichText::new(text).size(12.0).color(color));
-        });
+    let width = ui
+        .painter()
+        .layout_no_wrap(text.into(), FontId::proportional(12.0), color)
+        .size()
+        .x;
+    let (rect, response) = ui.allocate_exact_size(vec2(width + 13.0, 24.0), Sense::hover());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    ui.painter()
+        .circle_filled(rect.left_center() + vec2(3.0, 0.0), 2.5, color);
+    ui.painter().text(
+        rect.left_center() + vec2(12.0, 0.0),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(12.0),
+        color,
+    );
 }
 
 pub fn search(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Response {
@@ -695,28 +791,44 @@ pub fn sample_art(ui: &Ui, rect: Rect, seed: usize) {
 }
 
 pub fn count_card(ui: &mut Ui, count: usize, title: &str, kind: &str) -> Response {
-    egui::Frame::none()
-        .fill(NAV)
-        .stroke(Stroke::new(1.0_f32, LINE))
-        .rounding(8.0)
-        .inner_margin(16.0)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().interact_size.y = 20.0;
-            ui.set_min_height(64.0);
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                icon(ui, r.shrink(5.0), kind, MUTED);
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(count.to_string()).font(medium(30.0)));
-                    ui.label(RichText::new(title).size(13.0).color(MUTED));
-                });
-            });
-        })
-        .response
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 80.0), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+    icon(
+        ui,
+        Rect::from_min_size(rect.min + vec2(0.0, 3.0), vec2(15.0, 15.0)),
+        kind,
+        MUTED,
+    );
+    ui.painter().text(
+        rect.min + vec2(23.0, 10.0),
+        Align2::LEFT_CENTER,
+        title,
+        FontId::proportional(12.0),
+        MUTED,
+    );
+    ui.painter().text(
+        rect.min + vec2(0.0, 45.0),
+        Align2::LEFT_CENTER,
+        count.to_string(),
+        medium(30.0),
+        INK,
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(
+            1.0_f32,
+            if response.hovered() || response.has_focus() {
+                INK
+            } else {
+                LINE
+            },
+        ),
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-pub fn coverage_ring(
+pub fn coverage_bar(
     ui: &mut Ui,
     count: usize,
     total: usize,
@@ -724,48 +836,41 @@ pub fn coverage_ring(
     hint: &str,
     width: f32,
 ) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 116.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 38.0), Sense::click());
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), hint));
-    let center = rect.center_top() + vec2(0.0, 38.0);
     let fraction = if total == 0 {
         0.0
     } else {
-        count as f32 / total as f32
+        (count as f32 / total as f32).clamp(0.0, 1.0)
     };
-    let radius = 31.0;
+    let track = Rect::from_min_size(rect.min + vec2(0.0, 27.0), vec2(width, 3.0));
     ui.painter()
-        .circle_stroke(center, radius, Stroke::new(5.0_f32, SOFT));
+        .rect(track, 1.5, PANEL, Stroke::new(1.0_f32, LINE));
     if fraction > 0.0 {
-        let points = (0..=64)
-            .map(|i| {
-                let a = -std::f32::consts::FRAC_PI_2
-                    + std::f32::consts::TAU * fraction * i as f32 / 64.0;
-                center + vec2(a.cos(), a.sin()) * radius
-            })
-            .collect();
-        ui.painter().add(Shape::line(
-            points,
-            Stroke::new(5.0_f32, if response.hovered() { INK } else { ACCENT }),
-        ));
+        ui.painter().rect_filled(
+            Rect::from_min_size(track.min, vec2(width * fraction, 3.0)),
+            1.5,
+            INK,
+        );
     }
     ui.painter().text(
-        center,
-        Align2::CENTER_CENTER,
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        label,
+        FontId::proportional(12.0),
+        if response.hovered() { INK } else { MUTED },
+    );
+    ui.painter().text(
+        rect.right_top(),
+        Align2::RIGHT_TOP,
         if total == 0 {
             "—".into()
         } else {
-            format!("{:.0}%", fraction * 100.0)
+            format!("{count} / {total}")
         },
-        medium(16.0),
+        FontId::proportional(12.0),
         INK,
-    );
-    ui.painter().text(
-        center + vec2(0.0, 55.0),
-        Align2::CENTER_CENTER,
-        label,
-        FontId::proportional(13.0),
-        MUTED,
     );
     response.on_hover_text(format!("{hint} · {count} / {total}"))
 }

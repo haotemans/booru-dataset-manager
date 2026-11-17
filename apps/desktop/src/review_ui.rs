@@ -2,21 +2,25 @@ use crate::theme::*;
 use eframe::egui::{self, vec2, RichText};
 
 pub fn choice(ui: &mut egui::Ui, label: &str, selected: bool, width: f32) -> egui::Response {
-    ui.add_sized(
+    let response = ui.add_sized(
         [width, 32.0],
         egui::Button::new(RichText::new(label).size(13.0).color(if selected {
-            egui::Color32::WHITE
+            INK
         } else {
             MUTED
         }))
-        .fill(if selected {
-            ACCENT
-        } else {
-            egui::Color32::TRANSPARENT
-        })
+        .fill(PANEL)
         .stroke(egui::Stroke::NONE)
-        .rounding(6.0),
-    )
+        .rounding(0.0),
+    );
+    if selected {
+        ui.painter().hline(
+            (response.rect.left() + 12.0)..=(response.rect.right() - 12.0),
+            response.rect.bottom(),
+            egui::Stroke::new(2.0_f32, INK),
+        );
+    }
+    response
 }
 
 pub fn section() -> egui::Frame {
@@ -60,13 +64,7 @@ pub fn decision(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
-    let fill = if primary {
-        ACCENT
-    } else if selected || response.hovered() {
-        SOFT
-    } else {
-        PANEL
-    };
+    let fill = if primary { INK } else { PANEL };
     let color = if primary {
         egui::Color32::WHITE
     } else if danger {
@@ -78,7 +76,16 @@ pub fn decision(
         rect,
         7.0,
         fill,
-        egui::Stroke::new(1.0_f32, if primary { ACCENT } else { LINE }),
+        egui::Stroke::new(
+            1.0_f32,
+            if primary {
+                INK
+            } else if selected || response.hovered() {
+                color
+            } else {
+                LINE
+            },
+        ),
     );
     ui.painter().text(
         rect.left_center() + vec2(14.0, 0.0),
@@ -89,15 +96,6 @@ pub fn decision(
     );
     let key_rect =
         egui::Rect::from_center_size(rect.right_center() - vec2(19.0, 0.0), vec2(22.0, 22.0));
-    ui.painter().rect_filled(
-        key_rect,
-        4.0,
-        if primary {
-            egui::Color32::from_white_alpha(24)
-        } else {
-            NAV
-        },
-    );
     ui.painter().text(
         key_rect.center(),
         egui::Align2::CENTER_CENTER,

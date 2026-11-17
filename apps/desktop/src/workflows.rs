@@ -1486,9 +1486,9 @@ impl BdmApp {
         {
             return;
         }
-        card().show(ui, |ui| {
+        egui::Frame::none().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            section(ui, "数据处理", "");
+            ui.label(RichText::new("数据处理").size(12.0).color(MUTED));
             ui.add_space(10.0);
             for (index, job) in jobs.into_iter().enumerate() {
                 if index > 0 {
@@ -1678,7 +1678,7 @@ impl BdmApp {
         ui.add_space(12.0);
     }
 
-    fn actionable_workflows(&self) -> Vec<WorkflowJob> {
+    pub(crate) fn actionable_workflows(&self) -> Vec<WorkflowJob> {
         let valid: BTreeSet<_> = self
             .library
             .media

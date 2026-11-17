@@ -13,9 +13,7 @@ impl BdmApp {
 
     pub fn collections_page(&mut self, ui: &mut egui::Ui) {
         if self.prefs.page == Page::Downloads {
-            ui.add(egui::Label::new(RichText::new(
-                "例如 official_art zenless_zone_zero：下载同时符合这些标签的图片，并在画师页显示为一个标签合集，统一审核。"
-            ).size(13.0).color(MUTED)).wrap());
+            icon_label(ui, "layers", "多个标签 · 同时匹配", "例如 official_art zenless_zone_zero。合集同时显示在画师页，可统一审核、裁剪、优化和导出。");
             ui.add_space(12.0);
         }
         if self.prefs.page == Page::Character {
@@ -37,7 +35,12 @@ impl BdmApp {
             self.cancel_collection_selection();
         }
         ui.horizontal_wrapped(|ui| {
-            if search(ui, &mut self.query, "Tag", 240.0).changed() {
+            let hint = match self.prefs.page {
+                Page::Artist => "搜索画师 / 合集",
+                Page::Character => "搜索角色",
+                _ => "搜索标签合集",
+            };
+            if search(ui, &mut self.query, hint, 240.0).changed() {
                 self.page_number = 0;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -61,7 +64,11 @@ impl BdmApp {
         let pages = total.div_ceil(self.prefs.page_size).max(1);
         self.page_number = self.page_number.min(pages - 1);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{total}")).size(12.0).color(MUTED));
+            ui.label(
+                RichText::new(format!("{total} 个收藏"))
+                    .size(12.0)
+                    .color(MUTED),
+            );
             if !self.selected.is_empty() {
                 badge(ui, &format!("{}", self.selected.len()), ACCENT);
                 if !self.collection_delete_mode
@@ -161,14 +168,14 @@ impl BdmApp {
                             if self.selected.contains(&c.id) {
                                 ACCENT
                             } else {
-                                LINE
+                                egui::Color32::TRANSPARENT
                             },
                         ))
-                        .inner_margin(7.0)
+                        .inner_margin(0.0)
                         .show(ui, |ui| {
-                            ui.set_width(width - 14.0);
+                            ui.set_width(width);
                             let (rect, response) = ui.allocate_exact_size(
-                                vec2(width - 14.0, (width - 14.0) * 1.12),
+                                vec2(width, width * 1.08),
                                 Sense::click(),
                             );
                             let (image_count, latest) = if self.demo || self.is_capture() {
@@ -187,6 +194,9 @@ impl BdmApp {
                                     "image",
                                     MUTED,
                                 );
+                            }
+                            if response.hovered() || response.has_focus() {
+                                ui.painter().rect_stroke(rect, 7.0, Stroke::new(1.0_f32, INK));
                             }
                             if response.clicked() {
                                 if self.collection_delete_mode {
@@ -217,15 +227,12 @@ impl BdmApp {
                                     self.selected.remove(&c.id);
                                 }
                             }
-                            ui.add_space(5.0);
-                            if is_query {
-                                ui.add(egui::Label::new(RichText::new(&c.tag).size(13.0).strong()).wrap())
-                                    .on_hover_text(&c.tag);
-                                ui.add_space(4.0);
-                            }
+                            ui.add_space(8.0);
+                            let title = egui::Label::new(RichText::new(&c.tag).font(medium(13.0)));
+                            ui.add(if is_query { title.wrap() } else { title.truncate() }).on_hover_text(&c.tag);
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(format!("{image_count}")).strong().size(16.0),
+                                    RichText::new(format!("{image_count}")).size(12.0).color(MUTED),
                                 );
                                 let (icon_rect, response) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                                 icon(ui, icon_rect, "image", MUTED);
@@ -236,7 +243,7 @@ impl BdmApp {
                                         ui.label(
                                             RichText::new(c.api_count.map_or_else(|| if is_query { "标签合集".into() } else { "本地发现".into() }, |count| format!("API {count}")))
                                                 .color(MUTED)
-                                                .size(13.0),
+                                                .size(12.0),
                                         )
                                         .on_hover_text(
                                             if is_query {
@@ -417,7 +424,7 @@ impl BdmApp {
             });
         });
         ui.add_space(10.0);
-        card().inner_margin(14.0).show(ui, |ui| {
+        egui::Frame::none().show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if search(ui, &mut self.query, "Tag", 260.0).changed() {
                     self.page_number = 0;
@@ -616,15 +623,19 @@ impl BdmApp {
                             if self.selected_media.contains(&m.id) {
                                 ACCENT
                             } else {
-                                LINE
+                                egui::Color32::TRANSPARENT
                             },
                         ))
-                        .inner_margin(6.0)
+                        .inner_margin(0.0)
                         .show(ui, |ui| {
-                            ui.set_width(width - 12.0);
+                            ui.set_width(width);
                             let (rect, response) =
-                                ui.allocate_exact_size(vec2(width - 12.0, height), Sense::click());
+                                ui.allocate_exact_size(vec2(width, height), Sense::click());
                             self.paint_media(ui, rect, m.id);
+                            if response.hovered() || response.has_focus() {
+                                ui.painter()
+                                    .rect_stroke(rect, 7.0, Stroke::new(1.0_f32, INK));
+                            }
                             if response
                                 .on_hover_text(format!(
                                     "{} · {}",

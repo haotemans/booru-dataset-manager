@@ -466,7 +466,7 @@ impl BdmApp {
     }
 
     pub fn associated_media(&self, page: Page, ids: &BTreeSet<usize>) -> Vec<&Media> {
-        if self.demo {
+        if self.demo || self.is_capture() {
             return self.library.associated(page, ids);
         }
         self.library
@@ -880,9 +880,9 @@ impl BdmApp {
         if jobs.is_empty() {
             return;
         }
-        card().show(ui, |ui| {
+        egui::Frame::none().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            section(ui, "图片下载", "");
+            ui.label(RichText::new("图片下载").size(12.0).color(MUTED));
             ui.add_space(10.0);
             for (index, job) in jobs.into_iter().rev().take(6).enumerate() {
                 if index > 0 {

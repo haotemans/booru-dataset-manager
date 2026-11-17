@@ -8,9 +8,6 @@ use eframe::egui::{self, vec2, Color32, RichText, Sense};
 
 impl BdmApp {
     pub fn dashboard(&mut self, ui: &mut egui::Ui) {
-        self.task_cleanup_controls(ui);
-        self.ingestion_status(ui);
-        self.workflow_status(ui);
         let pending = self.library.media.iter().filter(|m| !m.keep).count();
         ui.columns(4, |cols| {
             let values = [
@@ -28,9 +25,7 @@ impl BdmApp {
             .iter()
             .enumerate()
             {
-                let r = count_card(&mut cols[i], values[i], title, kind);
-                if cols[i]
-                    .interact(r.rect, r.id.with("click"), Sense::click())
+                if count_card(&mut cols[i], values[i], title, kind)
                     .on_hover_text(*title)
                     .clicked()
                 {
@@ -48,10 +43,10 @@ impl BdmApp {
                 }
             }
         });
-        ui.add_space(24.0);
-        let gap = 24.0;
+        ui.add_space(28.0);
+        let gap = 28.0;
         let width = ui.available_width();
-        let right = (width * 0.30).clamp(260.0, 360.0);
+        let right = (width * 0.32).clamp(342.0, 380.0);
         let left = width - gap - right;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -61,86 +56,140 @@ impl BdmApp {
                 |ui| {
                     ui.set_width(left);
                     ui.horizontal(|ui| {
-                        section(ui, "最近", "");
+                        section(ui, "最近入库", "");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if icon_button(ui, "forward", "全部图片", false).clicked() {
+                            if tool_button(ui, "forward", "全部", false).clicked() {
                                 self.navigate(Page::Artist);
                                 self.gallery = true;
                             }
                         });
                     });
-                    ui.add_space(12.0);
+                    ui.add_space(14.0);
                     if self.library.media.is_empty() {
-                        let (r, _) = ui.allocate_exact_size(vec2(left, 310.0), Sense::hover());
-                        ui.painter().rect_filled(r, 10.0, NAV);
-                        icon(
-                            ui,
-                            egui::Rect::from_center_size(
-                                r.center() - vec2(0.0, 28.0),
-                                vec2(40.0, 40.0),
-                            ),
-                            "image",
-                            MUTED,
-                        );
-                        let response = ui.interact(
-                            egui::Rect::from_center_size(
-                                r.center() + vec2(0.0, 30.0),
-                                vec2(40.0, 40.0),
-                            ),
-                            ui.id().with("empty-add"),
-                            Sense::click(),
-                        );
-                        ui.painter().rect_filled(response.rect, 8.0, PANEL);
-                        icon(ui, response.rect.shrink(11.0), "plus", INK);
-                        response.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "添加画师")
-                        });
-                        if response.on_hover_text("添加画师").clicked() {
-                            self.navigate(Page::Artist);
-                            self.dialog = Some(Dialog::Add);
-                        }
+                        egui::Frame::none()
+                            .stroke(egui::Stroke::new(1.0_f32, LINE))
+                            .rounding(8.0)
+                            .show(ui, |ui| {
+                                ui.set_width(left - 2.0);
+                                empty(ui, "收藏你的第一位画师", "", "image");
+                                ui.vertical_centered(|ui| {
+                                    if primary(ui, "+ 添加画师").clicked() {
+                                        self.navigate(Page::Artist);
+                                        self.begin_add_collection();
+                                    }
+                                    ui.add_space(28.0);
+                                });
+                            });
                     } else {
-                        let cell = (left - 24.0) / 3.0;
-                        let height = (cell * 0.86).min(190.0);
+                        let columns = if left >= 560.0 { 3 } else { 2 };
+                        let cell = (left - 16.0 * (columns - 1) as f32) / columns as f32;
+                        let height = (cell * 0.85).min(
+                            ((ui.ctx().screen_rect().height() - 320.0) / 2.0).clamp(120.0, 210.0),
+                        );
                         let ids: Vec<_> = self
                             .library
                             .media
                             .iter()
                             .rev()
-                            .take(6)
+                            .take(columns * 2)
                             .map(|m| m.id)
                             .collect();
-                        for row in ids.chunks(3) {
+                        for row in ids.chunks(columns) {
                             ui.horizontal_top(|ui| {
-                                ui.spacing_mut().item_spacing.x = 12.0;
+                                ui.spacing_mut().item_spacing.x = 16.0;
                                 for id in row {
-                                    let (rect, response) =
-                                        ui.allocate_exact_size(vec2(cell, height), Sense::click());
-                                    self.paint_media(ui, rect, *id);
-                                    if response.on_hover_text(self.media_name(*id)).clicked() {
-                                        self.open_media(*id);
-                                    }
+                                    ui.allocate_ui_with_layout(
+                                        vec2(cell, 0.0),
+                                        egui::Layout::top_down(egui::Align::LEFT),
+                                        |ui| {
+                                            let (rect, response) = ui.allocate_exact_size(
+                                                vec2(cell, height),
+                                                Sense::click(),
+                                            );
+                                            self.paint_media(ui, rect, *id);
+                                            if response.hovered() || response.has_focus() {
+                                                ui.painter().rect_stroke(
+                                                    rect,
+                                                    4.0,
+                                                    egui::Stroke::new(1.0_f32, INK),
+                                                );
+                                            }
+                                            if response
+                                                .on_hover_text(self.media_name(*id))
+                                                .clicked()
+                                            {
+                                                self.open_media(*id);
+                                            }
+                                            ui.add_space(4.0);
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(self.media_name(*id))
+                                                        .size(12.0)
+                                                        .color(MUTED),
+                                                )
+                                                .truncate(),
+                                            );
+                                        },
+                                    );
                                 }
                             });
-                            ui.add_space(6.0);
+                            ui.add_space(12.0);
                         }
                     }
                 },
             );
             ui.allocate_ui_with_layout(
-                vec2(right, 0.0),
+                vec2(right, (ui.ctx().screen_rect().height() - 250.0).max(320.0)),
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
                     ui.set_width(right);
-                    ui.add_space(10.0);
-                    section(ui, "标注覆盖", "");
-                    ui.add_space(26.0);
-                    let counts = self.library.coverage();
-                    let total = self.library.media.len();
-                    for row in [0..2, 2..4] {
-                        ui.horizontal_top(|ui| {
-                            ui.spacing_mut().item_spacing.x = 16.0;
-                            for i in row {
+                    let top = ui.cursor().top();
+                    egui::Frame::none()
+                        .inner_margin(egui::Margin {
+                            left: 20.0,
+                            right: 0.0,
+                            top: 0.0,
+                            bottom: 0.0,
+                        })
+                        .show(ui, |ui| {
+                            ui.set_width(right - 20.0);
+                            section(ui, "任务", "");
+                            ui.add_space(14.0);
+                            self.task_cleanup_controls(ui);
+                            let empty = !self
+                                .ingest
+                                .jobs
+                                .iter()
+                                .any(|job| !job.dismissed && job.state != "completed")
+                                && self.actionable_workflows().is_empty()
+                                && self.pending_similarity_pairs().is_empty()
+                                && !self.workflows.metadata_active
+                                && !self.workflow_active();
+                            egui::ScrollArea::vertical()
+                                .id_salt("dashboard-tasks")
+                                .auto_shrink([false, true])
+                                .max_height(
+                                    (ui.ctx().screen_rect().height() - 500.0).clamp(220.0, 440.0),
+                                )
+                                .show(ui, |ui| {
+                                    self.ingestion_status(ui);
+                                    self.workflow_status(ui);
+                                    if empty {
+                                        icon_label(
+                                            ui,
+                                            "check",
+                                            "暂无进行中的任务",
+                                            "下载、去重、文本优化与导出任务会显示在这里。",
+                                        );
+                                        ui.add_space(16.0);
+                                    }
+                                });
+                            ui.add_space(24.0);
+                            section(ui, "标注覆盖", "");
+                            ui.add_space(16.0);
+                            let counts = self.library.coverage();
+                            let total = self.library.media.len();
+                            for i in 0..4 {
                                 let label = ["原始标签", "优化标签", "自然语言", "三份齐全"][i];
                                 let hint = [
                                     "原始标签",
@@ -148,13 +197,13 @@ impl BdmApp {
                                     "自然语言描述（含待确认结果）",
                                     "三份文本齐全（含待确认结果）",
                                 ][i];
-                                if coverage_ring(
+                                if coverage_bar(
                                     ui,
                                     counts[i],
                                     total,
                                     label,
                                     hint,
-                                    (right - 16.0) / 2.0,
+                                    ui.available_width(),
                                 )
                                 .clicked()
                                 {
@@ -164,8 +213,11 @@ impl BdmApp {
                                 }
                             }
                         });
-                        ui.add_space(18.0);
-                    }
+                    ui.painter().vline(
+                        ui.min_rect().left(),
+                        top..=ui.min_rect().bottom(),
+                        egui::Stroke::new(1.0_f32, LINE),
+                    );
                 },
             );
         });

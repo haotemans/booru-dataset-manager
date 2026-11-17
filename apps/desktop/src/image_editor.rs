@@ -247,16 +247,18 @@ impl BdmApp {
             ui.spacing_mut().item_spacing.x = 3.0;
             ui.spacing_mut().button_padding = vec2(3.0, 4.0);
             ui.spacing_mut().interact_size.y = 28.0;
-            let width = (ui.available_width() - 3.0 * (crop::RATIOS.len() - 1) as f32)
-                / (crop::RATIOS.len() as f32 + 0.9);
+            let width = ((ui.available_width() - 3.0 * (crop::RATIOS.len() - 1) as f32)
+                / (crop::RATIOS.len() as f32 + 0.9))
+                .floor();
             for index in crop::ordered_ratios() {
                 let (name, _) = crop::RATIOS[index];
                 let button = ui
                     .add_enabled_ui(!busy, |ui| {
-                        ui.add_sized(
-                            [width * if !name.is_ascii() { 1.45 } else { 1.0 }, 28.0],
-                            egui::Button::new(RichText::new(name).size(12.0))
-                                .selected(active && self.image_editor.crop.ratio == index),
+                        crate::widgets::segment(
+                            ui,
+                            name,
+                            active && self.image_editor.crop.ratio == index,
+                            width * if !name.is_ascii() { 1.45 } else { 1.0 },
                         )
                     })
                     .inner;

@@ -2,12 +2,12 @@ use eframe::egui::{self, Color32, FontFamily, FontId, Stroke, TextStyle};
 
 pub const BG: Color32 = Color32::from_rgb(255, 255, 255);
 pub const PANEL: Color32 = Color32::WHITE;
-pub const INK: Color32 = Color32::from_rgb(31, 33, 38);
-pub const MUTED: Color32 = Color32::from_rgb(100, 105, 114);
-pub const LINE: Color32 = Color32::from_rgb(229, 230, 234);
-pub const ACCENT: Color32 = Color32::from_rgb(48, 65, 91);
-pub const SOFT: Color32 = Color32::from_rgb(238, 241, 246);
-pub const NAV: Color32 = Color32::from_rgb(247, 247, 249);
+pub const INK: Color32 = Color32::from_rgb(25, 25, 25);
+pub const MUTED: Color32 = Color32::from_rgb(112, 112, 112);
+pub const LINE: Color32 = Color32::from_rgb(232, 232, 232);
+pub const ACCENT: Color32 = INK;
+pub const SOFT: Color32 = Color32::WHITE;
+pub const NAV: Color32 = Color32::WHITE;
 pub const AMBER: Color32 = Color32::from_rgb(148, 105, 43);
 pub const DANGER: Color32 = Color32::from_rgb(184, 58, 58);
 
@@ -70,10 +70,15 @@ pub fn setup(ctx: &egui::Context) {
     style.visuals.window_fill = PANEL;
     style.visuals.extreme_bg_color = PANEL;
     style.visuals.faint_bg_color = BG;
-    style.visuals.override_text_color = Some(INK);
-    style.visuals.selection.bg_fill = SOFT;
-    style.visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
+    // Let selected controls use their white foreground on a black selection.
+    style.visuals.override_text_color = None;
+    style.visuals.hyperlink_color = INK;
+    style.visuals.code_bg_color = PANEL;
+    style.visuals.selection.bg_fill = INK;
+    style.visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
     style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
+    style.visuals.widgets.noninteractive.bg_fill = PANEL;
+    style.visuals.widgets.noninteractive.weak_bg_fill = PANEL;
     style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, INK);
     style.visuals.widgets.inactive.bg_fill = PANEL;
     style.visuals.widgets.inactive.weak_bg_fill = PANEL;
@@ -81,12 +86,16 @@ pub fn setup(ctx: &egui::Context) {
     style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, INK);
     style.visuals.widgets.hovered.bg_fill = NAV;
     style.visuals.widgets.hovered.weak_bg_fill = NAV;
-    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_gray(185));
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, INK);
     style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, INK);
     style.visuals.widgets.active.bg_fill = SOFT;
     style.visuals.widgets.active.weak_bg_fill = SOFT;
     style.visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
     style.visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, INK);
+    style.visuals.widgets.open.bg_fill = PANEL;
+    style.visuals.widgets.open.weak_bg_fill = PANEL;
+    style.visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, INK);
+    style.visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, INK);
     for visuals in [
         &mut style.visuals.widgets.inactive,
         &mut style.visuals.widgets.hovered,
@@ -99,9 +108,14 @@ pub fn setup(ctx: &egui::Context) {
     style.visuals.window_stroke = Stroke::new(1.0_f32, LINE);
     style.visuals.window_shadow = egui::epaint::Shadow::NONE;
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.interact_size.y = 34.0;
-    style.text_styles.insert(TextStyle::Heading, medium(24.0));
+    style.spacing.scroll.foreground_color = true;
+    style.spacing.scroll.bar_width = 6.0;
+    style.spacing.scroll.floating_width = 3.0;
+    style.spacing.scroll.dormant_handle_opacity = 1.0;
+    style.spacing.scroll.active_handle_opacity = 1.0;
+    style.text_styles.insert(TextStyle::Heading, medium(22.0));
     style
         .text_styles
         .insert(TextStyle::Body, FontId::proportional(14.0));
