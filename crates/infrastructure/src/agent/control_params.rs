@@ -16,7 +16,45 @@ pub struct WorkClaimArgs {
     pub limit: Option<u32>,
     /// Lease lifetime 30..1800 seconds; default 600.
     pub ttl_seconds: Option<u32>,
+    /// Optional idempotent claim receipt. Reuse only for the same owner/scope;
+    /// an empty result stays empty until a new request ID is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
+
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkNextArgs {
+    pub owner: String,
+    pub job_id: Option<i64>,
+    pub ttl_seconds: Option<u32>,
+    /// One request claims at most one image. Retry this exact ID after an
+    /// interrupted response; use a new ID to advance to another image.
+    pub request_id: String,
+    #[serde(default = "PreviewOptions::compact")]
+    pub preview: PreviewOptions,
+}
+
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyViewPayload {
+    pub crop: CropApplyPayload,
+    #[serde(default = "PreviewOptions::compact")]
+    pub preview: PreviewOptions,
+}
+pub type WorkApplyViewArgs = WorkWriteArgs<ApplyViewPayload>;
+
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FinishPayload {
+    /// Final judgement only: crop_candidate must be false. Preview/apply any
+    /// needed crop and view the saved current image before this call.
+    pub assessment: AssessmentPayload,
+    /// Required for KEEP, forbidden for REJECT/DEFER. Requested visual outputs
+    /// only; identities and overwrite policy remain server-owned.
+    pub annotation: Option<AnnotationPayload>,
+}
+pub type WorkFinishArgs = WorkWriteArgs<FinishPayload>;
 
 #[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -362,6 +400,9 @@ pub const SCHEMA_OPERATIONS: &[&str] = &[
     "work_annotate",
     "work_heartbeat",
     "work_release",
+    "work_next",
+    "work_apply_view",
+    "work_finish",
 ];
 
 /// Pure schema discovery: no catalog, filesystem, credentials or network access.
@@ -399,6 +440,9 @@ pub fn operation_schema(operation: &str) -> Option<serde_json::Value> {
         "work_assess" => schema!(WorkAssessArgs),
         "work_annotate" => schema!(WorkAnnotateArgs),
         "work_heartbeat" | "work_release" => schema!(WorkLeaseArgs),
+        "work_next" => schema!(WorkNextArgs),
+        "work_apply_view" => schema!(WorkApplyViewArgs),
+        "work_finish" => schema!(WorkFinishArgs),
         _ => None,
     }
 }

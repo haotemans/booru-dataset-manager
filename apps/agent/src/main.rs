@@ -13,12 +13,14 @@ character_repair (media_ids, apply=false by default; existing verified rules onl
 job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick,
 download_submit, download_status, download_control,
 work_claim, work_view, work_preview, work_apply, work_assess, work_annotate,
+work_next (claim+view), work_apply_view (apply+view), work_finish (final assessment+annotation),
 work_heartbeat, work_release, daemon-serve, daemon_stop, mcp-serve, init.
 download_submit source: automatic|danbooru|safebooru|gelbooru. Safebooru uses safebooru.donmai.us (General only, shared Danbooru account/IDs).
 Readonly by default. Inputs are JSON objects; '-' reads stdin. View image bytes
 are written only to an explicit --output path. No GUI or hosted model is started.
 Preview options in view/work_view/work_preview: preview={max_edge:256..2048,format:png|jpeg};
 work operations put preview inside payload. Default PNG; JPEG display previews require .jpg/.jpeg output.
+work_next uses top-level preview; work_apply_view uses payload={crop,preview}. These two new image operations default to JPEG.
 Stored training images and native PNG crops are never recompressed by preview options.
 Examples: bdm job_plan ... --input plan.json
           bdm job_submit ... --input plan.json --allow-writes
@@ -40,7 +42,7 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
             return Err("Usage: bdm schema [operation] (no database flags needed)".into());
         }
         let value = if let Some(operation) = requested {
-            json!({"operation":operation,"input_schema":operation_schema(&operation).ok_or("Unknown schema operation")?,"display_defaults":"CLI keeps PNG by default; typed MCP work tools use JPEG. Set preview.format explicitly when using display options.","envelope":"work payload excludes server-owned identity/overwrite/stage fields"})
+            json!({"operation":operation,"input_schema":operation_schema(&operation).ok_or("Unknown schema operation")?,"display_defaults":"Legacy CLI image operations default to PNG; compound CLI image operations and typed MCP work tools default to JPEG. Set preview.format explicitly to choose.","envelope":"work payload excludes server-owned identity/overwrite/stage fields"})
         } else {
             json!({"operations":SCHEMA_OPERATIONS})
         };
@@ -119,18 +121,25 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
     if !input.is_object() {
         return Err("Input must be a JSON object".into());
     }
-    if matches!(operation.as_str(), "view" | "work_view" | "work_preview") {
+    if matches!(
+        operation.as_str(),
+        "view" | "work_view" | "work_preview" | "work_next" | "work_apply_view"
+    ) {
         let output=flags.get("--output").ok_or("Image operations require --output ABS_PNG; inspect that image before submitting decisions")?;
         let p = PathBuf::from(output);
         if !p.is_absolute() || p.exists() {
             return Err("--output must be an absolute unused image path".into());
         }
-        let preview = if operation == "view" {
+        let preview = if operation == "view" || operation == "work_next" {
             &input["preview"]
         } else {
             &input["payload"]["preview"]
         };
-        let jpeg = preview["format"] == "jpeg";
+        let jpeg = if preview.is_null() {
+            matches!(operation.as_str(), "work_next" | "work_apply_view")
+        } else {
+            preview["format"] == "jpeg"
+        };
         let extension = p
             .extension()
             .and_then(|s| s.to_str())

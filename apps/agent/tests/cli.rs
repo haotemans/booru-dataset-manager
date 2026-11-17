@@ -44,6 +44,52 @@ fn cli_help_init_readonly_errors_and_daemon_protocol_are_headless() {
 }
 
 struct ChildGuard(std::process::Child);
+
+#[test]
+fn composite_image_outputs_match_default_or_explicit_preview_format() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("library")).unwrap();
+    assert!(command(root.path(), "init", true).status.success());
+    for (index, preview, extension, expected) in [
+        (0, None, "jpg", "read_only"),
+        (1, None, "png", "cli_error"),
+        (2, Some(serde_json::json!({})), "png", "read_only"),
+        (
+            3,
+            Some(serde_json::json!({"format":"png"})),
+            "jpg",
+            "cli_error",
+        ),
+    ] {
+        let mut input = serde_json::json!({"owner":"test","request_id":format!("claim-{index}")});
+        if let Some(preview) = preview {
+            input["preview"] = preview;
+        }
+        let input_path = root.path().join(format!("input-{index}.json"));
+        std::fs::write(&input_path, input.to_string()).unwrap();
+        let output_path = root.path().join(format!("preview-{index}.{extension}"));
+        let response = Command::new(env!("CARGO_BIN_EXE_bdm"))
+            .arg("work_next")
+            .arg("--catalog")
+            .arg(root.path().join("catalog.sqlite3"))
+            .arg("--project-root")
+            .arg(root.path())
+            .arg("--library-root")
+            .arg(root.path().join("library"))
+            .arg("--input")
+            .arg(input_path)
+            .arg("--output")
+            .arg(&output_path)
+            .output()
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&response.stdout).unwrap();
+        assert_eq!(
+            body["code"].as_str().or(body["error"]["code"].as_str()),
+            Some(expected)
+        );
+        assert!(!output_path.exists());
+    }
+}
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -119,6 +165,9 @@ fn stdio_mcp_uses_the_same_headless_core_and_exposes_durable_tools() {
                 "bdm_work_assess",
                 "bdm_work_annotate",
                 "bdm_work_control",
+                "bdm_work_next",
+                "bdm_work_apply_view",
+                "bdm_work_finish",
             ]
             .into_iter()
             .all(|name| {

@@ -107,7 +107,8 @@ impl AgentService {
     pub fn policy(&self) -> ServiceReply {
         ServiceReply::success(
             json!({"protocol":"bdm-agent-v3","instructions":POLICY,"writes_enabled":self.settings.writes,
-        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging","preset_crop_proposal","retained_element_boxes","tag_coverage_guard","typed_work_tools","display_preview_cache"],
+        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging","preset_crop_proposal","retained_element_boxes","tag_coverage_guard","typed_work_tools","display_preview_cache","compound_work","idempotent_claims"],
+        "compound_tools":{"next":"bdm_work_next","apply_view":"bdm_work_apply_view","finish":"bdm_work_finish","inspection":"Inspect actual returned pixels before subsequent decisions; no crop-preview bypass","write_semantics":"Ordered recoverable phases, not atomic rollback; read assessment/annotation results independently"},
         "typed_tools":{"jobs":"bdm_job","downloads":"bdm_download","claim":"bdm_work_claim","view":"bdm_work_view","preview":"bdm_work_preview","apply":"bdm_work_apply","assess":"bdm_work_assess","annotate":"bdm_work_annotate","lease":"bdm_work_control","legacy":"bdm_agent"},
         "display_preview":{"new_work_tools_default":"1024-edge JPEG quality 90","legacy_default":"1024-edge PNG","max_edge_range":[256,2048],"memory_cache_max_bytes":33554432,"memory_cache_max_entries":32,"native_training_pixels_unchanged":true,"repeat_full_view":"Send known_preview_token only if this client retains the inspected preview; first view of a lease and changed current SHA always return pixels"},
         "crop_ratios":bdm_domain::training::RATIOS.iter().map(|r|r.0).collect::<Vec<_>>(),
@@ -230,6 +231,9 @@ impl AgentService {
             "assess" => tools::assess(&mut repo, settings, args!(AssessArgs)),
             "scan" => tools::scan(&mut repo, settings, args!(ScanArgs)),
             "pair" => tools::pair(&mut repo, settings, args!(PairArgs)),
+            "work_next" | "work_apply_view" | "work_finish" => {
+                super::composite::dispatch(self, &mut repo, operation, input)
+            }
             "download_submit" | "download_control" | "download_status" => {
                 super::downloads::dispatch(self, &mut repo, operation, input)
             }

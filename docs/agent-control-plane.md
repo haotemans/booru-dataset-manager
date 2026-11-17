@@ -38,9 +38,27 @@ Work payloads exclude server-owned identity/hash, overwrite, assessment stage an
 
 `bdm schema` lists operations, and `bdm schema work_annotate` returns the complete envelope/payload JSON Schema without opening a catalog, reading credentials or creating files. `describe` also includes `input_schema`. These schemas describe typed envelopes; CLI display defaults remain legacy PNG, so pass preview format explicitly when choosing display options.
 
+## Compound work (capability `compound_work`)
+
+Three optional typed MCP tools and matching CLI operations reduce client round trips while reusing the existing stage, lease, image-hash and write checks:
+
+| Operation / MCP tool | Behavior |
+| --- | --- |
+| `work_next` / `bdm_work_next` | Claim one item and return its current image plus canonical `work` write envelope. Supply owner, optional job_id/ttl_seconds, unique request_id and optional top-level preview. |
+| `work_apply_view` / `bdm_work_apply_view` | Existing apply followed by full-current view; payload is `{crop,preview?}`. Crop is the exact inspected proposal, including its native preview SHA. Inspect returned pixels before final judgement. |
+| `work_finish` / `bdm_work_finish` | Existing final assessment followed by requested annotation for KEEP. Payload is `{assessment,annotation}`; final crop_candidate=false. REJECT/DEFER forbid annotation and retain existing human-review/deletion rules. |
+
+For annotation-only work use next → inspect → annotate; do not add unrequested curation. For full curation without a crop, next → inspect → finish replaces separate claim/view/assess/annotate calls. Crop work remains next → inspect → preliminary assessment → crop preview → inspect preview → apply/view → inspect saved current image → finish. A harmful preview may instead be finalized with verified `crop_outcome=not_improved`. Applying and finalizing cannot bypass preview evidence or actual final-image delivery.
+
+Claims optionally accept request_id (mandatory for work_next). Claim selection and its receipt commit in one SQLite transaction. Identical retries return the same snapshot, not another lease; owner/scope/effective lease-policy changes conflict. Empty claims remain empty on replay even after preflight advances: use a new ID once ready. Plain work_claim replays the original snapshot; work_next rejects a released/expired lease during its follow-up view. Neither silently reclaims. Existing callers without a claim ID retain ordinary claim behavior. Metadata `claim.items` is the original snapshot; `work` contains only work_id, lease_token, generation and the current expected_sha256.
+
+Finish binds the entire request to its lease and uses stable child assessment/annotation receipts. If interrupted between phases, identical retry resumes/replays existing child outcomes. **This is ordered, recoverable execution, not atomic rollback.** Assessment may already have saved when annotation fails; inspect `assessment_saved`, both results, `next_stage` and `annotation.readback`/`verification`. Correct rejected/missing outputs with work_annotate; do not rerun approved work or change a prior request ID's input. Busy/ambiguous writes keep the existing recovery rules. Tag-coverage validation failures that saved nothing now retain the annotation-stage lease for correction.
+
+If apply saved but subsequent view fails, the response remains an error with `applied=true` and `apply_result`. Resume image inspection under a valid lease; never assume the crop was rolled back. The two compound image operations always return pixels when successful, default to JPEG and require CLI `.jpg`/`.jpeg` output unless preview.format is explicitly PNG. Their previews never change original/crop/export pixels.
+
 ## Display previews
 
-Typed MCP work tools default to longest edge 1024 and JPEG quality 90. Legacy tools and CLI default to PNG. Set `preview` on standalone view/crop arguments or `payload.preview` on work view/preview: `{"max_edge":2048,"format":"png"}`. The edge range is 256–2048; small images are never upscaled. Use PNG or detail tiles for fine text. These options affect Agent viewing only: originals, native crop PNGs and training export are never resized or recompressed by preview transport.
+Typed MCP work tools default to longest edge 1024 and JPEG quality 90. Legacy tools/CLI operations default to PNG; the two new compound CLI image operations default to JPEG. Set `preview` on standalone view/crop arguments or `payload.preview` on work view/preview: `{"max_edge":2048,"format":"png"}`. The edge range is 256–2048; small images are never upscaled. Use PNG or detail tiles for fine text. These options affect Agent viewing only: originals, native crop PNGs and training export are never resized or recompressed by preview transport.
 
 Each response reports native/display dimensions, MIME type, byte length, encoded SHA, a source-bound `display_preview.token`, cache hit and `not_modified`. An in-memory LRU holds at most 32 previews / 32 MiB, shared across leased work. Source hashes/path boundaries and fresh metadata are still checked before cache use. No cache image files or backup copies are created. Exact native crop proof (`preview_sha256`) is separate from display hash/token and verified again on apply.
 

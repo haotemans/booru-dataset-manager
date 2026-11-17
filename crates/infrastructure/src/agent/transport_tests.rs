@@ -42,6 +42,9 @@ fn mcp_lists_complete_typed_payloads_and_keeps_legacy_entry() {
         "bdm_work_assess",
         "bdm_work_annotate",
         "bdm_work_control",
+        "bdm_work_next",
+        "bdm_work_apply_view",
+        "bdm_work_finish",
     ] {
         let tool = tools
             .as_array()

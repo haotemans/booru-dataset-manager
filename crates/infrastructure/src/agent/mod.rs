@@ -1,4 +1,5 @@
 //! Local stdio MCP adapter. The client supplies the vision/reasoning model.
+mod composite;
 mod control_params;
 pub(crate) mod downloads;
 pub mod jobs;
@@ -128,6 +129,9 @@ impl AgentServer {
 
 fn operation_tool(operation: &str) -> &'static str {
     match operation {
+        "work_next" => "bdm_work_next",
+        "work_apply_view" => "bdm_work_apply_view",
+        "work_finish" => "bdm_work_finish",
         "work_claim" => "bdm_work_claim",
         "work_view" => "bdm_work_view",
         "work_preview" => "bdm_work_preview",
@@ -145,6 +149,35 @@ fn operation_tool(operation: &str) -> &'static str {
 
 #[tool_router]
 impl AgentServer {
+    #[tool(
+        description = "Claim ONE image and return its current pixels plus work lease in one call. request_id makes retries return the same claim, never silently claim another image. Use a new ID to advance; an empty claim remains empty on replay. Inspect the image before any decision. Expired/released lease replays fail rather than reclaim. Always sends pixels; display-only JPEG by default."
+    )]
+    async fn bdm_work_next(&self, Parameters(args): Parameters<WorkNextArgs>) -> CallToolResult {
+        self.execute_operation("work_next".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "Apply the exact inspected crop and return the NEW current pixels in one call. Echo crop ratio/bbox/preview_sha256; saves native PNG. Inspect this returned image before final assessment. If view fails, applied=true/apply_result still reports the saved crop: resume viewing, never recrop blindly. Identical retries reuse the apply receipt."
+    )]
+    async fn bdm_work_apply_view(
+        &self,
+        Parameters(args): Parameters<WorkApplyViewArgs>,
+    ) -> CallToolResult {
+        self.execute_operation("work_apply_view".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "For a viewed final curation image, submit final assessment and requested annotation in one round trip. KEEP requires annotation; REJECT/DEFER forbid it; crop_candidate must be false. Server runs existing checks in order. These are separate recoverable writes: assessment may save even if annotation fails. Read both phase results; correct missing outputs via work_annotate. Exact retries resume/replay child receipts; changed inputs need a new ID. Never skips crop preview or post-crop inspection."
+    )]
+    async fn bdm_work_finish(
+        &self,
+        Parameters(args): Parameters<WorkFinishArgs>,
+    ) -> CallToolResult {
+        self.execute_operation("work_finish".into(), json!(args))
+            .await
+    }
     #[tool(
         description = "Plan, submit, inspect or control durable jobs. Each operation has its exact typed input in this schema. Read policy; plan/submit use media_ids OR an exact collection. Resume requested outputs only by default. jobs_tick runs local preflight, never hosted inference."
     )]
@@ -173,6 +206,10 @@ impl AgentServer {
         description = "Claim a small batch of independent leased images after local preflight. Each item returns work_id, lease_token, generation, expected_sha256 and stage. View each current image before deciding; never substitute source tags for inspection."
     )]
     async fn bdm_work_claim(&self, Parameters(args): Parameters<WorkClaimArgs>) -> CallToolResult {
+        let mut args = args;
+        if args.limit.is_none() {
+            args.limit = Some(1);
+        }
         self.execute_operation("work_claim".into(), json!(args))
             .await
     }
@@ -269,6 +306,9 @@ impl AgentServer {
                 | "work_annotate"
                 | "work_heartbeat"
                 | "work_release"
+                | "work_next"
+                | "work_apply_view"
+                | "work_finish"
         ) {
             return mcp_reply(ServiceReply::error(
                 json!({"error":{"code":"unknown_operation","message":"Use one of the documented control-plane operations"}}),

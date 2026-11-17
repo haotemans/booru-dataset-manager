@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS agent_work(id INTEGER PRIMARY KEY,job_id INTEGER NOT 
 CREATE UNIQUE INDEX IF NOT EXISTS agent_work_live_media ON agent_work(media_id) WHERE lease IS NOT NULL;
 CREATE INDEX IF NOT EXISTS agent_work_ready ON agent_work(job_id,stage,id);
 CREATE TABLE IF NOT EXISTS agent_receipts(work_id INTEGER NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,response TEXT,state TEXT NOT NULL,lease_proof TEXT NOT NULL,PRIMARY KEY(work_id,request_id));
+CREATE TABLE IF NOT EXISTS agent_claims(request_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,response TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agent_daemon(id INTEGER PRIMARY KEY CHECK(id=1),pid INTEGER,heartbeat INTEGER NOT NULL DEFAULT 0,stop INTEGER NOT NULL DEFAULT 0);
 ";
 pub(super) fn now() -> i64 {
@@ -536,6 +537,39 @@ fn claim(repo: &mut SqliteCatalog, input: &Value) -> Result<ServiceReply, Ingest
         repo.connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
     )?;
+    let request = if input["request_id"].is_null() {
+        None
+    } else {
+        Some(text(input, "request_id")?)
+    };
+    let fingerprint = digest(&json!([
+        owner,
+        input["job_id"].as_i64().unwrap_or(0),
+        limit,
+        ttl
+    ]));
+    if let Some(request) = request {
+        let receipt: Option<(String, String)> = storage(
+            tx.query_row(
+                "SELECT fingerprint,response FROM agent_claims WHERE request_id=?1",
+                [request],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional(),
+        )?;
+        if let Some((previous, response)) = receipt {
+            if previous != fingerprint {
+                return Err(error(
+                    "idempotency_conflict",
+                    "Claim request_id reused with a different owner, scope or lease policy",
+                ));
+            }
+            let mut value: Value =
+                serde_json::from_str(&response).map_err(|_| IngestError::Storage)?;
+            value["replayed"] = json!(true);
+            return Ok(ServiceReply::success(value));
+        }
+    }
     storage(tx.execute("UPDATE agent_work SET stage='recovery_required',lease=NULL,owner=NULL,busy=0,last_error='Ambiguous interrupted write: inspect current artifacts before retry' WHERE busy=1 AND expires<?1",[at]))?;
     storage(tx.execute("UPDATE agent_work SET lease=NULL,owner=NULL,viewed=NULL,preview=NULL WHERE busy=0 AND expires<?1",[at]))?;
     let mut q=storage(tx.prepare("SELECT w.id FROM agent_work w JOIN agent_jobs j ON j.id=w.job_id WHERE j.state='running' AND w.stage IN ('triage','crop','final','annotation') AND w.lease IS NULL AND (?1=0 OR w.job_id=?1) AND NOT EXISTS(SELECT 1 FROM agent_work active WHERE active.media_id=w.media_id AND active.lease IS NOT NULL) ORDER BY w.id LIMIT ?2"))?;
@@ -562,6 +596,24 @@ fn claim(repo: &mut SqliteCatalog, input: &Value) -> Result<ServiceReply, Ingest
         let item=storage(tx.query_row("SELECT job_id,media_id,sha,stage,lease,generation,expires FROM agent_work WHERE id=?1",[id],|r|Ok(json!({"work_id":id,"job_id":r.get::<_,i64>(0)?,"media_id":r.get::<_,i64>(1)?,"expected_sha256":r.get::<_,String>(2)?,"stage":r.get::<_,String>(3)?,"lease_token":r.get::<_,String>(4)?,"generation":r.get::<_,i64>(5)?,"expires":r.get::<_,i64>(6)?}))))?;
         items.push(item);
     }
+    let next = if items.is_empty() {
+        if input["job_id"].as_i64().is_some() {
+            "job_status"
+        } else {
+            "jobs_list"
+        }
+    } else {
+        "work_view"
+    };
+    let mut response = json!({"items":items,"next":{"operation":next,"job_id":input["job_id"],"hint":if next=="work_view"{"Load the full current image for each leased item before deciding."}else{"No claimable work. Check preflight, completion, pause and existing leases; run jobs_tick only when local preflight is pending. Do not busy-poll. A cached empty claim needs a new request_id after readiness changes."}}});
+    if let Some(request) = request {
+        response["claim_request_id"] = json!(request);
+        response["replayed"] = json!(false);
+        storage(tx.execute(
+            "INSERT INTO agent_claims VALUES(?1,?2,?3)",
+            params![request, fingerprint, response.to_string()],
+        ))?;
+    }
     storage(tx.commit())?;
     let mut q = storage(
         repo.connection
@@ -572,18 +624,7 @@ fn claim(repo: &mut SqliteCatalog, input: &Value) -> Result<ServiceReply, Ingest
     for job in expired {
         finish(repo, job)?;
     }
-    let next = if items.is_empty() {
-        if input["job_id"].as_i64().is_some() {
-            "job_status"
-        } else {
-            "jobs_list"
-        }
-    } else {
-        "work_view"
-    };
-    Ok(ServiceReply::success(
-        json!({"items":items,"next":{"operation":next,"job_id":input["job_id"],"hint":if next=="work_view"{"Load the full current image for each leased item before deciding."}else{"No claimable work. Check preflight, completion, pause and existing leases; run jobs_tick only when local preflight is pending. Do not busy-poll."}}}),
-    ))
+    Ok(ServiceReply::success(response))
 }
 
 type WorkRecord = (
@@ -981,6 +1022,7 @@ fn work(
                     | "retained_elements_required"
                     | "invalid_retained_elements"
                     | "retained_elements_bbox_required"
+                    | "tag_coverage_incomplete"
             );
             let conflict = matches!(
                 code,

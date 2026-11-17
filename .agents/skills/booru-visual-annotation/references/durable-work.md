@@ -13,7 +13,20 @@
 
 ## 看图传输
 
-强类型 MCP 工作工具默认最长边 1024、JPEG 质量 90；旧入口与 CLI 默认 PNG。这些都是显示预览，原图、原像素裁剪 PNG 和训练导出不受影响。小字不清时在 `payload.preview` 选择 `format:"png",max_edge:2048` 或请求局部 tile；BBox 仍相对完整当前图，不相对缩略图。
+支持 `compound_work` 时，优先用下列合并路径减少往返，仍逐张实际看图：
+
+- 独立打标：`bdm_work_next → 看返回图 → bdm_work_annotate`，不顺带审美筛选。
+- 联合审标且无需裁剪：`bdm_work_next → 看返回图 → bdm_work_finish`。
+- 需要裁剪：`bdm_work_next → 看图 → bdm_work_assess(crop_candidate=true) → bdm_work_preview → 看预览 → bdm_work_apply_view → 看返回的新当前图 → bdm_work_finish`。不能跳过预览或裁后检查。
+- 预览破坏构图就不应用，最终判断用 `crop_outcome="not_improved"`，只在确实看过该预览后提交。已应用裁剪则用 `crop_outcome="applied"`，并按新图生成标注。
+
+`bdm_work_next` 每次最多领取一张，携带 owner、job_id 和唯一 request_id；相同 ID 重试领取同一个租约，不多领一张。无工作返回空结果；预检就绪后要新请求 ID，不能轮询同一个空回执。租约过期／释放后旧请求不会自动重新领取，应看任务状态。返回的 `work` 是后续写操作所需的 work_id、lease_token、generation、expected_sha256；请求 ID 和 payload 由当前步骤另填。原始领取快照在 `claim.items`。
+
+`bdm_work_apply_view.payload={crop,preview?}`：crop 原样回传已检查方案的 ratio、bbox、preview_sha256、reason、model；返回 `work.expected_sha256` 是保存后新图的哈希。如果 `applied=true` 但返回错误，先检查 apply_result 和任务状态，恢复看图；不能当成未裁剪再裁一次。两种合并看图操作始终返回像素，不使用已知 token 省掉图片。
+
+`bdm_work_finish.payload={assessment,annotation}`：assessment 是最终判断，crop_candidate=false；KEEP 必须有 annotation，REJECT/DEFER 不得带 annotation。只提交当前计划要求的输出。终审与标注是**顺序执行的两次可恢复写入**，不是原子回滚：分别核对 assessment、annotation、assessment_saved、next_stage；TXT 回读在 annotation.readback／verification。标注失败时保留已保存终审，按 next 用 work_annotate 修正缺失项，不重新跑整套。相同 request_id 和相同输入重试会从子回执续跑／回放；改内容用新请求，不能把部分成功说成全部未保存。服务端仍检查最终 KEEP、保留元素 BBox、标签覆盖、来源哈希和覆盖保护。
+
+强类型 MCP 工作工具默认最长边 1024、JPEG 质量 90；旧入口与旧 CLI 看图操作默认 PNG，新合并 CLI 看图操作默认 JPEG。这些都是显示预览，原图、原像素裁剪 PNG 和训练导出不受影响。小字不清时选择 `preview={format:"png",max_edge:2048}` 或请求局部 tile；preview 在 next 的顶层、apply_view 的 payload 内、普通 work_view/work_preview 的 payload 内。BBox 仍相对完整当前图，不相对缩略图。
 
 同一个租约、同一当前图已看过且客户端仍保留该预览时，才可在 `payload.preview.known_preview_token` 回传 `display_preview.token`。`not_modified=true` 时复用那张图；上下文已丢图就省略 token 重新取图。不要只凭文件路径、token 或缓存命中判断图片内容。首次领取、租约更新、图像变更和裁剪后必须取得并检查实际图像；裁剪预览始终返回图。缓存仅在内存中，最多 32 项／32 MB，不制造额外图库副本。
 
