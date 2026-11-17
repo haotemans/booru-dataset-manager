@@ -8,24 +8,30 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Clone, Debug)]
+pub struct ServiceImage {
+    pub bytes: Arc<[u8]>,
+    pub mime_type: &'static str,
+}
+
 #[derive(Debug)]
 pub struct ServiceReply {
     pub metadata: Value,
-    pub image_png: Option<Vec<u8>>,
+    pub image: Option<ServiceImage>,
     pub is_error: bool,
 }
 impl ServiceReply {
     pub fn success(metadata: Value) -> Self {
         Self {
             metadata,
-            image_png: None,
+            image: None,
             is_error: false,
         }
     }
     pub fn error(metadata: Value) -> Self {
         Self {
             metadata,
-            image_png: None,
+            image: None,
             is_error: true,
         }
     }
@@ -90,6 +96,7 @@ impl AgentService {
                 permit: None,
                 seen: Default::default(),
                 previews: Default::default(),
+                preview_cache: Default::default(),
             }),
         })
     }
@@ -100,24 +107,29 @@ impl AgentService {
     pub fn policy(&self) -> ServiceReply {
         ServiceReply::success(
             json!({"protocol":"bdm-agent-v3","instructions":POLICY,"writes_enabled":self.settings.writes,
-        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging","preset_crop_proposal","retained_element_boxes","tag_coverage_guard"],
+        "capabilities":["rich_text_regions","visual_regions","review_reasons","dataset_jsonl","crop_first_assessment","bucket_planning","jobs","work_leases","sql_paging","preset_crop_proposal","retained_element_boxes","tag_coverage_guard","typed_work_tools","display_preview_cache"],
+        "typed_tools":{"jobs":"bdm_job","downloads":"bdm_download","claim":"bdm_work_claim","view":"bdm_work_view","preview":"bdm_work_preview","apply":"bdm_work_apply","assess":"bdm_work_assess","annotate":"bdm_work_annotate","lease":"bdm_work_control","legacy":"bdm_agent"},
+        "display_preview":{"new_work_tools_default":"1024-edge JPEG quality 90","legacy_default":"1024-edge PNG","max_edge_range":[256,2048],"memory_cache_max_bytes":33554432,"memory_cache_max_entries":32,"native_training_pixels_unchanged":true,"repeat_full_view":"Send known_preview_token only if this client retains the inspected preview; first view of a lease and changed current SHA always return pixels"},
         "crop_ratios":bdm_domain::training::RATIOS.iter().map(|r|r.0).collect::<Vec<_>>(),
         "image_retention":{"original":1,"current":1,"thumbnail":1},"next":{"action":"resolve_scope_then_submit_or_inspect"}}),
         )
     }
     pub fn execute(&self, operation: &str, input: Value) -> ServiceReply {
-        match self.try_execute(operation, input.clone()) {
+        let mut reply = match self.try_execute(operation, input.clone()) {
             Ok(r) => r,
             Err(e) => {
                 let mut reply = tools::error_result(e);
                 if operation.starts_with("work_") {
-                    reply.metadata["next"]["tool"] = json!("bdm_agent");
                     reply.metadata["next"]["operation"] = json!(operation);
                     reply.metadata["next"]["work_id"] = input["work_id"].clone();
                 }
                 reply
             }
+        };
+        if let Some(operation) = reply.metadata["next"]["operation"].as_str() {
+            reply.metadata["next"]["tool"] = json!(super::operation_tool(operation));
         }
+        reply
     }
     fn try_execute(&self, operation: &str, input: Value) -> Result<ServiceReply, IngestError> {
         macro_rules! args {($t:ty)=>{serde_json::from_value::<$t>(input.clone()).map_err(|e|IngestError::StorageDetails(json!({"code":"invalid_arguments","message":e.to_string(),"next":{"action":"check_schema"}}).to_string()))?};}
@@ -147,7 +159,7 @@ impl AgentService {
                     "preview"|"apply"|"crop"=>serde_json::to_value(rmcp::schemars::schema_for!(CropArgs)),
                     "annotate"=>serde_json::to_value(rmcp::schemars::schema_for!(AnnotationArgs)),
                     "assess"=>serde_json::to_value(rmcp::schemars::schema_for!(AssessArgs)),
-                    _=>return Ok(ServiceReply::success(json!({"operation":name,"hint":"See policy and docs/agent-control-plane.md for job and download envelopes."}))),
+                    _=>return Ok(ServiceReply::success(json!({"operation":name,"input_schema":super::operation_schema(name),"hint":"Typed MCP tools expose their complete schemas directly. CLI: bdm schema OPERATION requires no database."}))),
                 }.map_err(|_|IngestError::Storage)?;
                 if name.starts_with("work_") {
                     for key in [
@@ -185,7 +197,7 @@ impl AgentService {
                     schema["properties"]["ratio"] = json!({"type":"string","enum":bdm_domain::training::RATIOS.iter().map(|r|r.0).collect::<Vec<_>>()});
                 }
                 Ok(ServiceReply::success(
-                    json!({"operation":name,"payload_schema":schema,"work_envelope":{"required":["work_id","lease_token","generation"],"writes_also_require":["request_id","expected_sha256","payload"]},"server_owned":["media_id","overwrite","require_final_assessment","apply"]}),
+                    json!({"operation":name,"input_schema":super::operation_schema(name),"payload_schema":schema,"work_envelope":{"required":["work_id","lease_token","generation"],"writes_also_require":["request_id","expected_sha256","payload"]},"server_owned":["media_id","overwrite","require_final_assessment","apply","stage"]}),
                 ))
             }
             "policy" => Ok(self.policy()),

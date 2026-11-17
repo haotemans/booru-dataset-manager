@@ -11,7 +11,7 @@ description: 使用 booru_dataset_manager MCP 对指定收藏逐图检查、提�
 
 ## 最短调用路径
 
-长批次、跨会话续跑或联合筛选使用 [durable-work.md](references/durable-work.md) 的 v3 任务入口。服务端决定阶段、输出范围和覆盖策略，跟随 `next.operation`；不混用独立写入工具绕过任务租约。少量独立修正仍可走下面的两次调用路径。
+长批次、跨会话续跑或联合筛选使用 [durable-work.md](references/durable-work.md) 的 v3 任务入口。服务端决定阶段、输出范围和覆盖策略，跟随 `next.tool`／`next.operation`；支持 `typed_work_tools` 时直接用强类型工具列表里的参数，不先调 `describe`。不混用独立写入工具绕过任务租约。少量独立修正仍可走下面的两次调用路径。
 
 1. 会话开始读取一次 `bdm_policy`。当前任务协议是 `bdm-agent-v3`；v2 可用于已有独立打标路径。需要任务续跑时检查 `jobs`／`work_leases` 能力；旧版没有词表和保存回读时报告需更新，不能宣称旧后端格式问题已解决。`model` 填实际客户端标识，不能确认填 `unknown`。
 2. 用 `bdm_collections` 找到目标，`bdm_list_media(collection=返回的tag)` 分页，沿用 `next_after_id`。不反复查询收藏；正常续跑跳过所需标注已完成的图，修正任务仅重做指定项。

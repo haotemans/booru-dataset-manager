@@ -1,12 +1,13 @@
 //! Headless entry point. JSON stdout is reserved for machine-readable results.
 use bdm_infrastructure::{
-    agent::{jobs, AgentService},
+    agent::{jobs, operation_schema, AgentService, SCHEMA_OPERATIONS},
     catalog::SqliteCatalog,
 };
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
-const HELP: &str = "bdm <operation> --catalog ABS_DB --project-root ABS_DIR --library-root ABS_DIR [--input FILE|-] [--output PNG] [--allow-writes]
+const HELP: &str = "bdm <operation> --catalog ABS_DB --project-root ABS_DIR --library-root ABS_DIR [--input FILE|-] [--output IMAGE] [--allow-writes]
+Schema discovery (no database required): bdm schema [operation]
 Operations: policy, describe, doctor, status, collections, list, view, bucket_plan,
 character_repair (media_ids, apply=false by default; existing verified rules only),
 job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick,
@@ -16,6 +17,9 @@ work_heartbeat, work_release, daemon-serve, daemon_stop, mcp-serve, init.
 download_submit source: automatic|danbooru|safebooru|gelbooru. Safebooru uses safebooru.donmai.us (General only, shared Danbooru account/IDs).
 Readonly by default. Inputs are JSON objects; '-' reads stdin. View image bytes
 are written only to an explicit --output path. No GUI or hosted model is started.
+Preview options in view/work_view/work_preview: preview={max_edge:256..2048,format:png|jpeg};
+work operations put preview inside payload. Default PNG; JPEG display previews require .jpg/.jpeg output.
+Stored training images and native PNG crops are never recompressed by preview options.
 Examples: bdm job_plan ... --input plan.json
           bdm job_submit ... --input plan.json --allow-writes
           bdm daemon-serve ... --allow-writes";
@@ -28,6 +32,19 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
     };
     if matches!(operation.as_str(), "--help" | "-h" | "help") {
         println!("{HELP}");
+        return Ok(true);
+    }
+    if operation == "schema" {
+        let requested = args.next();
+        if args.next().is_some() {
+            return Err("Usage: bdm schema [operation] (no database flags needed)".into());
+        }
+        let value = if let Some(operation) = requested {
+            json!({"operation":operation,"input_schema":operation_schema(&operation).ok_or("Unknown schema operation")?,"display_defaults":"CLI keeps PNG by default; typed MCP work tools use JPEG. Set preview.format explicitly when using display options.","envelope":"work payload excludes server-owned identity/overwrite/stage fields"})
+        } else {
+            json!({"operations":SCHEMA_OPERATIONS})
+        };
+        println!("{value}");
         return Ok(true);
     }
     let mut flags = BTreeMap::new();
@@ -108,9 +125,24 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
         if !p.is_absolute() || p.exists() {
             return Err("--output must be an absolute unused image path".into());
         }
+        let preview = if operation == "view" {
+            &input["preview"]
+        } else {
+            &input["payload"]["preview"]
+        };
+        let jpeg = preview["format"] == "jpeg";
+        let extension = p
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if (jpeg && !matches!(extension.as_str(), "jpg" | "jpeg")) || (!jpeg && extension != "png")
+        {
+            return Err("--output extension must match the preview format (.png by default, .jpg/.jpeg for JPEG)".into());
+        }
     }
     let mut result = service.execute(&operation, input);
-    if let Some(png) = result.image_png {
+    if let Some(image) = result.image {
         if let Some(output) = flags.get("--output") {
             let path = PathBuf::from(output);
             if !path.is_absolute() {
@@ -121,8 +153,9 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
                 .write(true)
                 .create_new(true)
                 .open(&path)?;
-            file.write_all(&png)?;
+            file.write_all(&image.bytes)?;
             result.metadata["image_file"] = json!(path);
+            result.metadata["image_mime_type"] = json!(image.mime_type);
         } else {
             result.metadata["image_output_required"] = json!(true);
         }

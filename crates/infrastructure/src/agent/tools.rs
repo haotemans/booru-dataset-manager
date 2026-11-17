@@ -3,7 +3,7 @@ use super::{params::*, state, Settings};
 use crate::{ai, catalog::SqliteCatalog, editing, ingest::storage};
 use bdm_domain::{editing::CropRect, ingest::StoredMedia};
 use bdm_ports::IngestError;
-use image::{DynamicImage, GenericImageView, ImageFormat};
+use image::GenericImageView;
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::Digest;
@@ -279,19 +279,6 @@ fn page(mut rows: Vec<Value>, field: &str) -> ServiceReply {
     };
     result(json!({(field):rows,"next_after_id":next,"next":action}))
 }
-fn picture(image: DynamicImage, mut data: Value) -> Result<ServiceReply, IngestError> {
-    let native = image.dimensions();
-    let display = image.thumbnail(1024, 1024);
-    data["native_view_dimensions"] = json!(native);
-    data["display_dimensions"] = json!(display.dimensions());
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    storage(display.write_to(&mut bytes, ImageFormat::Png))?;
-    Ok(ServiceReply {
-        metadata: data,
-        image_png: Some(bytes.into_inner()),
-        is_error: false,
-    })
-}
 fn rect(bbox: [u32; 4], dims: (u32, u32)) -> Result<CropRect, IngestError> {
     let [x1, y1, x2, y2] = bbox;
     if x1 >= x2 || y1 >= y2 || x2 > 1000 || y2 > 1000 {
@@ -368,27 +355,37 @@ pub(super) fn view(
     settings: &Settings,
     args: ViewArgs,
 ) -> Result<ServiceReply, IngestError> {
+    args.preview.validate()?;
     let m = media(repo, settings, args.media_id, None)?;
     let path = if args.original {
         original(&m, settings)?
     } else {
         m.path.clone()
     };
-    let mut image = storage(image::open(path))?;
-    if let Some(bbox) = args.bbox_1000_xyxy {
-        let r = rect(bbox, image.dimensions())?;
-        image = image.crop_imm(r.x, r.y, r.width, r.height);
+    let marker = if args.original {
+        format!("original:{}", m.id)
     } else {
-        settings
-            .seen
-            .lock()
-            .map_err(|_| IngestError::Storage)?
-            .insert(if args.original {
-                format!("original:{}", m.id)
-            } else {
-                m.sha256.clone()
-            });
-    }
+        m.sha256.clone()
+    };
+    let previously_seen = settings
+        .seen
+        .lock()
+        .map_err(|_| IngestError::Storage)?
+        .contains(&marker);
+    let source_sha = if args.original {
+        editing::hash(&path)?
+    } else {
+        m.sha256.clone()
+    };
+    let source = json!(["view", m.id, source_sha, args.original, args.bbox_1000_xyxy]).to_string();
+    let prepared = super::preview::prepare(settings, &source, &args.preview, || {
+        let mut image = storage(image::open(&path))?;
+        if let Some(bbox) = args.bbox_1000_xyxy {
+            let r = rect(bbox, image.dimensions())?;
+            image = image.crop_imm(r.x, r.y, r.width, r.height);
+        }
+        Ok((image, Value::Null))
+    })?;
     let mut data = info(repo, &m)?;
     data["view"] = json!(if args.original {
         "complete_original"
@@ -429,13 +426,26 @@ pub(super) fn view(
         json!({"action":"decide_requested_step","media_id":m.id,"expected_sha256":m.sha256,
             "hint":"Annotation: save caption/tags together using tag_vocabulary. Crop if requested: preview apply=false, inspect, then apply=true. Tiny text only: request a detail tile. Otherwise assess or continue; do not repeat the full view for the same hash."})
     };
-    picture(image, data)
+    let reply = prepared.reply(
+        data,
+        &args.preview,
+        previously_seen && !args.original && args.bbox_1000_xyxy.is_none(),
+    );
+    if args.bbox_1000_xyxy.is_none() {
+        settings
+            .seen
+            .lock()
+            .map_err(|_| IngestError::Storage)?
+            .insert(marker);
+    }
+    Ok(reply)
 }
 pub(super) fn crop(
     repo: &mut SqliteCatalog,
     settings: &Settings,
     args: CropArgs,
 ) -> Result<ServiceReply, IngestError> {
+    args.preview.validate()?;
     provenance(&args.reason, &args.model)?;
     let m = media(repo, settings, args.media_id, Some(&args.expected_sha256))?;
     seen(settings, &m.sha256)?;
@@ -479,9 +489,9 @@ pub(super) fn crop(
             ));
         }
     }
-    let preview = editing::native_crop_preview(&m, selection, &AtomicBool::new(false))?;
-    let preview_sha = editing::hash(&preview.image)?;
     if args.apply {
+        let preview = editing::native_crop_preview(&m, selection, &AtomicBool::new(false))?;
+        let preview_sha = editing::hash(&preview.image)?;
         if receipt.as_ref().is_none_or(|(_, sha)| *sha != preview_sha)
             || args
                 .preview_sha256
@@ -513,17 +523,31 @@ pub(super) fn crop(
             json!({"saved":true,"media":info(repo,&saved)?,"bucket_plan":bucket,"next":{"tool":"bdm_view_image","args":{"media_id":m.id,"original":false},"hint":"Inspect the saved pixels; use the new hash before annotation."}}),
         ))
     } else {
+        let source = json!(["crop", m.id, m.sha256, ratio, selection]).to_string();
+        let prepared = super::preview::prepare(settings, &source, &args.preview, || {
+            let preview = editing::native_crop_preview(&m, selection, &AtomicBool::new(false))?;
+            let sha = editing::hash(&preview.image)?;
+            Ok((
+                storage(image::open(&preview.image))?,
+                json!({"sha256":sha,"training":preview.training}),
+            ))
+        })?;
+        let preview_sha = prepared.facts()["sha256"]
+            .as_str()
+            .ok_or(IngestError::Storage)?
+            .to_owned();
+        let training = prepared.facts()["training"].clone();
         settings
             .previews
             .lock()
             .map_err(|_| IngestError::Storage)?
             .insert(key, (ratio.to_owned(), preview_sha.clone()));
-        picture(
-            storage(image::open(&preview.image))?,
-            json!({"saved":false,"media_id":m.id,"expected_sha256":m.sha256,"selection":selection,"training":preview.training,"ratio":ratio,"bucket_plan":bucket,"preview_sha256":preview_sha,"bbox_1000_xyxy":args.bbox_1000_xyxy,
+        Ok(prepared.reply(
+            json!({"saved":false,"media_id":m.id,"expected_sha256":m.sha256,"selection":selection,"training":training,"ratio":ratio,"bucket_plan":bucket,"preview_sha256":preview_sha,"bbox_1000_xyxy":args.bbox_1000_xyxy,
                 "proposal":{"ratio":ratio,"reason":args.reason,"model":args.model,"source_bbox_1000_xyxy":args.bbox_1000_xyxy,"native_selection":selection,"ratio_tolerance":0.02},
                 "next":{"tool":"bdm_crop","args":{"media_id":m.id,"expected_sha256":m.sha256,"bbox_1000_xyxy":args.bbox_1000_xyxy,"ratio":ratio,"preview_sha256":preview_sha,"apply":true},"hint":"Apply only if this preview improves composition; retain reason and model. Otherwise revise preview or keep unchanged."}}),
-        )
+            &args.preview,false,
+        ))
     }
 }
 pub(super) fn restore(

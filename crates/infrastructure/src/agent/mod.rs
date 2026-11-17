@@ -1,7 +1,9 @@
 //! Local stdio MCP adapter. The client supplies the vision/reasoning model.
+mod control_params;
 pub(crate) mod downloads;
 pub mod jobs;
 mod params;
+mod preview;
 pub mod service;
 mod state;
 mod tools;
@@ -9,9 +11,13 @@ pub use service::{AgentService, ServiceReply};
 pub use state::{snapshot, AgentSnapshot};
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transport_tests;
 
 use crate::catalog::SqliteCatalog;
 use bdm_ports::IngestError;
+use control_params::*;
+pub use control_params::{operation_schema, SCHEMA_OPERATIONS};
 use params::*;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -27,8 +33,11 @@ use std::{
 fn mcp_reply(reply: ServiceReply) -> CallToolResult {
     use base64::{engine::general_purpose::STANDARD, Engine};
     let mut contents = vec![ContentBlock::text(reply.metadata.to_string())];
-    if let Some(png) = reply.image_png {
-        contents.push(ContentBlock::image(STANDARD.encode(png), "image/png"));
+    if let Some(image) = reply.image {
+        contents.push(ContentBlock::image(
+            STANDARD.encode(image.bytes.as_ref()),
+            image.mime_type,
+        ));
     }
     if reply.is_error {
         CallToolResult::error(contents)
@@ -53,9 +62,24 @@ struct Settings {
     permit: Option<(i64, String, i64)>,
     seen: Mutex<std::collections::BTreeSet<String>>,
     previews: Mutex<CropPreviews>,
+    preview_cache: std::sync::Arc<Mutex<preview::Cache>>,
 }
 
 impl AgentServer {
+    async fn execute_operation(
+        &self,
+        operation: String,
+        input: serde_json::Value,
+    ) -> CallToolResult {
+        let service = self.service.clone();
+        match tokio::task::spawn_blocking(move || service.execute(&operation, input)).await {
+            Ok(reply) => mcp_reply(reply),
+            Err(_) => mcp_reply(ServiceReply::error(
+                json!({"error":{"code":"worker_failed","message":"Inspect job status before retrying a write"}}),
+            )),
+        }
+    }
+
     pub fn open(
         catalog: &Path,
         project_root: &Path,
@@ -102,10 +126,124 @@ impl AgentServer {
     }
 }
 
+fn operation_tool(operation: &str) -> &'static str {
+    match operation {
+        "work_claim" => "bdm_work_claim",
+        "work_view" => "bdm_work_view",
+        "work_preview" => "bdm_work_preview",
+        "work_apply" => "bdm_work_apply",
+        "work_assess" => "bdm_work_assess",
+        "work_annotate" => "bdm_work_annotate",
+        "work_heartbeat" | "work_release" => "bdm_work_control",
+        "job_plan" | "job_submit" | "jobs_list" | "job_status" | "job_control" | "jobs_tick" => {
+            "bdm_job"
+        }
+        "download_submit" | "download_status" | "download_control" => "bdm_download",
+        _ => "bdm_agent",
+    }
+}
+
 #[tool_router]
 impl AgentServer {
     #[tool(
-        description = "Durable jobs and leased work. Read policy first; describe input {operation:work_annotate|work_assess|work_preview|work_view} returns exact payload schema once. operation: describe, character_repair, doctor, download_submit, download_status, download_control, bucket_plan, job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick, work_claim, work_view, work_preview, work_apply, work_assess, work_annotate, work_heartbeat, work_release. job_plan/submit input: mode curate|annotate|bucket|export, media_ids OR collection, outputs [caption,tags,regions], overwrite=false; submit also request_id. work_claim: owner, optional job_id/limit<=16. Other work_*: work_id, lease_token, generation, expected_sha256, payload (standalone tool schema without media_id/hash); writes also request_id. character_repair input: media_ids (1..64), apply=false preview or true to repair saved identity prefixes under verified rules; raw data and prose remain untouched. Follow next_stage; server enforces ordering. job_control: job_id, action pause|resume|retry|cancel. Export additionally destination absolute, text_kind caption|tags. download_submit input: request_id, existing collection_id, source automatic|danbooru|safebooru|gelbooru (safebooru.donmai.us, General-only, shares Danbooru IDs/account; no fallback), minimum_short_side (default800). download_status/control use download_id; control action pause|resume|retry. Local preflight via daemon or jobs_tick; model calls remain client-owned."
+        description = "Plan, submit, inspect or control durable jobs. Each operation has its exact typed input in this schema. Read policy; plan/submit use media_ids OR an exact collection. Resume requested outputs only by default. jobs_tick runs local preflight, never hosted inference."
+    )]
+    async fn bdm_job(&self, Parameters(args): Parameters<JobRequest>) -> CallToolResult {
+        let request = json!(args);
+        self.execute_operation(
+            request["operation"].as_str().unwrap().into(),
+            request["input"].clone(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Submit/control source downloads through existing collections; inspect progress by download_id. Safebooru is the General-only Danbooru entrance, with shared credentials/IDs and no unrestricted fallback. Network execution starts in the daemon/jobs_tick."
+    )]
+    async fn bdm_download(&self, Parameters(args): Parameters<DownloadRequest>) -> CallToolResult {
+        let request = json!(args);
+        self.execute_operation(
+            request["operation"].as_str().unwrap().into(),
+            request["input"].clone(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Claim a small batch of independent leased images after local preflight. Each item returns work_id, lease_token, generation, expected_sha256 and stage. View each current image before deciding; never substitute source tags for inspection."
+    )]
+    async fn bdm_work_claim(&self, Parameters(args): Parameters<WorkClaimArgs>) -> CallToolResult {
+        self.execute_operation("work_claim".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "See a leased current image; first full view always sends pixels. Default display is 1024-edge JPEG, stored training pixels unchanged. Use PNG or 2048/detail tiles for small text. An original/tile does not authorize unseen current pixels. known_preview_token suppresses a repeat only after this lease's full view; omit it if the client lost the image."
+    )]
+    async fn bdm_work_view(&self, Parameters(args): Parameters<WorkViewArgs>) -> CallToolResult {
+        self.execute_operation("work_view".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "Propose and SEE a crop after inspecting the full current image, in the server's crop stage. Select one exact preset ratio and CURRENT-image bbox; preserve expression/composition, crop edge watermarks only when safe. Returns preview_sha256; inspect the returned image before apply. Display encoding never changes native PNG crop pixels."
+    )]
+    async fn bdm_work_preview(
+        &self,
+        Parameters(args): Parameters<WorkPreviewArgs>,
+    ) -> CallToolResult {
+        self.execute_operation("work_preview".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "Apply the exact inspected crop proposal, echoing its ratio/bbox/preview_sha256. Saves native-pixel PNG with the verified original preserved. Never guess a preview hash. After saving, view the NEW current image before final assessment or annotation."
+    )]
+    async fn bdm_work_apply(&self, Parameters(args): Parameters<WorkApplyArgs>) -> CallToolResult {
+        self.execute_operation("work_apply".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "Assess inspected leased current pixels. The SERVER owns preliminary/final stage. In triage set crop_candidate=true only for useful composition-preserving cropping; after a crop outcome report applied/not_improved with real evidence. Final KEEP requires retained_elements (including [] only after observing none). Reject queues human review, never deletes."
+    )]
+    async fn bdm_work_assess(
+        &self,
+        Parameters(args): Parameters<WorkAssessArgs>,
+    ) -> CallToolResult {
+        self.execute_operation("work_assess".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "Save requested caption/tags/regions for the inspected final image. The SERVER owns image identity, overwrite policy and assessment requirements. Artist/character names merge locally; produce visual content only. Remove redundancy while preserving distinct visible detail; compare view.tag_vocabulary.baseline_tags. Omitted regions preserve, [] clears. Same-call verification/readback; correct only rejected/missing outputs with a new request_id."
+    )]
+    async fn bdm_work_annotate(
+        &self,
+        Parameters(args): Parameters<WorkAnnotateArgs>,
+    ) -> CallToolResult {
+        self.execute_operation("work_annotate".into(), json!(args))
+            .await
+    }
+
+    #[tool(
+        description = "Extend this lease (heartbeat) or release it without a decision. Does not bypass the task stage or modify training images/TXT."
+    )]
+    async fn bdm_work_control(
+        &self,
+        Parameters(args): Parameters<WorkControlArgs>,
+    ) -> CallToolResult {
+        let operation = match args.action {
+            WorkControlAction::Heartbeat => "work_heartbeat",
+            WorkControlAction::Release => "work_release",
+        };
+        let mut input = json!(args);
+        input.as_object_mut().unwrap().remove("action");
+        self.execute_operation(operation.into(), input).await
+    }
+
+    #[tool(
+        description = "Legacy operation/input adapter retained for compatibility. Prefer bdm_job, bdm_download and the typed bdm_work_* tools: their schemas expose exact arguments without describe. Legacy describe and doctor/status/bucket_plan/character_repair remain available. The same service enforces leases, stages, hashes and idempotency for every entry."
     )]
     async fn bdm_agent(&self, Parameters(args): Parameters<OperationArgs>) -> CallToolResult {
         if !matches!(
@@ -136,24 +274,15 @@ impl AgentServer {
                 json!({"error":{"code":"unknown_operation","message":"Use one of the documented control-plane operations"}}),
             ));
         }
-        let service = self.service.clone();
-        match tokio::task::spawn_blocking(move || {
-            service.execute(
-                &args.operation,
-                if args.input.is_null() {
-                    json!({})
-                } else {
-                    args.input
-                },
-            )
-        })
+        self.execute_operation(
+            args.operation,
+            if args.input.is_null() {
+                json!({})
+            } else {
+                args.input
+            },
+        )
         .await
-        {
-            Ok(reply) => mcp_reply(reply),
-            Err(_) => mcp_reply(ServiceReply::error(
-                json!({"error":{"code":"worker_failed","message":"Inspect job status before retrying a write"}}),
-            )),
-        }
     }
 
     #[tool(

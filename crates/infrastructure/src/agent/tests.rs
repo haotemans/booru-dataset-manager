@@ -3,7 +3,7 @@ use bdm_ports::{CollectionRepository, IngestRepository};
 use sha2::Digest;
 use std::{collections::BTreeSet, fs, sync::atomic::AtomicBool};
 
-fn fixture() -> (
+pub(super) fn fixture() -> (
     crate::workflow_tests::Fixture,
     Settings,
     bdm_domain::ingest::StoredMedia,
@@ -27,11 +27,12 @@ fn fixture() -> (
         permit: None,
         seen: Mutex::default(),
         previews: Mutex::default(),
+        preview_cache: Default::default(),
     };
     (f, settings, m)
 }
 
-fn service(f: &crate::workflow_tests::Fixture, writes: bool) -> AgentService {
+pub(super) fn service(f: &crate::workflow_tests::Fixture, writes: bool) -> AgentService {
     AgentService::open(
         &f.directory.path().join("catalog.sqlite3"),
         f.directory.path(),
@@ -40,12 +41,12 @@ fn service(f: &crate::workflow_tests::Fixture, writes: bool) -> AgentService {
     )
     .unwrap()
 }
-fn ok(service: &AgentService, op: &str, input: serde_json::Value) -> serde_json::Value {
+pub(super) fn ok(service: &AgentService, op: &str, input: serde_json::Value) -> serde_json::Value {
     let reply = service.execute(op, input);
     assert!(!reply.is_error, "{op}: {}", reply.metadata);
     reply.metadata
 }
-fn leased_input(
+pub(super) fn leased_input(
     item: &serde_json::Value,
     request: &str,
     payload: serde_json::Value,
@@ -55,7 +56,7 @@ fn leased_input(
     input["payload"] = payload;
     input
 }
-fn start_work(
+pub(super) fn start_work(
     f: &crate::workflow_tests::Fixture,
     id: i64,
     mode: &str,
@@ -728,6 +729,7 @@ fn view(repo: &mut SqliteCatalog, settings: &Settings, id: i64) {
             media_id: id,
             original: false,
             bbox_1000_xyxy: None,
+            preview: Default::default(),
         },
     )
     .unwrap();
@@ -742,6 +744,7 @@ fn crop_args(m: &bdm_domain::ingest::StoredMedia, apply: bool) -> CropArgs {
         apply,
         reason: "Retain the complete subject with balanced margins".into(),
         model: "unit-test".into(),
+        preview: Default::default(),
     }
 }
 fn assessment(m: &bdm_domain::ingest::StoredMedia, decision: Decision) -> AssessArgs {
@@ -1014,7 +1017,8 @@ fn read_only_and_library_boundary_are_enforced_and_mcp_tools_are_discoverable() 
         ViewArgs {
             media_id: m.id,
             original: false,
-            bbox_1000_xyxy: None
+            bbox_1000_xyxy: None,
+            preview: Default::default(),
         }
     )
     .is_err());
@@ -1140,6 +1144,7 @@ fn redundancy_cleanup_is_allowed_but_large_tag_reduction_is_atomic_and_cannot_be
                 media_id: m.id,
                 original: false,
                 bbox_1000_xyxy: None,
+                preview: Default::default(),
             },
         )
         .unwrap(),
@@ -1256,6 +1261,7 @@ fn edited_pixel_tag_baselines_do_not_reuse_old_source_terms_or_rebind_old_region
                 media_id: m.id,
                 original: false,
                 bbox_1000_xyxy: None,
+                preview: Default::default(),
             },
         )
         .unwrap(),
@@ -1401,6 +1407,7 @@ fn view_supplies_usable_vocabulary_and_crop_errors_include_a_recovery_step() {
                 media_id: m.id,
                 original: false,
                 bbox_1000_xyxy: None,
+                preview: Default::default(),
             },
         )
         .unwrap(),

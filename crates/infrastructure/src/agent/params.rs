@@ -19,7 +19,7 @@ pub struct ListArgs {
     pub limit: Option<usize>,
 }
 
-#[derive(Clone, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewArgs {
     pub media_id: i64,
@@ -27,6 +27,9 @@ pub struct ViewArgs {
     pub original: bool,
     /// Optional detail tile: left, top, right, bottom in 0..1000.
     pub bbox_1000_xyxy: Option<[u32; 4]>,
+    /// Display-only options. Never resize or recompress stored training images.
+    #[serde(default)]
+    pub preview: super::preview::PreviewOptions,
 }
 
 #[derive(Clone, Deserialize, schemars::JsonSchema)]
@@ -46,6 +49,9 @@ pub struct CropArgs {
     pub apply: bool,
     pub reason: String,
     pub model: String,
+    /// Display-only crop preview options; saved crops remain native-pixel PNG.
+    #[serde(default)]
+    pub preview: super::preview::PreviewOptions,
 }
 
 #[derive(Clone, Deserialize, schemars::JsonSchema)]
@@ -57,12 +63,15 @@ pub struct RestoreArgs {
     pub model: String,
 }
 
-#[derive(Clone, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AnnotationArgs {
-    pub media_id: i64,
-    pub expected_sha256: String,
-    /// Visual description only: identities are merged locally, artist first. May be omitted with tags for a review_reasons-only decision.
+// Standalone and leased annotations share one field definition. Lease-only tools
+// cannot accept identity/hash/overwrite fields inside their business payload.
+macro_rules! annotation_args {
+    ($name:ident { $($extra:tt)* }) => {
+    #[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct $name {
+    $($extra)*
+    /// Visual description only; identities merge locally, artist first. Omit to preserve the existing caption while correcting other requested outputs.
     pub caption: Option<String>,
     /// Complete generic visual tag list. Redundancy cleanup is allowed; preserve distinct visible details. Compare view.tag_vocabulary.baseline_tags; large reductions are blocked for review. Spaces instead of underscores.
     pub tags: Option<Vec<String>>,
@@ -72,16 +81,22 @@ pub struct AnnotationArgs {
     pub special_elements: Option<Vec<String>>,
     /// Optional compound-composition regions. Omit to preserve; [] clears. Use regions for important insets/overlays, not mandatory segmentation of simple images.
     pub visual_regions: Option<Vec<crate::ai::VisualRegion>>,
-    /// Reasons requiring human review, such as uncertain age in sexual content. Nonempty reasons defer the image and remove training approval; never delete it. Omit preserves.
+    pub reason: String,
+    pub model: String,
+    }
+    };
+}
+annotation_args!(AnnotationArgs {
+    pub media_id: i64,
+    pub expected_sha256: String,
+    /// Nonempty reasons defer for human review; never delete the image.
     pub review_reasons: Option<Vec<String>>,
-    /// Full curation only: require a current final KEEP assessment before writing caption/tags. Standalone annotation defaults false.
     #[serde(default)]
     pub require_final_assessment: bool,
     #[serde(default)]
     pub overwrite: bool,
-    pub reason: String,
-    pub model: String,
-}
+});
+annotation_args!(AnnotationPayload {});
 
 pub type Region = crate::ai::TextRegion;
 
@@ -123,11 +138,12 @@ pub enum RetainedElement {
     Signature,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AssessArgs {
-    pub media_id: i64,
-    pub expected_sha256: String,
+macro_rules! assessment_args {
+    ($name:ident { $($extra:tt)* }) => {
+    #[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct $name {
+    $($extra)*
     /// 0..10, or null when no reliable judgement is possible.
     pub aesthetic: Option<f64>,
     pub training_suitability: Option<f64>,
@@ -140,9 +156,6 @@ pub struct AssessArgs {
     pub retained_elements: Option<Vec<RetainedElement>>,
     pub style: String,
     pub decision: Decision,
-    /// Preliminary scores are provisional and never approve or reject. Only final results can route keep/reject.
-    #[serde(default)]
-    pub stage: AssessmentStage,
     /// Preliminary stage only. Defers final routing until a safe crop is tried and the actual result reassessed.
     #[serde(default)]
     pub crop_candidate: bool,
@@ -150,7 +163,17 @@ pub struct AssessArgs {
     pub crop_outcome: Option<CropOutcome>,
     pub reason: String,
     pub model: String,
+    }
+    };
 }
+assessment_args!(AssessArgs {
+    pub media_id: i64,
+    pub expected_sha256: String,
+    /// Preliminary results cannot approve or reject; durable jobs own this field.
+    #[serde(default)]
+    pub stage: AssessmentStage,
+});
+assessment_args!(AssessmentPayload {});
 
 #[derive(Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

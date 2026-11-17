@@ -23,9 +23,34 @@ The daemon runs in the foreground so a supervisor can own its lifetime. On Windo
 
 `mcp-serve` exposes the same tools over stdio. The existing desktop `--mcp-server` command remains valid, so existing Agent configuration does not need its executable path changed.
 
+## Typed tools and schema discovery
+
+When policy advertises `typed_work_tools`, prefer these typed MCP adapters. They call the same operations and persisted state; `bdm_agent(operation,input)` remains compatible. Every typed tool exposes its full argument schema in `tools/list`, including nested regions, enums and required fields. Do not call `describe` before using these tools.
+
+| CLI operation | MCP tool / arguments |
+| --- | --- |
+| `job_plan`, `job_submit`, `jobs_list`, `job_status`, `job_control`, `jobs_tick` | `bdm_job(operation,input)`; input is typed for each operation |
+| `download_submit`, `download_status`, `download_control` | `bdm_download(operation,input)` |
+| `work_claim`, `work_view`, `work_preview`, `work_apply`, `work_assess`, `work_annotate` | Corresponding `bdm_work_*` tool, direct arguments without operation/input wrapper |
+| `work_heartbeat`, `work_release` | `bdm_work_control(action="heartbeat"/"release",work_id,lease_token,generation)` |
+
+Work payloads exclude server-owned identity/hash, overwrite, assessment stage and apply policy. Crop preview requires `expected_sha256` and payload, but no `request_id`; applying, assessing and annotating also require a unique write request ID. `next.tool` names the preferred adapter; `next.operation` remains the CLI/legacy operation. Existing standalone tools retain their behavior.
+
+`bdm schema` lists operations, and `bdm schema work_annotate` returns the complete envelope/payload JSON Schema without opening a catalog, reading credentials or creating files. `describe` also includes `input_schema`. These schemas describe typed envelopes; CLI display defaults remain legacy PNG, so pass preview format explicitly when choosing display options.
+
+## Display previews
+
+Typed MCP work tools default to longest edge 1024 and JPEG quality 90. Legacy tools and CLI default to PNG. Set `preview` on standalone view/crop arguments or `payload.preview` on work view/preview: `{"max_edge":2048,"format":"png"}`. The edge range is 256–2048; small images are never upscaled. Use PNG or detail tiles for fine text. These options affect Agent viewing only: originals, native crop PNGs and training export are never resized or recompressed by preview transport.
+
+Each response reports native/display dimensions, MIME type, byte length, encoded SHA, a source-bound `display_preview.token`, cache hit and `not_modified`. An in-memory LRU holds at most 32 previews / 32 MiB, shared across leased work. Source hashes/path boundaries and fresh metadata are still checked before cache use. No cache image files or backup copies are created. Exact native crop proof (`preview_sha256`) is separate from display hash/token and verified again on apply.
+
+Supply `known_preview_token` only when the client retains and has actually inspected that exact full preview. A repeat full-current view under an already-viewed lease may return `not_modified:true` without an image block. Omit the token to fetch pixels again. A new lease, changed current SHA, original/detail tile and crop preview always send an image. Cropping clears the inspection receipt; the saved current image must be delivered/seen again. Cache hits alone are never inspection evidence.
+
+MCP uses image content blocks with the actual MIME type, not Base64 in a text field. CLI writes only to an explicit unused absolute `--output` path: `.png` by default or `.jpg`/`.jpeg` with `format:"jpeg"`. JSON includes `image_file` and `image_mime_type`. A path/hash alone is not inspection; the calling Agent must open that file.
+
 ## A durable batch
 
-Pass a JSON file with `--input ABS_FILE` or stdin with `--input -`. CLI image operations additionally require an unused absolute `--output PNG` path: actually inspect that file before submitting a visual judgment. Files cannot be silently overwritten. MCP delivers the PNG directly.
+Pass a JSON file with `--input ABS_FILE` or stdin with `--input -`. CLI image operations additionally require an unused absolute `--output IMAGE` path: actually inspect that file before submitting a visual judgment. Files cannot be silently overwritten. MCP delivers the display image directly.
 
 Example `job_plan` / `job_submit` input:
 
@@ -43,7 +68,7 @@ Use `media_ids` **or** `collection`, never both. A submission snapshots 1–10,0
 
 1. Submit once. A running daemon performs local preflight; otherwise call `jobs_tick`. Already-complete requested outputs are skipped in normal annotation continuation. Original image files are verified before work is offered.
 2. `work_claim` with `{"owner":"actual-client-name","job_id":123,"limit":4}` returns up to 16 independent work items. Each includes `work_id`, `lease_token`, `generation`, `expected_sha256`, `stage` and expiration. Treat tokens as local credentials, not captions or logs.
-3. Use `work_view` on each full current image. Follow response `next.operation` through `work_assess`, `work_preview`, `work_apply`, `work_view` and `work_annotate` as applicable. `bdm_agent` wraps these operations for MCP. `describe` with `{"operation":"work_annotate"}` returns the exact payload schema once; reuse it for the batch.
+3. Use `work_view` on each full current image. Follow `next.tool` / `next.operation` through `work_assess`, `work_preview`, `work_apply`, `work_view`, final `work_assess` and `work_annotate` as applicable. Prefer typed MCP tools, whose complete arguments are already in `tools/list`. Older clients may retain `bdm_agent` and call `describe` once for an unfamiliar payload.
 4. Every work call carries its work ID, token and generation. Writes also carry a unique `request_id`, the inspected `expected_sha256`, and a `payload` matching the corresponding standalone schema **without** media ID/hash. The server owns media identity, stage, overwrite policy and final-assessment requirements. A view of the original or a small tile does not replace seeing the full current image.
 
 Example write envelope:

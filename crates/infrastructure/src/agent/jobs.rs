@@ -118,10 +118,26 @@ fn output_complete(
 fn route(reply: &mut ServiceReply, id: i64, stage: &str, operation: &str) {
     reply.metadata["work_id"] = json!(id);
     reply.metadata["next_stage"] = json!(stage);
-    reply.metadata["next"] = json!({"tool":"bdm_agent","operation":operation,"work_id":id,
+    reply.metadata["next"] = json!({"tool":super::operation_tool(operation),"operation":operation,
         "required":["work_id","lease_token","generation"],
-        "write_required":["request_id","expected_sha256","payload"],
         "hint":match operation {"work_view"=>"Inspect the full saved current image; reuse its new SHA.","work_preview"=>"Preview a composition-preserving crop; do not bypass the lease with standalone tools.","work_apply"=>"Apply this exact inspected preview, or assess with crop_outcome=not_improved if it harms expression.","work_assess"=>"Assess current visible pixels. Triage: crop_candidate=true if useful cropping is possible; after crop use verified crop_outcome.","work_annotate"=>"Submit only the requested outputs. Identity merging is local; omit already successful fields when correcting.",_=>"Continue claiming requested work; terminal results stay in history."}});
+    if operation == "work_claim" {
+        reply.metadata["next"]["required"] = json!(["owner"]);
+    } else {
+        reply.metadata["next"]["work_id"] = json!(id);
+        if operation == "work_preview" {
+            reply.metadata["next"]["required"] = json!([
+                "work_id",
+                "lease_token",
+                "generation",
+                "expected_sha256",
+                "payload"
+            ]);
+        } else if matches!(operation, "work_apply" | "work_assess" | "work_annotate") {
+            reply.metadata["next"]["write_required"] =
+                json!(["request_id", "expected_sha256", "payload"]);
+        }
+    }
 }
 fn writable(service: &AgentService) -> Result<(), IngestError> {
     if service.settings.writes {
@@ -619,7 +635,7 @@ fn work(
         if let Some((fp,response,state,receipt_proof))=storage(repo.connection.query_row("SELECT fingerprint,response,state,lease_proof FROM agent_receipts WHERE work_id=?1 AND request_id=?2",params![id,request],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?))).optional())?{
             if proof!=receipt_proof{return Err(error("lease_lost","Receipt belongs to another lease"));}
             if fp!=fingerprint{return Err(error("idempotency_conflict","Use a new request_id for a correction"));}
-            if state=="complete"{let metadata:Value=serde_json::from_str(&response.unwrap()).map_err(|_|IngestError::Storage)?;let is_error=metadata["status"]=="error"||metadata.get("error").is_some();return Ok(ServiceReply{metadata,is_error,image_png:None});}
+            if state=="complete"{let metadata:Value=serde_json::from_str(&response.unwrap()).map_err(|_|IngestError::Storage)?;let is_error=metadata["status"]=="error"||metadata.get("error").is_some();return Ok(ServiceReply{metadata,is_error,image:None});}
             if state=="intent"{return Err(error("recovery_required","Previous write outcome is ambiguous; never blindly replay"));}
         }
     }
@@ -665,6 +681,7 @@ fn work(
         permit: Some((id, token.to_owned(), generation)),
         seen: Default::default(),
         previews: Default::default(),
+        preview_cache: service.settings.preview_cache.clone(),
     };
     if viewed.as_deref() == Some(&sha) {
         settings.seen.lock().unwrap().insert(sha.clone());
