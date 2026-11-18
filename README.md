@@ -44,6 +44,8 @@ Artist and Character lists use one toolbar delete entry: click it, select cards,
 
 Collection/media metadata and preferences are stored under the project directory: `data/catalog.sqlite3` and `data/app.ron`. Default originals and sidecars live in `data/library/`. Development startup discovers the repository from the executable location; a standalone packaged executable uses its own directory. Changing the managed-media root preference affects new imports and does not relocate existing data. `--preview` and `--capture` skip the real catalog, source credentials and Tag requests.
 
+Use the [manual ModelScope backup and restore commands](docs/features/MODELSCOPE_BACKUP.md) to back up the catalog and managed images to a private dataset.
+
 ## Planned architecture
 
 - Rust workspace with an `egui`/`eframe` desktop application

@@ -22,7 +22,7 @@ Status labels are strict: **Specified** means documented; **Implemented** means 
 | Character hierarchy / tag protection | Local checks passed | Alias-aware verified base→variant normalization, manual editing, cycle validation, preserved coexisting characters/variants and persistent rejection; post-download metadata discovery connected |
 | DINOv3 inference/search/dedup | Actual local inference verified | Pinned 384-D model, pHash, persistent bucket retrieval, dual-signal deletion and single-signal review; labeled/50k evaluation, broad relations and concurrent analysis workers pending |
 | AI optimization/review/export/dashboard | Local workflow checks passed | Text-only strict JSON target isolation, protected names, partial failed-only recovery, resumable jobs, text review and basic atomic export. Full shared-profile scheduling and export options pending |
-| ModelScope backup/restore | Specified | No remote adapter or restore test |
+| ModelScope backup/restore | Manual CLI implemented | Local restore, incremental reuse and failure tests pass with a simulated repository. Private ModelScope upload and restore remain to be verified. |
 | Windows packaging | Specified | Development executable builds and renders on Windows; installer, updates, deployment and platform recovery remain unverified |
 
 ## Local verification — 2026-10-21

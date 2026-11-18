@@ -98,6 +98,35 @@ pub struct AppConfig {
     pub download_media: DownloadMediaPolicy,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelScopeConfig {
+    pub dataset_id: String,
+}
+
+impl ModelScopeConfig {
+    pub fn new(dataset_id: &str) -> Result<Self, &'static str> {
+        let dataset_id = dataset_id.trim();
+        let valid_part = |part: &str| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-'))
+        };
+        if dataset_id.len() > 200
+            || !dataset_id
+                .split_once('/')
+                .is_some_and(|(owner, name)| valid_part(owner) && valid_part(name))
+        {
+            return Err("请填写有效的魔搭数据集 ID，格式为 用户名/数据集名。");
+        }
+        Ok(Self {
+            dataset_id: dataset_id.to_owned(),
+        })
+    }
+}
+
 fn default_flatten_transparency() -> bool {
     true
 }

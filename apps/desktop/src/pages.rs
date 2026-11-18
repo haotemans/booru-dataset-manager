@@ -361,6 +361,8 @@ impl BdmApp {
     }
 
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
+        self.modelscope_settings_card(ui);
+        ui.add_space(16.0);
         self.gelbooru_settings_card(ui);
         ui.add_space(16.0);
         egui::CollapsingHeader::new("Danbooru 来源设置")

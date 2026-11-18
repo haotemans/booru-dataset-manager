@@ -10,6 +10,7 @@ pub mod editing;
 pub mod export;
 pub mod gelbooru;
 pub mod ingest;
+pub mod modelscope;
 pub mod providers;
 pub mod visual;
 #[cfg(test)]

@@ -14,6 +14,7 @@ mod image_editor;
 mod ingest;
 mod media_review;
 mod model;
+mod modelscope_settings;
 mod pages;
 mod paths;
 mod redownload;

@@ -51,6 +51,7 @@ pub struct BdmApp {
     pub minimum_short_side_draft: u32,
     pub danbooru: crate::sources::DanbooruSettings,
     pub gelbooru: crate::gelbooru_settings::GelbooruSettings,
+    pub modelscope: crate::modelscope_settings::ModelScopeSettings,
     pub catalog: crate::catalog::CatalogSettings,
     pub ingest: crate::ingest::IngestSettings,
     pub workflows: crate::workflows::WorkflowSettings,
@@ -87,6 +88,7 @@ impl BdmApp {
         if app.capture_dir.is_none() && !app.demo {
             app.load_danbooru_settings();
             app.load_gelbooru_settings();
+            app.modelscope.load(&crate::paths::project_root());
             if !app.demo {
                 app.open_catalog(&crate::paths::data_directory().join("catalog.sqlite3"));
             }
@@ -154,6 +156,7 @@ impl BdmApp {
             minimum_short_side_draft,
             danbooru,
             gelbooru,
+            modelscope: crate::modelscope_settings::ModelScopeSettings::default(),
             catalog: crate::catalog::CatalogSettings::default(),
             ingest: crate::ingest::IngestSettings::default(),
             workflows: crate::workflows::WorkflowSettings::default(),

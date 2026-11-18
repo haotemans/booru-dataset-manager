@@ -76,6 +76,17 @@ fn portable_accounts_match_desktop_and_canonical_headless_paths_without_global_f
 }
 
 impl NativeCredentialStore {
+    pub fn modelscope(dataset_id: &str) -> Self {
+        #[cfg(not(windows))]
+        let _ = dataset_id;
+        Self {
+            #[cfg(windows)]
+            service: "Booru Dataset Manager".into(),
+            #[cfg(windows)]
+            account: format!("modelscope-{dataset_id}"),
+        }
+    }
+
     #[cfg(windows)]
     fn portable_root_key(root: &std::path::Path) -> String {
         let path = root.to_string_lossy().to_lowercase().replace('/', "\\");
