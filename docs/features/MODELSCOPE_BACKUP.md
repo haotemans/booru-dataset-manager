@@ -17,6 +17,8 @@ python scripts/modelscope_backup.py restore .\restored-data
 
 Use a private ModelScope **dataset** and a write-capable Access Token for backup. To bypass the desktop settings, use `--repo owner/name` or `MODELSCOPE_DATASET_ID`, and provide `MODELSCOPE_TOKEN` in the process environment or enter the token at the hidden prompt. The `check` command validates repository access and visibility. A successful backup and restore verify write access and readback.
 
+For a dataset under `www.modelscope.ai`, set `$env:MODELSCOPE_BACKUP_SITE = 'modelscope.ai'` before running the PowerShell commands. The default is `modelscope.cn`.
+
 `backup` defaults to the project's `data` folder. Use `backup --data 'D:\BDM\data'` for a portable install and repeat `--library 'D:\ImageLibrary'` for each additional or former managed-media root. Supply the same root paths that BDM used. `restore` defaults to the latest complete version and accepts `--id` for a specific version. Its destination must be a new folder under an existing parent. Restored SQLite media paths point to `library`, `library-1`, and subsequent restored roots. To try the restored data in the desktop app, restore directly to the `data` path of a separate portable BDM install. The restore command leaves the current catalog in place.
 
 Each snapshot covers SQLite and its catalog-referenced working images, thumbnails, three text sidecars, current edit masks and known retained source originals. This first version includes current images and available source originals so a small library can be restored without re-downloading from the original providers. It excludes desktop `app.ron`, Windows Credential Manager, runtime logs, model weights and transient files. Set desktop preferences and logins again when needed.

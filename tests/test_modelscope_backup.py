@@ -11,6 +11,39 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT / 'scripts'))
 import modelscope_backup as backup
 
+try:
+    from modelscope_hub.errors import FileSizeMismatchError
+except ModuleNotFoundError:
+    FileSizeMismatchError = None
+
+
+@unittest.skipIf(FileSizeMismatchError is None, 'Optional ModelScope SDK is required')
+class ModelScopeRemoteTests(unittest.TestCase):
+    def test_international_site_checks_tree_after_empty_response(self):
+        expected = {'size': 12, 'sha256': 'a' * 64}
+        key = backup.object_key(expected)
+        path = f'bdm/{key}'
+        with (TemporaryDirectory() as directory,
+              patch.dict(os.environ, {'MODELSCOPE_BACKUP_SITE': 'modelscope.ai'}),
+              patch('modelscope_hub.HubApi') as create_api):
+            api = create_api.return_value
+            api.get_repo.return_value.visibility = 'private'
+            api.get_repo.return_value.gated = False
+            api.download_file.side_effect = FileSizeMismatchError('Empty response')
+            remote = backup.ModelScope('owner/data', 'master', 'test-token')
+            create_api.assert_called_once_with(token='test-token', endpoint='https://www.modelscope.ai')
+            target = Path(directory) / 'readback'
+            api.legacy.list_repo_files.return_value = []
+            self.assertFalse(remote.fetch(key, target, expected, missing_ok=True))
+            api.legacy.list_repo_files.assert_called_once_with(
+                'owner/data', 'dataset', revision='master', root='bdm/objects/aa',
+            )
+            api.legacy.list_repo_files.return_value = [{'Path': path}]
+            with self.assertRaises(FileSizeMismatchError):
+                remote.fetch(key, target, expected, missing_ok=True)
+            with self.assertRaises(FileSizeMismatchError):
+                remote.fetch(key, target, expected)
+
 
 class MemoryDataset:
     def __init__(self):

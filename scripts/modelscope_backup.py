@@ -129,21 +129,31 @@ def object_key(info):
 class ModelScope:
     def __init__(self, repo, revision, token):
         from modelscope_hub import HubApi
-        from modelscope_hub.errors import NotExistError
+        from modelscope_hub.errors import FileSizeMismatchError, NotExistError
 
-        self.api = HubApi(token=token, endpoint='https://modelscope.cn')
+        site = os.getenv('MODELSCOPE_BACKUP_SITE', 'modelscope.cn')
+        endpoints = {
+            'modelscope.cn': 'https://modelscope.cn',
+            'modelscope.ai': 'https://www.modelscope.ai',
+        }
+        if site not in endpoints:
+            raise BackupError('Set MODELSCOPE_BACKUP_SITE to modelscope.cn or modelscope.ai.')
+        self.api = HubApi(token=token, endpoint=endpoints[site])
+        self.site = site
         self.repo = repo
         self.revision = revision
         self.not_found = NotExistError
+        self.size_mismatch = FileSizeMismatchError
         info = self.api.get_repo(repo, repo_type='dataset')
         if info.gated or str(info.visibility).lower() not in {'1', 'private'}:
             raise BackupError('The ModelScope dataset must have private visibility.')
 
     def fetch(self, key, target, expected=None, *, missing_ok=False):
+        remote_path = f'{REMOTE_PREFIX}/{key}'
         with TemporaryDirectory(prefix='.readback-', dir=target.parent) as tmp:
             try:
                 path = self.api.download_file(
-                    self.repo, 'dataset', f'{REMOTE_PREFIX}/{key}', revision=self.revision,
+                    self.repo, 'dataset', remote_path, revision=self.revision,
                     local_dir=tmp, cache_dir=tmp, force=True,
                     expected_sha256=expected['sha256'] if expected else None,
                     file_size=expected['size'] if expected else None,
@@ -152,6 +162,17 @@ class ModelScope:
                 if missing_ok:
                     return False
                 raise BackupError(f'Remote file is missing: {key}') from None
+            except self.size_mismatch:
+                if not missing_ok or self.site != 'modelscope.ai':
+                    raise
+                # A missing path on the international site can return an empty HTTP 200.
+                entries = self.api.legacy.list_repo_files(
+                    self.repo, 'dataset', revision=self.revision,
+                    root=str(PurePosixPath(remote_path).parent),
+                )
+                if any(entry.get('Path') == remote_path for entry in entries):
+                    raise
+                return False
             if expected is not None and file_info(Path(path)) != expected:
                 raise BackupError(f'Remote file failed SHA-256 or size verification: {key}')
             Path(path).replace(target)

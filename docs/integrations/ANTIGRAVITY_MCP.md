@@ -46,6 +46,8 @@ python scripts/modelscope_backup.py --repo owner/name configure
 
 Enter the Access Token at the hidden terminal prompt. Add `bdm_modelscope` to Antigravity's existing `mcpServers` and refresh the server. Use absolute paths to the Python interpreter and script.
 
+For a dataset under `www.modelscope.ai`, add `"env": {"MODELSCOPE_BACKUP_SITE": "modelscope.ai"}` to the `bdm_modelscope` entry on each computer. The default is `modelscope.cn`.
+
 ```json
 {
   "mcpServers": {

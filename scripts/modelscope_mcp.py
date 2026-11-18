@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import redirect_stdout
 import os
 from pathlib import Path
+import sys
 from threading import Lock
 from typing import Literal
 
@@ -72,7 +74,9 @@ def server(config, source, roots, destination):
                 raise BackupError('Save an Access Token using modelscope_backup.py --repo owner/name configure in a local terminal.')
             remote = ModelScope(dataset, 'master', token.strip())
             if action == 'backup':
-                version = write_backup(source, roots, remote)
+                # The SDK prints commit progress. MCP stdio reserves stdout for JSON-RPC.
+                with redirect_stdout(sys.stderr):
+                    version = write_backup(source, roots, remote)
                 return {'status': 'verified', 'dataset_id': dataset, 'backup_id': version}
             if action == 'restore':
                 version = restore(destination, remote, backup_id)

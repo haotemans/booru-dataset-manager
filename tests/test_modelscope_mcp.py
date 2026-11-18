@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 import sqlite3
 import sys
@@ -33,6 +34,11 @@ sys.path[:0] = ['scripts', 'tests']
 import modelscope_mcp
 from test_modelscope_backup import MemoryDataset
 remote = MemoryDataset()
+upload = remote.upload
+def verbose_upload(*args):
+    print('SDK commit progress', flush=True)
+    return upload(*args)
+remote.upload = verbose_upload
 modelscope_mcp.ModelScope = lambda *args: remote
 modelscope_mcp.main()
 '''
@@ -54,7 +60,8 @@ modelscope_mcp.main()
                 status = await session.call_tool('bdm_modelscope_status', {})
                 self.assertTrue(status.structuredContent['token_available'])
                 self.assertNotIn('synthetic-mcp-test-token', str(status))
-                backup = await session.call_tool('bdm_modelscope_transfer', {'action': 'backup'})
+                with self.assertNoLogs('mcp.client.stdio', level=logging.ERROR):
+                    backup = await session.call_tool('bdm_modelscope_transfer', {'action': 'backup'})
                 self.assertEqual(backup.structuredContent['status'], 'verified')
                 restored = await session.call_tool('bdm_modelscope_transfer', {'action': 'restore'})
                 self.assertEqual(restored.structuredContent['backup_id'], backup.structuredContent['backup_id'])
