@@ -83,11 +83,12 @@ impl BdmApp {
             setting_header(ui, "lock", "魔搭备份");
             ui.add_space(8.0);
             let settings = &mut self.modelscope;
+            let field_width = ui.available_width().min(360.0);
             ui.label("私有数据集 ID");
             ui.add(
                 egui::TextEdit::singleline(&mut settings.dataset)
                     .hint_text("用户名/数据集名")
-                    .desired_width(360.0),
+                    .desired_width(field_width),
             );
             ui.label("Access Token");
             let has_token =
@@ -100,7 +101,7 @@ impl BdmApp {
                     } else {
                         "输入令牌"
                     })
-                    .desired_width(360.0),
+                    .desired_width(field_width),
             );
             ui.horizontal_wrapped(|ui| {
                 if ui

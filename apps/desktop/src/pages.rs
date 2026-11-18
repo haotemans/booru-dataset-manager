@@ -361,8 +361,6 @@ impl BdmApp {
     }
 
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
-        self.modelscope_settings_card(ui);
-        ui.add_space(16.0);
         self.gelbooru_settings_card(ui);
         ui.add_space(16.0);
         egui::CollapsingHeader::new("Danbooru 来源设置")
@@ -571,21 +569,7 @@ impl BdmApp {
                 });
                 ui.add_space(5.0);
             });
-            card().show(&mut cols[1], |ui| {
-                ui.set_width(ui.available_width());
-                section(ui, "备份与恢复", "");
-                ui.add_space(12.0);
-
-                ui.add_space(12.0);
-
-                ui.add_space(14.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.add_enabled(false, egui::Button::new("备份"))
-                        .on_hover_text("备份服务未接入");
-                    ui.add_enabled(false, egui::Button::new("恢复"))
-                        .on_hover_text("备份服务未接入");
-                });
-            });
+            self.modelscope_settings_card(&mut cols[1]);
         });
         ui.add_space(16.0);
         card().show(ui, |ui| {
