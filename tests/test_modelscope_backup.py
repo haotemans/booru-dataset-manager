@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -151,6 +152,19 @@ class ModelScopeBackupTests(unittest.TestCase):
             backup.main()
         saved_token.assert_called_once_with('owner/shared')
         remote.assert_called_once_with('owner/shared', 'master', 'dummy-token')
+
+    @unittest.skipUnless(os.name == 'nt', 'Rust extended Windows path spelling')
+    def test_catalog_paths_written_by_native_windows_mcp_restore(self):
+        item = json.loads(self.db.execute('SELECT metadata FROM media').fetchone()[0])
+        for name in ('path', 'thumbnail'):
+            item[name] = '\\\\?\\' + str(Path(item[name]).resolve())
+        with self.db:
+            self.db.execute('UPDATE media SET metadata=?', (json.dumps(item),))
+        restored = self.root / 'restored-extended'
+        version = backup.write_backup(self.data, [self.default_library, self.custom_library.resolve()], self.remote)
+        self.assertEqual(backup.restore(restored, self.remote, None), version)
+        relocated = restored / 'library-1' / self.image.relative_to(self.custom_library)
+        self.assertEqual(relocated.read_bytes(), b'current')
 
 
 if __name__ == '__main__':

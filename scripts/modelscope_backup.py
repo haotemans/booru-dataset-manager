@@ -221,13 +221,27 @@ def media_files(db, locate=lambda path: path):
                     yield original, item.get('source_sha256') or None
 
 
+def windows_path_spelling(value):
+    # Rust's canonicalize writes extended Windows paths into BDM's catalog.
+    if value[:8].lower() == '\\\\?\\unc\\':
+        return '\\\\' + value[8:]
+    if value.startswith('\\\\?\\'):
+        return value[4:]
+    return value
+
+
 def plan(db, roots):
     files = {}
-    resolved_roots = [(root, root.resolve()) for root in roots]
+    def comparable(path):
+        return Path(windows_path_spelling(str(path))) if os.name == 'nt' else path
+
+    resolved_roots = [(comparable(root), comparable(root.resolve())) for root in roots]
     for path, sha in media_files(db):
         source = path.resolve()
+        source_key = comparable(source)
+        path = comparable(path)
         for index, (root, resolved_root) in enumerate(resolved_roots):
-            if path.is_relative_to(root) and source == resolved_root / path.relative_to(root):
+            if path.is_relative_to(root) and source_key == resolved_root / path.relative_to(root):
                 relative = path.relative_to(root).as_posix()
                 prefix = 'library' if index == 0 else f'library-{index}'
                 key = f'{prefix}/{relative}'
@@ -326,8 +340,8 @@ def validated_entries(manifest, backup_id):
 
 
 def relocate_catalog(stage, destination, manifest, entries):
-    roots = [PureWindowsPath(root) if PureWindowsPath(root).is_absolute() else PurePosixPath(root)
-             for root in manifest['roots']]
+    roots = [PureWindowsPath(windows_path_spelling(root)) if PureWindowsPath(root).is_absolute()
+             else PurePosixPath(root) for root in manifest['roots']]
     libraries = ['library', *(f'library-{i}' for i in range(1, len(roots)))]
 
     def rebase(value):
@@ -337,7 +351,7 @@ def relocate_catalog(stage, destination, manifest, entries):
             return [rebase(item) for item in value]
         if isinstance(value, str):
             for root, library in zip(roots, libraries):
-                path = type(root)(value)
+                path = type(root)(windows_path_spelling(value) if isinstance(root, PureWindowsPath) else value)
                 if path.is_relative_to(root):
                     parts = path.relative_to(root).parts
                     if '..' not in parts:
