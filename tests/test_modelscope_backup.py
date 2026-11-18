@@ -106,7 +106,8 @@ class ModelScopeBackupTests(unittest.TestCase):
         self.write()
         restored = self.root / 'restored'
         backup.restore(restored, self.remote, None)
-        self.assertEqual(list(restored.iterdir()), [restored / backup.DATABASE])
+        self.assertEqual({path.name for path in restored.iterdir()}, {backup.DATABASE, 'library'})
+        self.assertEqual(list((restored / 'library').iterdir()), [])
         previous = self.root / 'previous'
         backup.restore(previous, self.remote, first)
         self.assertTrue((previous / 'library-1' / self.image.relative_to(self.custom_library)).is_file())
@@ -140,7 +141,9 @@ class ModelScopeBackupTests(unittest.TestCase):
 
     def test_cli_uses_bdm_config_and_saved_token(self):
         config = self.root / 'modelscope.json'
-        config.write_text('{"dataset_id":"owner/shared"}', encoding='utf-8')
+        backup.save_settings(config, 'owner/old')
+        backup.save_settings(config, 'owner/shared')
+        self.assertEqual(json.loads(config.read_text(encoding='utf-8')), {'dataset_id': 'owner/shared'})
         with (patch.dict(backup.os.environ, {'MODELSCOPE_DATASET_ID': '', 'MODELSCOPE_TOKEN': ''}),
               patch.object(sys, 'argv', ['backup', '--config', str(config), 'check']),
               patch.object(backup, 'windows_token', return_value='dummy-token') as saved_token,

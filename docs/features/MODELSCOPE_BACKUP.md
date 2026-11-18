@@ -6,6 +6,8 @@ Use the [backup script](../../scripts/modelscope_backup.py) from the machine tha
 
 On each Windows computer, open **系统设置 → 魔搭备份** and save the private dataset ID and Access Token. BDM writes the dataset ID to `config/modelscope.json` beside the project or portable install and stores the token in Windows Credential Manager. When running the script from a separate copy of the project, use `--config` with the portable install's configuration file.
 
+For machines running BDM through Antigravity, follow the [MCP setup](../integrations/ANTIGRAVITY_MCP.md#modelscope-backup-and-restore-in-antigravity). The terminal `configure` command provides the hidden token prompt.
+
 ```powershell
 python -m pip install 'modelscope-hub>=0.7.1,<1' pywin32-ctypes
 python scripts/modelscope_backup.py check

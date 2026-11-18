@@ -2,6 +2,7 @@
 /dist
 /data
 /data.relocation-*
+/data-restored
 /config/modelscope.json
 *.sqlite3
 *.sqlite3-shm

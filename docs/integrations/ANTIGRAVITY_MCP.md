@@ -35,6 +35,33 @@ permission prompts remain controlled by Antigravity's permission mode.
 
 Protocol v3 adds `bdm_agent` for durable batches, leased work, job controls, operation-schema discovery, download queues, bucket planning and local health checks. Existing configuration above remains valid. The optional `bdm.exe mcp-serve` entry serves the same tools without linking the desktop UI; `bdm.exe --help` documents standalone JSON commands. See [the implemented control-plane contract](../agent-control-plane.md) for exact commands, restart behavior and current limits.
 
+## ModelScope backup and restore in Antigravity
+
+Install the Python dependencies on each machine. The backup MCP server can start on the destination before a local catalog exists. It uses the same `config/modelscope.json` and Windows Credential Manager entries as BDM desktop.
+
+```powershell
+python -m pip install 'mcp>=1.26,<2' 'modelscope-hub>=0.7.1,<1' pywin32-ctypes
+python scripts/modelscope_backup.py --repo owner/name configure
+```
+
+Enter the Access Token at the hidden terminal prompt. Add `bdm_modelscope` to Antigravity's existing `mcpServers` and refresh the server. Use absolute paths to the Python interpreter and script.
+
+```json
+{
+  "mcpServers": {
+    "bdm_modelscope": {
+      "command": "C:\\Python312\\python.exe",
+      "args": ["D:\\BDM\\scripts\\modelscope_mcp.py"],
+      "timeoutSeconds": 1800
+    }
+  }
+}
+```
+
+`bdm_modelscope_status` reports the configured destination and whether a token and source catalog are available. `bdm_modelscope_configure` saves the dataset ID. `bdm_modelscope_transfer` takes `action` set to `check`, `backup`, or `restore`. Finish editing and download jobs before starting a backup. Restore uses the latest verified backup by default and accepts a historical `backup_id`.
+
+The default source is `<project>/data`, and the default restore destination is the new directory `<project>/data-restored`. To use a different source or destination, add `--data` or `--restore-to` with the absolute path to the server's `args`. Repeat `--library` for additional source library roots. After restoring, point the regular BDM MCP server's `--catalog` and `--library-root` to the restored catalog and library directories, then refresh it. See [backup and restore details](../features/MODELSCOPE_BACKUP.md).
+
 ## Project annotation skill
 
 The workspace skill [booru-visual-annotation](../../.agents/skills/booru-visual-annotation/SKILL.md)

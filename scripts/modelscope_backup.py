@@ -13,7 +13,7 @@ import re
 import shutil
 import sqlite3
 import sys
-from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from uuid import uuid4
 import warnings
 
@@ -51,13 +51,18 @@ def valid_dataset(repo):
             and not any(part in {'.', '..'} for part in repo.split('/')))
 
 
-def windows_token(repo):
-    if os.name != 'nt':
-        return None
+def credential_module():
     try:
         from win32ctypes.pywin32 import pywintypes, win32cred
     except ModuleNotFoundError:
         raise BackupError('Install pywin32-ctypes to use the token saved in BDM settings.') from None
+    return pywintypes, win32cred
+
+
+def windows_token(repo):
+    if os.name != 'nt':
+        return None
+    pywintypes, win32cred = credential_module()
     try:
         # Matches NativeCredentialStore::modelscope and the Windows keyring target convention.
         credential = win32cred.CredRead(f'modelscope-{repo}.Booru Dataset Manager', win32cred.CRED_TYPE_GENERIC)
@@ -74,6 +79,37 @@ def windows_token(repo):
     if dataset != repo or not token.strip():
         raise BackupError('The saved ModelScope credential does not match the configured dataset.')
     return token
+
+
+def save_settings(path, repo, token=None):
+    if not valid_dataset(repo):
+        raise BackupError('Use a ModelScope dataset ID in owner/name format.')
+    if token is not None:
+        if not token or len(token) > 1024 or any(not c.isprintable() or c.isspace() for c in token):
+            raise BackupError('The Access Token is empty or invalid.')
+        if os.name != 'nt':
+            raise BackupError('Set MODELSCOPE_TOKEN in the process environment on this platform.')
+        pywintypes, win32cred = credential_module()
+        try:
+            win32cred.CredWrite({
+                'Type': win32cred.CRED_TYPE_GENERIC,
+                'TargetName': f'modelscope-{repo}.Booru Dataset Manager',
+                'UserName': f'modelscope-{repo}',
+                'CredentialBlob': f'{repo}\n{token}',
+                'Persist': win32cred.CRED_PERSIST_LOCAL_MACHINE,
+            })
+        except pywintypes.error:
+            raise BackupError('Could not save the token in Windows Credential Manager.') from None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False)
+    scratch = Path(pending.name)
+    try:
+        with pending:
+            json.dump({'dataset_id': repo}, pending, indent=2)
+            pending.write('\n')
+        scratch.replace(path)
+    finally:
+        scratch.unlink(missing_ok=True)
 
 
 def json_file(path, value):
@@ -233,7 +269,7 @@ def write_backup(source, roots, remote):
             if max(info['size'] for _, info in files.values()) > shutil.disk_usage(scratch).free:
                 raise BackupError('Insufficient disk space for remote readback verification.')
             size = sum(info['size'] for _, info in files.values())
-            print(f'Verifying {len(files)} files ({size:,} bytes)', flush=True)
+            print(f'Verifying {len(files)} files ({size:,} bytes)', file=sys.stderr, flush=True)
             verified = set()
             readback = scratch / 'readback.bin'
             for path, info in files.values():
@@ -358,6 +394,8 @@ def restore(destination, remote, backup_id):
             target.parent.mkdir(parents=True, exist_ok=True)
             remote.fetch(object_key(entry), target, entry)
         relocate_catalog(stage, destination, manifest, entries)
+        # The headless BDM server requires its configured library path to exist.
+        (stage / 'library').mkdir(exist_ok=True)
         if destination.exists():
             raise BackupError('Restore destination appeared during download.')
         stage.rename(destination)
@@ -370,6 +408,7 @@ def main():
     parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG, help='BDM ModelScope settings file')
     parser.add_argument('--revision', default='master')
     commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('configure', help='Set the dataset and save a hidden token in Windows Credential Manager')
     commands.add_parser('check', help='Verify access and private visibility')
     backup = commands.add_parser('backup', help='Back up a stopped BDM data directory')
     backup.add_argument('--data', type=Path, default=Path(__file__).resolve().parents[1] / 'data')
@@ -387,10 +426,16 @@ def main():
             raise BackupError(f'Local catalog was not found: {args.data / DATABASE}')
         with warnings.catch_warnings():
             warnings.simplefilter('error', GetPassWarning)
-            token = os.getenv('MODELSCOPE_TOKEN') or (windows_token(repo) if dataset else None)
+            token = os.getenv('MODELSCOPE_TOKEN')
+            if not token and dataset and args.command != 'configure':
+                token = windows_token(repo)
             token = token or getpass('ModelScope Access Token: ')
         if not token.strip():
             raise BackupError('Provide a ModelScope Access Token using a local terminal.')
+        if args.command == 'configure':
+            save_settings(args.config, repo, token.strip())
+            print(f'Saved BDM ModelScope settings for {repo}')
+            return
         remote = ModelScope(repo, args.revision, token.strip())
         if args.command == 'backup':
             source = args.data.absolute()
