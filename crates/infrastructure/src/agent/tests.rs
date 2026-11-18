@@ -523,6 +523,41 @@ fn submission_replay_keeps_original_scope_after_job_changes_and_validation_recei
 }
 
 #[test]
+fn pixiv_submission_replays_by_user_id_and_preserves_work_limit() {
+    let (mut fixture, _, _) = fixture();
+    let artist = bdm_domain::catalog::SourceTag {
+        provider: bdm_domain::sources::SourceProvider::Pixiv,
+        id: 87610448,
+        category: 1,
+        name: "test_pixiv_artist".into(),
+        post_count: 15,
+    };
+    let collection = fixture
+        .repo
+        .add(bdm_domain::catalog::CollectionKind::Artist, &artist)
+        .unwrap()
+        .record
+        .id;
+    let service = service(&fixture, true);
+    let input = json!({"request_id":"pixiv-test","user_id":artist.id,"max_works":3});
+    let submitted = ok(&service, "download_pixiv_submit", input.clone());
+    assert_eq!(submitted["collection_id"], collection);
+    let repeated = ok(&service, "download_pixiv_submit", input.clone());
+    assert_eq!(repeated["download_id"], submitted["download_id"]);
+    assert_eq!(repeated["replayed"], true);
+    let status = ok(
+        &service,
+        "download_status",
+        json!({"download_id":submitted["download_id"]}),
+    );
+    assert_eq!(status["provider"], "pixiv");
+    assert_eq!(status["pixiv_max_works"], 3);
+    let mut changed = input;
+    changed["max_works"] = json!(4);
+    assert!(service.execute("download_pixiv_submit", changed).is_error);
+}
+
+#[test]
 fn queued_download_reuses_existing_collection_and_is_idempotent_without_network() {
     let (f, _, _) = fixture();
     let s = service(&f, true);

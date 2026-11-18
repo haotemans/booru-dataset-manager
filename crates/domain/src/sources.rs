@@ -6,6 +6,7 @@ pub enum SourceProvider {
     #[default]
     Danbooru,
     Gelbooru,
+    Pixiv,
 }
 
 impl SourceProvider {
@@ -13,12 +14,14 @@ impl SourceProvider {
         match self {
             Self::Danbooru => "danbooru",
             Self::Gelbooru => "gelbooru",
+            Self::Pixiv => "pixiv",
         }
     }
     pub fn label(self) -> &'static str {
         match self {
             Self::Danbooru => "Danbooru",
             Self::Gelbooru => "Gelbooru",
+            Self::Pixiv => "Pixiv",
         }
     }
 }
@@ -31,6 +34,7 @@ pub enum DownloadSource {
     #[serde(alias = "SafeDanbooru", alias = "safedanbooru", alias = "safebooru")]
     Safebooru,
     Gelbooru,
+    Pixiv,
 }
 
 impl DownloadSource {
@@ -40,6 +44,7 @@ impl DownloadSource {
             Self::Danbooru => "仅 Danbooru",
             Self::Safebooru => "仅 Safebooru（General）",
             Self::Gelbooru => "仅 Gelbooru",
+            Self::Pixiv => "仅 Pixiv",
         }
     }
 
@@ -48,6 +53,7 @@ impl DownloadSource {
             Self::Automatic => saved,
             Self::Danbooru | Self::Safebooru => SourceProvider::Danbooru,
             Self::Gelbooru => SourceProvider::Gelbooru,
+            Self::Pixiv => SourceProvider::Pixiv,
         }
     }
 

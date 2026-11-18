@@ -36,6 +36,7 @@ impl MediaProvider for SourceRouter<'_> {
         match post.provider {
             SourceProvider::Danbooru => self.danbooru.download(post, path, cancel),
             SourceProvider::Gelbooru => self.gelbooru.download(post, path, cancel),
+            SourceProvider::Pixiv => Err(bdm_ports::CatalogError::InvalidQuery.into()),
         }
     }
 }
@@ -52,6 +53,7 @@ pub fn run_with_fallback(
     let metadata = match job.provider {
         SourceProvider::Danbooru => danbooru,
         SourceProvider::Gelbooru => gelbooru,
+        SourceProvider::Pixiv => return Err(bdm_ports::CatalogError::InvalidQuery.into()),
     };
     let router = SourceRouter {
         metadata,

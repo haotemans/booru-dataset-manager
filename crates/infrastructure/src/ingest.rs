@@ -138,6 +138,7 @@ impl SqliteCatalog {
             let provider = match provider.as_str() {
                 "danbooru" => bdm_domain::sources::SourceProvider::Danbooru,
                 "gelbooru" => bdm_domain::sources::SourceProvider::Gelbooru,
+                "pixiv" => bdm_domain::sources::SourceProvider::Pixiv,
                 _ => return Err(IngestError::Storage),
             };
             providers.entry(id).or_default().insert(provider);
@@ -298,6 +299,7 @@ impl SqliteCatalog {
             [collection_id],
         ))?;
         let job = IngestJob {
+            pixiv_max_works: None,
             provider: bdm_domain::sources::SourceProvider::Danbooru,
             source_mode: bdm_domain::sources::DownloadSource::Automatic,
             primary_before_id: None,
@@ -739,7 +741,7 @@ impl SqliteCatalog {
             return Ok(false);
         };
         let source: SourcePost = storage(serde_json::from_str(&source))?;
-        if source.md5 != post.md5 {
+        if source.md5 != post.md5 && !pixiv_without_source_md5(post) {
             return Err(IngestError::Integrity);
         }
         let metadata: String = storage(self.connection.query_row(
@@ -796,11 +798,12 @@ impl SqliteCatalog {
         if post.skip_reason_with_minimum(minimum_short_side).is_some() {
             return Err(IngestError::InvalidMedia);
         }
-        if post.md5.len() != 32
-            || !post
-                .md5
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        if !pixiv_without_source_md5(post)
+            && (post.md5.len() != 32
+                || !post
+                    .md5
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
         {
             return Err(IngestError::Integrity);
         }
@@ -827,9 +830,13 @@ impl SqliteCatalog {
         {
             return Err(IngestError::InvalidMedia);
         }
-        if format!("{:x}", Md5::digest(&bytes)) != post.md5 {
+        let md5 = format!("{:x}", Md5::digest(&bytes));
+        if !pixiv_without_source_md5(post) && md5 != post.md5 {
             return Err(IngestError::Integrity);
         }
+        let mut verified_post = post.clone();
+        verified_post.md5 = md5;
+        let post = &verified_post;
         let decoded = validate(&bytes, post, minimum_short_side)?;
         let source_sha256 = format!("{:x}", Sha256::digest(&bytes));
         let (stored_image, stored_bytes) = if flatten_transparency && has_transparency(&decoded) {
@@ -951,4 +958,8 @@ impl SqliteCatalog {
         self.finish_import_tags(&imported)?;
         Ok(true)
     }
+}
+
+fn pixiv_without_source_md5(post: &SourcePost) -> bool {
+    post.provider == bdm_domain::sources::SourceProvider::Pixiv && post.md5.is_empty()
 }

@@ -696,7 +696,11 @@ impl BdmApp {
                             self.prefs.flatten_transparency,
                         )
                         .map_err(|e| e.to_string())?;
-                    job.source_mode = self.prefs.download_source;
+                    job.source_mode = if c.provider == bdm_domain::sources::SourceProvider::Pixiv {
+                        bdm_domain::sources::DownloadSource::Pixiv
+                    } else {
+                        self.prefs.download_source
+                    };
                     job.provider = job.source_mode.initial_provider(c.provider);
                     bdm_ports::IngestRepository::save_job(&mut repo, &job)
                         .map_err(|e| e.to_string())?;
@@ -704,7 +708,11 @@ impl BdmApp {
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
-        let source_mode = jobs.first().map(|job| job.source_mode).unwrap_or_default();
+        let source_mode = jobs
+            .iter()
+            .find(|job| job.provider != bdm_domain::sources::SourceProvider::Pixiv)
+            .map(|job| job.source_mode)
+            .unwrap_or_default();
         let cancel = Arc::new(AtomicBool::new(false));
         let signal = cancel.clone();
         let (sender, receiver) = mpsc::channel();
@@ -733,17 +741,31 @@ impl BdmApp {
                     }
                 };
                 for mut job in jobs {
-                    let result = bdm_application::ingest::run_with_fallback(
-                        danbooru.as_ref(),
-                        gelbooru.as_ref(),
-                        &mut repo,
-                        &mut job,
-                        &signal,
-                        |j| {
-                            let _ = sender.send(j.clone());
-                            repaint.request_repaint();
-                        },
-                    );
+                    let progress = |j: &bdm_domain::ingest::IngestJob| {
+                        let _ = sender.send(j.clone());
+                        repaint.request_repaint();
+                    };
+                    let result = if job.provider == bdm_domain::sources::SourceProvider::Pixiv {
+                        bdm_infrastructure::pixiv::PixivProvider::for_job(
+                            &repo,
+                            &job,
+                            signal.clone(),
+                        )
+                        .and_then(|provider| {
+                            bdm_application::ingest::run(
+                                &provider, &mut repo, &mut job, &signal, progress,
+                            )
+                        })
+                    } else {
+                        bdm_application::ingest::run_with_fallback(
+                            danbooru.as_ref(),
+                            gelbooru.as_ref(),
+                            &mut repo,
+                            &mut job,
+                            &signal,
+                            progress,
+                        )
+                    };
                     if let Err(error) = result {
                         job.state = if error == bdm_ports::IngestError::Cancelled {
                             "cancelled"

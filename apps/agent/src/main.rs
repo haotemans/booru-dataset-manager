@@ -11,7 +11,7 @@ Schema discovery (no database required): bdm schema [operation]
 Operations: policy, describe, doctor, status, collections, list, view, bucket_plan,
 character_repair (media_ids, apply=false by default; existing verified rules only),
 job_plan, job_submit, jobs_list, job_status, job_control, jobs_tick,
-download_submit, download_status, download_control,
+download_submit, download_pixiv_submit, download_status, download_control,
 work_claim, work_view, work_preview, work_apply, work_assess, work_annotate,
 work_next (claim+view), work_apply_view (apply+view), work_finish (final assessment+annotation),
 work_heartbeat, work_release, daemon-serve, daemon_stop, mcp-serve, init.

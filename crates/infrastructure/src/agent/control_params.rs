@@ -323,6 +323,17 @@ pub struct DownloadSubmitArgs {
 }
 #[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct PixivDownloadSubmitArgs {
+    pub request_id: String,
+    pub user_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_short_side: Option<u32>,
+    /// Limit to this many newest artwork entries. Each entry can have multiple pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_works: Option<u32>,
+}
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DownloadStatusArgs {
     pub download_id: i64,
 }
@@ -345,6 +356,8 @@ pub struct DownloadControlArgs {
 pub enum DownloadRequest {
     #[serde(rename = "download_submit")]
     Submit(DownloadSubmitArgs),
+    #[serde(rename = "download_pixiv_submit")]
+    PixivSubmit(PixivDownloadSubmitArgs),
     #[serde(rename = "download_status")]
     Status(DownloadStatusArgs),
     #[serde(rename = "download_control")]
@@ -390,6 +403,7 @@ pub const SCHEMA_OPERATIONS: &[&str] = &[
     "job_control",
     "jobs_tick",
     "download_submit",
+    "download_pixiv_submit",
     "download_status",
     "download_control",
     "work_claim",
@@ -431,6 +445,7 @@ pub fn operation_schema(operation: &str) -> Option<serde_json::Value> {
         "job_status" => schema!(JobStatusArgs),
         "job_control" => schema!(JobControlArgs),
         "download_submit" => schema!(DownloadSubmitArgs),
+        "download_pixiv_submit" => schema!(PixivDownloadSubmitArgs),
         "download_status" => schema!(DownloadStatusArgs),
         "download_control" => schema!(DownloadControlArgs),
         "work_claim" => schema!(WorkClaimArgs),

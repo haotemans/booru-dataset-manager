@@ -18,6 +18,27 @@ pub(crate) struct Fixture {
 }
 
 #[test]
+fn pixiv_original_without_provider_md5_gets_a_verified_local_hash() {
+    let mut f = fixture();
+    let expected = f.post.md5.clone();
+    f.post.provider = bdm_domain::sources::SourceProvider::Pixiv;
+    f.post.md5.clear();
+    let root = f.directory.path().join("library");
+    let cancel = AtomicBool::new(false);
+    assert!(f
+        .repo
+        .import(&f.post, &root, f.collection, 800, &cancel, &f.provider)
+        .unwrap());
+    let saved = f.repo.list_media().unwrap().remove(0);
+    assert_eq!(saved.post.md5, expected);
+    assert!(f.repo.has_source(&f.post, f.collection).unwrap());
+    assert!(!f
+        .repo
+        .import(&f.post, &root, f.collection, 800, &cancel, &f.provider)
+        .unwrap());
+}
+
+#[test]
 fn character_prefix_repair_preserves_body_reviews_manual_files_and_raw_source() {
     use bdm_domain::tags::CharacterRelation;
     let mut f = fixture();

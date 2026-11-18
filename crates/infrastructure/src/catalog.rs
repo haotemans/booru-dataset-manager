@@ -10,6 +10,8 @@ const WORKFLOW_MIGRATION: &str = include_str!("migrations/003_workflows.sql");
 const DISCOVERY_MIGRATION: &str = include_str!("migrations/004_discovered_artists.sql");
 const QUERY_MIGRATION: &str = include_str!("migrations/005_download_queries.sql");
 const SOURCE_MIGRATION: &str = include_str!("migrations/006_source_providers.sql");
+const PIXIV_MIGRATION: &str = include_str!("migrations/007_pixiv.sql");
+const SCHEMA_VERSION: i64 = 7;
 
 pub struct SqliteCatalog {
     pub(crate) connection: Connection,
@@ -33,7 +35,7 @@ impl SqliteCatalog {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(|_| CatalogError::Schema)?;
-        if version != 6 {
+        if version != SCHEMA_VERSION {
             return Err(CatalogError::Schema);
         }
         connection
@@ -60,7 +62,7 @@ impl SqliteCatalog {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(|_| CatalogError::Schema)?;
-        if (1..6).contains(&version) {
+        if (1..SCHEMA_VERSION).contains(&version) {
             let backup = path.with_extension(format!("pre-v{version}.sqlite3"));
             if !backup.exists() {
                 connection
@@ -109,7 +111,7 @@ impl SqliteCatalog {
                 )
                 .map_err(|_| CatalogError::Schema)?;
             }
-            1..=6 => {
+            1..=SCHEMA_VERSION => {
                 let saved: String = tx
                     .query_row(
                         "SELECT checksum FROM schema_migrations WHERE version=1",
@@ -243,6 +245,30 @@ impl SqliteCatalog {
                 return Err(CatalogError::Schema);
             }
         }
+        let pixiv_checksum = format!(
+            "{:x}",
+            Sha256::digest(PIXIV_MIGRATION.replace("\r\n", "\n").as_bytes())
+        );
+        if version < SCHEMA_VERSION {
+            tx.execute_batch(PIXIV_MIGRATION)
+                .map_err(|_| CatalogError::Schema)?;
+            tx.execute(
+                "INSERT INTO schema_migrations(version,checksum) VALUES(7,?1)",
+                [&pixiv_checksum],
+            )
+            .map_err(|_| CatalogError::Schema)?;
+        } else {
+            let saved: String = tx
+                .query_row(
+                    "SELECT checksum FROM schema_migrations WHERE version=7",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| CatalogError::Schema)?;
+            if saved != pixiv_checksum {
+                return Err(CatalogError::Schema);
+            }
+        }
         // Additive agent state: no schema-version bump or database snapshot is
         // needed. Image files and immutable source metadata are untouched.
         tx.execute_batch(
@@ -289,6 +315,7 @@ fn record(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionRecord> {
     let provider = match row.get::<_, String>(5)?.as_str() {
         "danbooru" => bdm_domain::sources::SourceProvider::Danbooru,
         "gelbooru" => bdm_domain::sources::SourceProvider::Gelbooru,
+        "pixiv" => bdm_domain::sources::SourceProvider::Pixiv,
         _ => return Err(rusqlite::Error::InvalidQuery),
     };
     let category: u8 = row.get(2)?;
@@ -438,7 +465,7 @@ impl CollectionRepository for SqliteCatalog {
         let version: i64 = tx
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|_| CatalogError::Schema)?;
-        if version != 6 {
+        if version != SCHEMA_VERSION {
             return Err(CatalogError::Schema);
         }
         for (kind, id) in records {

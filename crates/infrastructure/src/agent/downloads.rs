@@ -5,10 +5,11 @@ use super::{
 };
 use crate::{catalog::SqliteCatalog, credentials::NativeCredentialStore, ingest::storage};
 use bdm_domain::{
+    catalog::CollectionKind,
     ingest::IngestJob,
     sources::{DownloadSource, SourceProvider},
 };
-use bdm_ports::{IngestError, IngestRepository, SourceCredentialStore};
+use bdm_ports::{CollectionRepository, IngestError, IngestRepository, SourceCredentialStore};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -55,26 +56,49 @@ pub(super) fn dispatch(
     if !service.settings.writes {
         return Err(fail("Restart with --allow-writes"));
     }
-    if operation == "download_submit" {
+    if matches!(operation, "download_submit" | "download_pixiv_submit") {
+        let pixiv = operation == "download_pixiv_submit";
         let request = input["request_id"]
             .as_str()
             .filter(|s| !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control))
             .ok_or_else(|| fail("request_id required"))?;
-        let collection = input["collection_id"]
+        let scope = input[if pixiv { "user_id" } else { "collection_id" }]
             .as_i64()
             .filter(|n| *n > 0)
-            .ok_or_else(|| fail("Existing collection_id required"))?;
+            .ok_or_else(|| {
+                fail(if pixiv {
+                    "Positive Pixiv user_id required"
+                } else {
+                    "Existing collection_id required"
+                })
+            })?;
         let side = input["minimum_short_side"].as_u64().unwrap_or(800);
         if side > u64::from(u32::MAX) || !bdm_domain::ingest::valid_minimum_short_side(side as u32)
         {
             return Err(fail("Invalid minimum_short_side"));
         }
-        let source = input["source"].as_str().unwrap_or("automatic");
+        let pixiv_max_works = if pixiv && !input["max_works"].is_null() {
+            Some(
+                input["max_works"]
+                    .as_u64()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| fail("max_works must be a positive integer"))?,
+            )
+        } else {
+            None
+        };
+        let source = if pixiv {
+            "pixiv"
+        } else {
+            input["source"].as_str().unwrap_or("automatic")
+        };
         let mode = match source {
             "automatic" => DownloadSource::Automatic,
             "danbooru" => DownloadSource::Danbooru,
             "safebooru" | "safedanbooru" => DownloadSource::Safebooru,
             "gelbooru" => DownloadSource::Gelbooru,
+            "pixiv" if pixiv => DownloadSource::Pixiv,
             _ => return Err(fail("source: automatic/danbooru/safebooru/gelbooru")),
         };
         let source = if mode == DownloadSource::Safebooru {
@@ -82,38 +106,58 @@ pub(super) fn dispatch(
         } else {
             source
         };
+        let parameters = if pixiv {
+            json!([scope, side, source, pixiv_max_works])
+        } else {
+            json!([scope, side, source])
+        };
+        let fingerprint = format!("{:x}", Sha256::digest(parameters.to_string().as_bytes()));
+        if let Some(reply) = replay(&repo.connection, request, &fingerprint)? {
+            return Ok(reply);
+        }
+        let collection = if pixiv {
+            let existing = storage(repo.connection.query_row(
+                "SELECT id FROM collections WHERE provider='pixiv' AND source_tag_id=?1 AND category=1",
+                [scope], |row| row.get::<_, i64>(0),
+            ).optional())?;
+            match existing {
+                Some(id) => id,
+                None => {
+                    let mut artist =
+                        crate::pixiv::PixivProvider::new(scope, String::new(), None)?.artist()?;
+                    let saved = match repo.add(CollectionKind::Artist, &artist) {
+                        Err(bdm_ports::CatalogError::Changed) => {
+                            artist.name.push_str(&format!("_({scope})"));
+                            repo.add(CollectionKind::Artist, &artist)?
+                        }
+                        result => result?,
+                    };
+                    saved.record.id
+                }
+            }
+        } else {
+            scope
+        };
         let (tag, provider): (String, String) = storage(repo.connection.query_row(
             "SELECT tag,provider FROM collections WHERE id=?1",
             [collection],
             |r| Ok((r.get(0)?, r.get(1)?)),
         ))?;
-        let provider = mode.initial_provider(if provider == "gelbooru" {
-            SourceProvider::Gelbooru
-        } else {
-            SourceProvider::Danbooru
-        });
-        let fingerprint = format!(
-            "{:x}",
-            Sha256::digest(json!([collection, side, source]).to_string().as_bytes())
-        );
+        let provider = match provider.as_str() {
+            "pixiv" if !pixiv => {
+                return Err(fail("Use download_pixiv_submit with the artist user_id"))
+            }
+            "pixiv" => SourceProvider::Pixiv,
+            "gelbooru" => SourceProvider::Gelbooru,
+            _ => SourceProvider::Danbooru,
+        };
+        let provider = mode.initial_provider(provider);
         let tx = storage(
             repo.connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate),
         )?;
-        if let Some((id, previous)) = storage(
-            tx.query_row(
-                "SELECT id,fingerprint FROM agent_downloads WHERE request_id=?1",
-                [request],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
-            )
-            .optional(),
-        )? {
-            if previous != fingerprint {
-                return Err(fail("request_id reused with changed arguments"));
-            }
-            return Ok(ServiceReply::success(
-                json!({"download_id":id,"replayed":true}),
-            ));
+        if let Some(reply) = replay(&tx, request, &fingerprint)? {
+            return Ok(reply);
         }
         storage(tx.execute(
             "INSERT INTO ingest_jobs(collection_id,metadata) VALUES(?1,'{}')",
@@ -121,6 +165,7 @@ pub(super) fn dispatch(
         ))?;
         let id = tx.last_insert_rowid();
         let job = IngestJob {
+            pixiv_max_works,
             id,
             collection_id: collection,
             tag,
@@ -152,7 +197,7 @@ pub(super) fn dispatch(
             &json!({"download_id":id,"state":"queued"}).to_string(),
         )?;
         return Ok(ServiceReply::success(
-            json!({"download_id":id,"state":"queued","next":{"operation":"jobs_tick","hint":"Daemon runs the existing downloader; network requests start only during execution."}}),
+            json!({"download_id":id,"collection_id":collection,"state":"queued","next":{"operation":"jobs_tick","hint":"Daemon runs the queued downloader."}}),
         ));
     }
     if operation == "download_control" {
@@ -164,6 +209,26 @@ pub(super) fn dispatch(
     }
 
     Err(fail("Unknown download operation"))
+}
+
+fn replay(
+    connection: &rusqlite::Connection,
+    request: &str,
+    fingerprint: &str,
+) -> Result<Option<ServiceReply>, IngestError> {
+    let existing = storage(connection.query_row(
+        "SELECT a.id,a.fingerprint,i.collection_id FROM agent_downloads a JOIN ingest_jobs i ON i.id=a.id WHERE a.request_id=?1",
+        [request], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)),
+    ).optional())?;
+    match existing {
+        Some((_, previous, _)) if previous != fingerprint => {
+            Err(fail("request_id reused with changed arguments"))
+        }
+        Some((id, _, collection)) => Ok(Some(ServiceReply::success(
+            json!({"download_id":id,"collection_id":collection,"replayed":true}),
+        ))),
+        None => Ok(None),
+    }
 }
 
 pub(super) fn tick(service: &AgentService, repo: &mut SqliteCatalog) -> Result<Value, IngestError> {
@@ -190,13 +255,17 @@ pub(super) fn tick(service: &AgentService, repo: &mut SqliteCatalog) -> Result<V
         scope.spawn(||{while !done.load(Ordering::Relaxed){
             if let Ok(db)=service.connection(false){
                 let state:Result<String,_>=db.connection.query_row("SELECT state FROM agent_downloads WHERE id=?1",[id],|r|r.get(0));
-                if state.as_deref()!=Ok("running"){cancel.store(true,Ordering::Relaxed);}
+                if matches!(state, Ok(ref state) if state != "running") || matches!(state,Err(rusqlite::Error::QueryReturnedNoRows)){cancel.store(true,Ordering::Relaxed);}
                 let _=db.connection.execute("UPDATE agent_downloads SET expires=?2 WHERE id=?1 AND state IN ('running','pausing')",params![id,now()+300]);
                 let _=db.connection.execute("UPDATE agent_daemon SET heartbeat=?2 WHERE id=1 AND pid=?1",params![std::process::id(),now()]);
             }
             std::thread::sleep(std::time::Duration::from_millis(250));
         }});
-        let result = {
+        let result = (|| {
+            if job.provider == SourceProvider::Pixiv {
+                let provider = crate::pixiv::PixivProvider::for_job(repo, &job, cancel.clone())?;
+                return bdm_application::ingest::run(&provider, repo, &mut job, &cancel, |_| {});
+            }
             let (dan, gel) = credentials(&service.settings.project_root);
             let dan: Box<dyn bdm_ports::MediaProvider> = match dan
                 .load()
@@ -234,7 +303,7 @@ pub(super) fn tick(service: &AgentService, repo: &mut SqliteCatalog) -> Result<V
                     }
                 },
             )
-        };
+        })();
         done.store(true, Ordering::Relaxed);
         result
     });

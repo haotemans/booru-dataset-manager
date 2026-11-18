@@ -131,6 +131,8 @@ pub struct IngestProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestJob {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pixiv_max_works: Option<u32>,
     #[serde(default)]
     pub provider: crate::sources::SourceProvider,
     #[serde(default)]

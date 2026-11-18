@@ -463,6 +463,7 @@ impl BdmApp {
                 .into_iter()
                 .enumerate()
                 .map(|(index, tag)| bdm_domain::ingest::IngestJob {
+                    pixiv_max_works: None,
                     provider: bdm_domain::sources::SourceProvider::Danbooru,
                     source_mode: bdm_domain::sources::DownloadSource::Automatic,
                     primary_before_id: None,

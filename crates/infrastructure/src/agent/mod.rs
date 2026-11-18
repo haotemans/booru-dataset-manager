@@ -142,7 +142,9 @@ fn operation_tool(operation: &str) -> &'static str {
         "job_plan" | "job_submit" | "jobs_list" | "job_status" | "job_control" | "jobs_tick" => {
             "bdm_job"
         }
-        "download_submit" | "download_status" | "download_control" => "bdm_download",
+        "download_submit" | "download_pixiv_submit" | "download_status" | "download_control" => {
+            "bdm_download"
+        }
         _ => "bdm_agent",
     }
 }
@@ -191,7 +193,7 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "Submit/control source downloads through existing collections; inspect progress by download_id. Safebooru is the General-only Danbooru entrance, with shared credentials/IDs and no unrestricted fallback. Network execution starts in the daemon/jobs_tick."
+        description = "Submit/control source downloads; inspect progress by download_id. For Pixiv use download_pixiv_submit with the numeric artist user_id and optional max_works. Safebooru is the General-only Danbooru entrance. The daemon/jobs_tick runs queued transfers."
     )]
     async fn bdm_download(&self, Parameters(args): Parameters<DownloadRequest>) -> CallToolResult {
         let request = json!(args);

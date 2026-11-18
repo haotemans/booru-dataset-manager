@@ -617,6 +617,7 @@ mod tests {
         crate::theme::setup(&ctx);
         let mut app = BdmApp::from_preferences(Preferences::default(), true, None);
         app.ingest.jobs = vec![bdm_domain::ingest::IngestJob {
+            pixiv_max_works: None,
             provider: bdm_domain::sources::SourceProvider::Danbooru,
             source_mode: bdm_domain::sources::DownloadSource::Automatic,
             primary_before_id: None,

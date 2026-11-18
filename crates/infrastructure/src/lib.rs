@@ -11,6 +11,7 @@ pub mod export;
 pub mod gelbooru;
 pub mod ingest;
 pub mod modelscope;
+pub mod pixiv;
 pub mod providers;
 pub mod visual;
 #[cfg(test)]

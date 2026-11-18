@@ -108,6 +108,7 @@ impl BdmApp {
         let credentials = match source {
             bdm_domain::sources::SourceProvider::Danbooru => self.saved_danbooru_credentials(),
             bdm_domain::sources::SourceProvider::Gelbooru => self.saved_gelbooru_credentials(),
+            bdm_domain::sources::SourceProvider::Pixiv => Ok(None),
         }
         .map_err(|error| error.to_string())?;
         let (sender, receiver) = mpsc::channel();
@@ -128,6 +129,10 @@ impl BdmApp {
                         ),
                         bdm_domain::sources::SourceProvider::Gelbooru => Box::new(
                             bdm_infrastructure::gelbooru::GelbooruProvider::new(credentials)
+                                .map_err(|e| e.to_string())?,
+                        ),
+                        bdm_domain::sources::SourceProvider::Pixiv => Box::new(
+                            bdm_infrastructure::pixiv::PixivProvider::new(0, String::new(), None)
                                 .map_err(|e| e.to_string())?,
                         ),
                     };

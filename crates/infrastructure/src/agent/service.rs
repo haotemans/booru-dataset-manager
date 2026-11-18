@@ -234,9 +234,10 @@ impl AgentService {
             "work_next" | "work_apply_view" | "work_finish" => {
                 super::composite::dispatch(self, &mut repo, operation, input)
             }
-            "download_submit" | "download_control" | "download_status" => {
-                super::downloads::dispatch(self, &mut repo, operation, input)
-            }
+            "download_submit"
+            | "download_pixiv_submit"
+            | "download_control"
+            | "download_status" => super::downloads::dispatch(self, &mut repo, operation, input),
             "bucket_plan" => {
                 let id = input["media_id"]
                     .as_i64()
