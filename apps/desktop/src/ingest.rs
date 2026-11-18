@@ -798,6 +798,10 @@ impl BdmApp {
     }
 
     pub fn poll_ingest(&mut self, ctx: &egui::Context) {
+        self.poll_ingest_at(ctx, std::time::Instant::now());
+    }
+
+    pub(crate) fn poll_ingest_at(&mut self, ctx: &egui::Context, now: std::time::Instant) {
         let Some(receiver) = &self.ingest.pending else {
             return;
         };
@@ -827,13 +831,12 @@ impl BdmApp {
         self.ingest.refresh_pending |= changed;
         let refresh = done
             || (self.ingest.refresh_pending
-                && self
-                    .ingest
-                    .last_refresh
-                    .is_none_or(|last| last.elapsed() >= std::time::Duration::from_millis(350)));
+                && self.ingest.last_refresh.is_none_or(|last| {
+                    now.saturating_duration_since(last) >= std::time::Duration::from_millis(350)
+                }));
         if refresh {
             self.ingest.refresh_pending = false;
-            self.ingest.last_refresh = Some(std::time::Instant::now());
+            self.ingest.last_refresh = Some(now);
             if let Err(error) = self.reload_media() {
                 self.ingest.error = Some(error);
             }

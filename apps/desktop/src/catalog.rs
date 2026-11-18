@@ -912,7 +912,9 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         app.pending_for_test(receiver);
         sender.send(job.clone()).unwrap();
-        app.poll_ingest(&egui::Context::default());
+        let now = std::time::Instant::now();
+        let ctx = egui::Context::default();
+        app.poll_ingest_at(&ctx, now);
         assert_eq!(app.library.artists.len(), 2);
         assert_eq!(app.library.collections(Page::Artist).len(), 3);
         assert!(app
@@ -948,10 +950,10 @@ mod tests {
         )
         .unwrap();
         sender.send(job).unwrap();
-        app.poll_ingest(&egui::Context::default());
+        app.poll_ingest_at(&ctx, now);
         assert_eq!(app.library.artists.len(), 2);
         drop(sender);
-        app.poll_ingest(&egui::Context::default());
+        app.poll_ingest_at(&ctx, now);
         assert_eq!(app.library.artists.len(), 3);
         app.navigate(Page::Artist);
         app.context = Some(app.library.artists[0].id);
