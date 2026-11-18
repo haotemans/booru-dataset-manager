@@ -279,13 +279,21 @@ impl PixivProvider {
 
 fn original_url(raw: &str, page_id: i64) -> Result<(Url, String), IngestError> {
     let url = Url::parse(raw).map_err(|_| IngestError::InvalidUrl)?;
-    let expected = format!("{}_p{}", page_id / PAGE_FACTOR, page_id % PAGE_FACTOR);
     let (stem, ext) = url
         .path()
         .rsplit('/')
         .next()
         .and_then(|name| name.rsplit_once('.'))
         .ok_or(IngestError::InvalidUrl)?;
+    let (artwork, page) = stem.rsplit_once("_p").ok_or(IngestError::InvalidUrl)?;
+    let expected_artwork = (page_id / PAGE_FACTOR).to_string();
+    // Pixiv publishes both historic ID-only names and newer ID-digest names.
+    let artwork_matches = artwork == expected_artwork
+        || artwork.split_once('-').is_some_and(|(id, digest)| {
+            id == expected_artwork
+                && digest.len() == 32
+                && digest.bytes().all(|b| b.is_ascii_hexdigit())
+        });
     if url.scheme() != "https"
         || url.host_str() != Some("i.pximg.net")
         || url.port().is_some()
@@ -294,7 +302,8 @@ fn original_url(raw: &str, page_id: i64) -> Result<(Url, String), IngestError> {
         || url.query().is_some()
         || url.fragment().is_some()
         || !url.path().starts_with("/img-original/img/")
-        || stem != expected
+        || !artwork_matches
+        || page != (page_id % PAGE_FACTOR).to_string()
     {
         return Err(IngestError::InvalidUrl);
     }
@@ -441,6 +450,9 @@ mod tests {
             "png"
         );
         assert!(original_url(original, 123 * PAGE_FACTOR + 1).is_err());
+        let with_digest = original.replace("123_p2", "123-868c126d5cd6603cb1c1e292f80922e6_p2");
+        assert!(original_url(&with_digest, 123 * PAGE_FACTOR + 2).is_ok());
+        assert!(original_url(&with_digest, 12 * PAGE_FACTOR + 2).is_err());
         assert!(original_url(
             &original.replace("i.pximg.net", "i.pximg.net.example.org"),
             123 * PAGE_FACTOR + 2
