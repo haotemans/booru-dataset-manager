@@ -20,6 +20,7 @@ mod paths;
 mod redownload;
 mod review;
 mod review_ui;
+mod shared_catalog;
 mod similarity_review;
 mod sources;
 mod tags;

@@ -1,8 +1,9 @@
 use bdm_config::{ModelScopeConfig, ModelScopeSite};
 use std::{
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
 };
 
 pub enum Transfer {
@@ -21,48 +22,8 @@ pub fn transfer(
     site: ModelScopeSite,
     transfer: Transfer,
 ) -> Result<TransferResult, String> {
-    let script = root.join("scripts/modelscope_backup.py");
-    if !script.is_file() {
-        return Err("找不到项目自带的魔搭备份脚本。请从完整 BDM 目录运行。".into());
-    }
-    let candidates = if cfg!(windows) {
-        [
-            "target/modelscope-mcp/venv/Scripts/python.exe",
-            "runtime/python.exe",
-        ]
-    } else {
-        [
-            "target/modelscope-mcp/venv/bin/python",
-            "runtime/bin/python",
-        ]
-    };
-    let python = std::env::var_os("BDM_MODELSCOPE_PYTHON")
-        .map(PathBuf::from)
-        .or_else(|| {
-            candidates
-                .into_iter()
-                .map(|path| root.join(path))
-                .find(|path| path.is_file())
-        })
-        .unwrap_or_else(|| PathBuf::from("python"));
-    let mut command = Command::new(python);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    command
-        .arg(script)
-        .arg("--json")
-        .arg("--config")
-        .arg(root.join("config/modelscope.json"))
-        .current_dir(root)
-        .env("MODELSCOPE_BACKUP_SITE", site.endpoint())
-        .env("PYTHONUTF8", "1")
-        .env_remove("MODELSCOPE_TOKEN")
-        .env_remove("MODELSCOPE_DATASET_ID")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null());
+    let mut command = python_command(root, site, "modelscope_backup.py")?;
+    command.arg("--json").stdin(Stdio::null());
     match transfer {
         Transfer::Upload { data, library } => {
             command.arg("backup").arg("--data").arg(&data);
@@ -92,10 +53,93 @@ pub fn transfer(
             command.arg("receive").arg(directory);
         }
     }
-    let output = command.output().map_err(|error| match error.kind() {
+    let output = command.output().map_err(start_error)?;
+    read_response(output)
+}
+
+pub fn shared_catalog<T: serde::de::DeserializeOwned>(
+    root: &Path,
+    config: &ModelScopeConfig,
+    workspace: &Path,
+    action: &str,
+    arguments: &serde_json::Value,
+) -> Result<T, String> {
+    let mut child = python_command(
+        root,
+        config.site.unwrap_or_default(),
+        "modelscope_catalog.py",
+    )?
+    .arg("--workspace")
+    .arg(workspace)
+    .args(["--view", action, "-"])
+    .env("MODELSCOPE_DATASET_ID", &config.dataset_id)
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .spawn()
+    .map_err(start_error)?;
+    let mut input = child.stdin.take().expect("piped Python stdin");
+    let request = arguments.to_string();
+    let written = input.write_all(request.as_bytes());
+    drop(input);
+    let output = child.wait_with_output().map_err(start_error)?;
+    if output.status.success() && written.is_err() {
+        return Err("无法发送魔搭共享图库请求。".into());
+    }
+    read_response(output)
+}
+
+fn python_command(root: &Path, site: ModelScopeSite, script: &str) -> Result<Command, String> {
+    let script = root.join("scripts").join(script);
+    if !script.is_file() {
+        return Err("找不到项目自带的魔搭脚本。请从完整 BDM 目录运行。".into());
+    }
+    let candidates = if cfg!(windows) {
+        [
+            "target/modelscope-mcp/venv/Scripts/python.exe",
+            "runtime/python.exe",
+        ]
+    } else {
+        [
+            "target/modelscope-mcp/venv/bin/python",
+            "runtime/bin/python",
+        ]
+    };
+    let python = std::env::var_os("BDM_MODELSCOPE_PYTHON")
+        .map(PathBuf::from)
+        .or_else(|| {
+            candidates
+                .into_iter()
+                .map(|path| root.join(path))
+                .find(|path| path.is_file())
+        })
+        .unwrap_or_else(|| PathBuf::from("python"));
+    let mut command = Command::new(python);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+        .arg(script)
+        .arg("--config")
+        .arg(root.join("config/modelscope.json"))
+        .current_dir(root)
+        .env("MODELSCOPE_BACKUP_SITE", site.endpoint())
+        .env("PYTHONUTF8", "1")
+        .env_remove("MODELSCOPE_TOKEN")
+        .env_remove("MODELSCOPE_DATASET_ID")
+        .stderr(Stdio::null());
+    Ok(command)
+}
+
+fn start_error(error: io::Error) -> String {
+    match error.kind() {
         io::ErrorKind::NotFound => "找不到魔搭所需的 Python 环境。".to_owned(),
-        _ => "无法启动魔搭备份脚本。".to_owned(),
-    })?;
+        _ => "无法启动魔搭脚本。".to_owned(),
+    }
+}
+
+fn read_response<T: serde::de::DeserializeOwned>(output: Output) -> Result<T, String> {
     if output.status.success() {
         serde_json::from_slice(&output.stdout).map_err(|_| "魔搭脚本返回了无法识别的结果。".into())
     } else {

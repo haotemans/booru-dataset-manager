@@ -62,6 +62,8 @@ For a dataset under `www.modelscope.ai`, add `"env": {"MODELSCOPE_BACKUP_SITE": 
 
 `bdm_modelscope_status` reports the configured destination and whether a token and source catalog are available. `bdm_modelscope_configure` saves the dataset ID. `bdm_modelscope_transfer` takes `action` set to `check`, `backup`, or `restore`. Finish editing and download jobs before starting a backup. Restore uses the latest verified backup by default and accepts a historical `backup_id`.
 
+Use `bdm_modelscope_catalog` for the shared Git catalog. Install Git on each machine. The tool accepts an `action` and an optional `arguments` object. For example, call `pull` to get metadata and `original` with `{"entry_id":"…"}` to download just one original. `add`, `import`, `edit`, and `delete` stage local changes. Use `commit` with `{"message":"…"}` and then `push` to publish them. See the [shared catalog workflow](../features/MODELSCOPE_BACKUP.md#shared-git-catalog).
+
 The default source is `<project>/data`, and the default restore destination is the new directory `<project>/data-restored`. To use a different source or destination, add `--data` or `--restore-to` with the absolute path to the server's `args`. Repeat `--library` for additional source library roots. After restoring, point the regular BDM MCP server's `--catalog` and `--library-root` to the restored catalog and library directories, then refresh it. See [backup and restore details](../features/MODELSCOPE_BACKUP.md).
 
 ## Project annotation skill

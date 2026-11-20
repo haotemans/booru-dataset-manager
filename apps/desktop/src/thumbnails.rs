@@ -13,6 +13,7 @@ struct Request {
     id: usize,
     ticket: u64,
     path: PathBuf,
+    original: bool,
 }
 struct Reply {
     id: usize,
@@ -41,6 +42,14 @@ impl Thumbnails {
     }
 
     pub fn request(&mut self, ctx: &egui::Context, id: usize, path: PathBuf) {
+        self.request_image(ctx, id, path, false);
+    }
+
+    pub fn request_preview(&mut self, ctx: &egui::Context, id: usize, path: PathBuf) {
+        self.request_image(ctx, id, path, true);
+    }
+
+    fn request_image(&mut self, ctx: &egui::Context, id: usize, path: PathBuf, original: bool) {
         if self.pending.contains_key(&id) || self.failed.contains(&id) {
             return;
         }
@@ -52,7 +61,7 @@ impl Thumbnails {
                 .name("thumbnail-decoder".into())
                 .spawn(move || {
                     while let Ok(request) = requests.recv() {
-                        let image = decode(&request.path);
+                        let image = decode(&request.path, request.original);
                         if results
                             .send(Reply {
                                 id: request.id,
@@ -75,13 +84,12 @@ impl Thumbnails {
         }
         self.clock += 1;
         let ticket = self.clock;
-        match self
-            .worker
-            .as_ref()
-            .unwrap()
-            .sender
-            .try_send(Request { id, ticket, path })
-        {
+        match self.worker.as_ref().unwrap().sender.try_send(Request {
+            id,
+            ticket,
+            path,
+            original,
+        }) {
             Ok(()) => {
                 self.pending.insert(id, ticket);
             }
@@ -141,12 +149,13 @@ impl Thumbnails {
     }
 }
 
-fn decode(path: &std::path::Path) -> Option<egui::ColorImage> {
+fn decode(path: &std::path::Path, original: bool) -> Option<egui::ColorImage> {
     let mut reader = image::ImageReader::open(path).ok()?;
     let mut limits = image::Limits::default();
-    limits.max_image_width = Some(4096);
-    limits.max_image_height = Some(4096);
-    limits.max_alloc = Some(16 * 1024 * 1024);
+    let side = if original { 16_384 } else { 4096 };
+    limits.max_image_width = Some(side);
+    limits.max_image_height = Some(side);
+    limits.max_alloc = Some(if original { 128 } else { 16 } * 1024 * 1024);
     reader.limits(limits);
     let decoded = reader.decode().ok()?;
     let decoded = if decoded.width() > 384 || decoded.height() > 384 {

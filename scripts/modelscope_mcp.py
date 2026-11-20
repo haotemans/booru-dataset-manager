@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import sys
 from threading import Lock
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -17,6 +17,7 @@ from modelscope_backup import (
     BackupError, DATABASE, DEFAULT_CONFIG, ModelScope, configured_dataset, configured_site,
     restore, save_settings, windows_token, write_backup,
 )
+from modelscope_catalog import run_request
 
 
 def server(config, source, roots, destination):
@@ -102,6 +103,35 @@ def server(config, source, roots, destination):
         if backup_id is not None and action != 'restore':
             return {'error': 'backup_id is only used by restore.'}
         return await asyncio.to_thread(transfer, action, backup_id)
+
+    def catalog(action, arguments):
+        if not transfer_lock.acquire(blocking=False):
+            return {'error': 'A ModelScope operation is in progress.'}
+        try:
+            with redirect_stdout(sys.stderr):
+                return run_request(config, source / 'modelscope-catalog', action, arguments or {})
+        except BackupError as error:
+            return {'error': str(error)}
+        except Exception as error:
+            return {'error': f'ModelScope catalog operation failed ({type(error).__name__}).'}
+        finally:
+            transfer_lock.release()
+
+    @mcp.tool(structured_output=True)
+    async def bdm_modelscope_catalog(
+        action: Literal['status', 'list', 'add', 'edit', 'import', 'delete', 'commit', 'pull',
+                        'push', 'history', 'inspect', 'original', 'clear-cache', 'resolve', 'revert'],
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Work with the Git-versioned private gallery. Pull downloads metadata, original fetches one file.
+
+        add takes file (local original), optional name, labels, caption, collection and review.
+        edit takes entry_id and any of those fields. import takes a catalog path and media_id.
+        delete, original and clear-cache take entry_id. list takes optional query. commit takes message.
+        resolve takes entry_id and side (local or remote).
+        inspect and revert take commit_id. pull, push, history and status take no arguments.
+        """
+        return await asyncio.to_thread(catalog, action, arguments)
 
     return mcp
 

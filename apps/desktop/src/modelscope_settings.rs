@@ -1,6 +1,7 @@
 use crate::{
     app::BdmApp,
     paths,
+    shared_catalog::SharedCatalog,
     theme::{card, MUTED},
     widgets::setting_header,
 };
@@ -19,6 +20,7 @@ use std::{
 
 #[derive(Default)]
 pub struct ModelScopeSettings {
+    pub shared: SharedCatalog,
     dataset: String,
     site: ModelScopeSite,
     token: String,
@@ -243,6 +245,20 @@ impl BdmApp {
             });
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(enabled, egui::Button::new("打开共享图库"))
+                    .clicked()
+                {
+                    let root = paths::project_root();
+                    match settings.save(&root).and_then(|_| {
+                        let mut config = ModelScopeConfig::new(&settings.saved_dataset)?;
+                        config.site = Some(settings.site);
+                        Ok(config)
+                    }) {
+                        Ok(config) => settings.shared.open(ui.ctx(), config),
+                        Err(error) => settings.error = Some(error),
+                    }
+                }
                 if ui
                     .add_enabled(enabled && idle, egui::Button::new("A 机：上传本机图库"))
                     .on_disabled_hover_text("等当前图库任务结束后再上传。")

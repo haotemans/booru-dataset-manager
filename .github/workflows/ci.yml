@@ -20,6 +20,15 @@ jobs:
       - run: cargo test --workspace --locked --no-fail-fast
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo build --locked -p bdm-desktop -p bdm-agent
+  check-modelscope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'filelock>=3,<4' 'mcp>=1.26,<2'
+      - run: python -m unittest discover -s tests -p 'test_modelscope*.py' -v
   build-windows:
     runs-on: windows-latest
     env:
@@ -29,11 +38,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p bdm-desktop -p bdm-agent
-      - name: Upload Windows executable
+      - name: Prepare Windows package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path target/windows-package/scripts
+          Copy-Item -Path target/release/bdm-desktop.exe,target/release/bdm.exe -Destination target/windows-package/
+          Copy-Item -Path scripts/modelscope_backup.py,scripts/modelscope_catalog.py,scripts/modelscope_mcp.py -Destination target/windows-package/scripts/
+          New-Item -ItemType File -Path target/windows-package/portable.flag
+      - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: bdm-desktop-windows
-          path: |
-            target/release/bdm-desktop.exe
-            target/release/bdm.exe
+          path: target/windows-package/
           if-no-files-found: error

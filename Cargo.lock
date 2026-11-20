@@ -190,6 +190,7 @@ dependencies = [
  "md-5",
  "rusqlite",
  "serde",
+ "serde_json",
  "tempfile",
  "url",
 ]

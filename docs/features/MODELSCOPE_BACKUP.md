@@ -1,5 +1,24 @@
 # ModelScope backup and restore
 
+## Shared Git catalog
+
+In BDM, open **系统设置 → 魔搭备份 → 打开共享图库**. Use the same private dataset on both machines. Install Git and use the configured Python runtime or a Python interpreter with `modelscope-hub>=0.7.1,<1`, `filelock`, and `pywin32-ctypes` on Windows. A read token can pull and download. A write token is needed to push.
+
+1. Click **拉取** to get the catalog and its history. Entries display before any images are downloaded. Select an entry and click **打开原图** to download and verify just that original. BDM generates its preview locally.
+2. Add an original by file path, or enter a local BDM media ID and click **导入已验证原图**. Import checks the source checksum, including for images whose working copies were edited. Edit names, labels, captions, collections or the local review decision in the shared catalog. **保存到本地** and **删除条目** stage changes in the local catalog.
+3. Enter a message and click **提交** to record the staged changes. Then click **推送** to publish. An unreadable or rejected original blocks publishing the commit and keeps it available locally. If someone pushed first, pull and merge. BDM shows both versions of conflicting entries so you can choose a version and commit the resolution.
+4. Use **提交历史** to inspect recent commits or create a new commit that reverses one. Removing a catalog entry retains its historical original.
+
+The real Git branch `bdm-catalog` holds the shared `entries/<id>.json` files and their history. The existing dataset revision `master` holds original image bytes under `bdm/catalog-originals/<first-two-hash-characters>/<sha256>.<extension>`. BDM verifies originals referenced by unpublished commits before performing a regular Git push. Local Git state and downloaded originals are stored under `data/modelscope-catalog/`.
+
+```powershell
+python scripts/modelscope_catalog.py pull
+python scripts/modelscope_catalog.py list
+python scripts/modelscope_catalog.py status
+```
+
+The existing A/B buttons transfer a complete backup with the format described in the next section.
+
 ## Windows transfer between two computers
 
 Open **系统设置 → 魔搭备份** in BDM on both computers. Select the same ModelScope site and enter the same private dataset ID. Save a write-capable Access Token on A and a token with dataset read access on B. The Windows Credential Manager stores the token. Leave the token field blank to reuse a saved token.

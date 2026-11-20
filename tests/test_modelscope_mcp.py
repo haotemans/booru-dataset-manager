@@ -53,6 +53,7 @@ modelscope_mcp.main()
                 listed = await session.list_tools()
                 self.assertEqual({tool.name for tool in listed.tools}, {
                     'bdm_modelscope_status', 'bdm_modelscope_configure', 'bdm_modelscope_transfer',
+                    'bdm_modelscope_catalog',
                 })
                 configured = await session.call_tool('bdm_modelscope_configure', {'dataset_id': 'owner/data'})
                 self.assertTrue(configured.structuredContent['saved'])
@@ -60,6 +61,8 @@ modelscope_mcp.main()
                 status = await session.call_tool('bdm_modelscope_status', {})
                 self.assertTrue(status.structuredContent['token_available'])
                 self.assertNotIn('synthetic-mcp-test-token', str(status))
+                catalog = await session.call_tool('bdm_modelscope_catalog', {'action': 'list'})
+                self.assertEqual(catalog.structuredContent, {'entries': []})
                 with self.assertNoLogs('mcp.client.stdio', level=logging.ERROR):
                     backup = await session.call_tool('bdm_modelscope_transfer', {'action': 'backup'})
                 self.assertEqual(backup.structuredContent['status'], 'verified')

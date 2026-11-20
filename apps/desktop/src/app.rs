@@ -1158,6 +1158,7 @@ impl eframe::App for BdmApp {
         }
         crate::window_chrome::show(ctx);
         self.shell(ctx);
+        self.modelscope.shared.show(ctx);
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         if self.capture_dir.is_none() {
