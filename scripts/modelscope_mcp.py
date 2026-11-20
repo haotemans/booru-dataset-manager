@@ -14,7 +14,7 @@ from typing import Literal
 from mcp.server.fastmcp import FastMCP
 
 from modelscope_backup import (
-    BackupError, DATABASE, DEFAULT_CONFIG, ModelScope, configured_dataset,
+    BackupError, DATABASE, DEFAULT_CONFIG, ModelScope, configured_dataset, configured_site,
     restore, save_settings, windows_token, write_backup,
 )
 
@@ -72,7 +72,8 @@ def server(config, source, roots, destination):
             token = token_for(dataset)
             if not token or not token.strip():
                 raise BackupError('Save an Access Token using modelscope_backup.py --repo owner/name configure in a local terminal.')
-            remote = ModelScope(dataset, 'master', token.strip())
+            site = os.getenv('MODELSCOPE_BACKUP_SITE') or configured_site(config)
+            remote = ModelScope(dataset, 'master', token.strip(), **({'site': site} if site else {}))
             if action == 'backup':
                 # The SDK prints commit progress. MCP stdio reserves stdout for JSON-RPC.
                 with redirect_stdout(sys.stderr):

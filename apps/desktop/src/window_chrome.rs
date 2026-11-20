@@ -41,7 +41,7 @@ pub fn show(ctx: &egui::Context) {
             ui.painter().text(
                 pos2(rect.left() + 44.0, rect.center().y),
                 Align2::LEFT_CENTER,
-                "Booru Dataset Manager",
+                crate::paths::window_title(),
                 medium(13.0),
                 INK,
             );

@@ -1,5 +1,6 @@
 import json
 import os
+from importlib.util import find_spec
 from pathlib import Path
 import sqlite3
 import sys
@@ -153,6 +154,29 @@ class ModelScopeBackupTests(unittest.TestCase):
         with self.assertRaisesRegex(backup.BackupError, 'readback failed'):
             backup.restore(destination, self.remote, None)
         self.assertFalse(destination.exists())
+
+    @unittest.skipUnless(find_spec('filelock'), 'Optional ModelScope SDK dependency is required')
+    def test_receive_reuses_a_version_and_preserves_previous_local_edits(self):
+        self.remote.site = 'modelscope.ai'
+        self.remote.repo = 'owner/data'
+        inbox = self.root / 'received'
+        first = self.write()
+        version, directory = backup.receive_latest(inbox, self.remote)
+        self.assertEqual(version, first)
+        self.assertTrue((directory / backup.DATABASE).is_file())
+        local_edit = directory / 'local-edit.txt'
+        local_edit.write_text('keep', encoding='utf-8')
+        self.assertEqual(backup.receive_latest(inbox, self.remote), (first, directory))
+
+        second = self.write()
+        self.remote.fail_manifest = True
+        with self.assertRaisesRegex(backup.BackupError, 'readback failed'):
+            backup.receive_latest(inbox, self.remote)
+        self.remote.fail_manifest = False
+        version, new_directory = backup.receive_latest(inbox, self.remote)
+        self.assertEqual(version, second)
+        self.assertNotEqual(new_directory, directory)
+        self.assertEqual(local_edit.read_text(encoding='utf-8'), 'keep')
 
     def test_snapshot_removes_cached_and_deleted_lease_tokens(self):
         jobs = (PROJECT / 'crates/infrastructure/src/agent/jobs.rs').read_text(encoding='utf-8')

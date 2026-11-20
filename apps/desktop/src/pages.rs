@@ -361,6 +361,8 @@ impl BdmApp {
     }
 
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
+        self.modelscope_settings_card(ui);
+        ui.add_space(16.0);
         self.gelbooru_settings_card(ui);
         ui.add_space(16.0);
         egui::CollapsingHeader::new("Danbooru 来源设置")
@@ -530,46 +532,43 @@ impl BdmApp {
             }
         });
         ui.add_space(16.0);
-        ui.columns(2, |cols| {
-            card().show(&mut cols[0], |ui| {
-                ui.set_width(ui.available_width());
-                section(ui, "视觉模型", "DINOv3");
-                ui.add_space(12.0);
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section(ui, "视觉模型", "DINOv3");
+            ui.add_space(12.0);
 
-                ui.add_space(12.0);
-                ui.label(RichText::new("模型目录").size(13.0));
-                ui.add_sized(
-                    [ui.available_width(), 36.0],
-                    egui::TextEdit::singleline(&mut self.model_draft)
-                        .hint_text("默认跟随托管根目录 models/")
-                        .margin(vec2(10.0, 9.0)),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("保存").clicked() {
-                        let path = self.model_draft.trim();
-                        if path.is_empty() || std::path::Path::new(path).is_absolute() {
-                            self.prefs.model_path = path.into();
-                            self.notify(ui.ctx(), "模型目录偏好已保存。");
-                        } else {
-                            self.notify(ui.ctx(), "模型目录需要使用绝对路径。");
-                        }
+            ui.add_space(12.0);
+            ui.label(RichText::new("模型目录").size(13.0));
+            ui.add_sized(
+                [ui.available_width(), 36.0],
+                egui::TextEdit::singleline(&mut self.model_draft)
+                    .hint_text("默认跟随托管根目录 models/")
+                    .margin(vec2(10.0, 9.0)),
+            );
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("保存").clicked() {
+                    let path = self.model_draft.trim();
+                    if path.is_empty() || std::path::Path::new(path).is_absolute() {
+                        self.prefs.model_path = path.into();
+                        self.notify(ui.ctx(), "模型目录偏好已保存。");
+                    } else {
+                        self.notify(ui.ctx(), "模型目录需要使用绝对路径。");
                     }
-                    if ui
-                        .add_enabled(
-                            !self.workflow_active() && !self.demo && !self.is_capture(),
-                            egui::Button::new("下载模型"),
-                        )
-                        .clicked()
-                    {
-                        if let Err(e) = self.start_model_download(ui.ctx()) {
-                            self.workflows.error = Some(e);
-                        }
+                }
+                if ui
+                    .add_enabled(
+                        !self.workflow_active() && !self.demo && !self.is_capture(),
+                        egui::Button::new("下载模型"),
+                    )
+                    .clicked()
+                {
+                    if let Err(e) = self.start_model_download(ui.ctx()) {
+                        self.workflows.error = Some(e);
                     }
-                    ui.label(self.model_directory().display().to_string());
-                });
-                ui.add_space(5.0);
+                }
+                ui.label(self.model_directory().display().to_string());
             });
-            self.modelscope_settings_card(&mut cols[1]);
+            ui.add_space(5.0);
         });
         ui.add_space(16.0);
         card().show(ui, |ui| {

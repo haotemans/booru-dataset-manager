@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+from contextlib import closing, nullcontext, redirect_stdout
 from datetime import datetime, timezone
 from getpass import getpass, GetPassWarning
+from hashlib import sha256
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -33,17 +34,33 @@ class BackupError(Exception):
     pass
 
 
-def configured_dataset(path):
+def read_settings(path):
     try:
         value = json.loads(path.read_text(encoding='utf-8-sig'))
     except FileNotFoundError:
-        return None
+        return {}
     except (OSError, ValueError):
         raise BackupError(f'Cannot read the BDM ModelScope configuration: {path}') from None
-    dataset = value.get('dataset_id') if isinstance(value, dict) else None
+    if not isinstance(value, dict) or 'dataset_id' not in value:
+        raise BackupError(f'Invalid dataset_id in the BDM ModelScope configuration: {path}')
+    return value
+
+
+def configured_dataset(path):
+    settings = read_settings(path)
+    if not settings:
+        return None
+    dataset = settings['dataset_id']
     if not isinstance(dataset, str) or not valid_dataset(dataset.strip()):
         raise BackupError(f'Invalid dataset_id in the BDM ModelScope configuration: {path}')
     return dataset.strip()
+
+
+def configured_site(path):
+    site = read_settings(path).get('site')
+    if site not in (None, 'modelscope.cn', 'modelscope.ai'):
+        raise BackupError('Invalid ModelScope site in the BDM settings.')
+    return site
 
 
 def valid_dataset(repo):
@@ -100,12 +117,19 @@ def save_settings(path, repo, token=None):
             })
         except pywintypes.error:
             raise BackupError('Could not save the token in Windows Credential Manager.') from None
+    settings = {'dataset_id': repo}
+    try:
+        site = configured_site(path)
+    except BackupError:
+        site = None
+    if site:
+        settings['site'] = site
     path.parent.mkdir(parents=True, exist_ok=True)
     pending = NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False)
     scratch = Path(pending.name)
     try:
         with pending:
-            json.dump({'dataset_id': repo}, pending, indent=2)
+            json.dump(settings, pending, indent=2)
             pending.write('\n')
         scratch.replace(path)
     finally:
@@ -127,11 +151,11 @@ def object_key(info):
 
 
 class ModelScope:
-    def __init__(self, repo, revision, token):
+    def __init__(self, repo, revision, token, *, site=None):
         from modelscope_hub import HubApi
         from modelscope_hub.errors import FileSizeMismatchError, NotExistError
 
-        site = os.getenv('MODELSCOPE_BACKUP_SITE', 'modelscope.cn')
+        site = site or os.getenv('MODELSCOPE_BACKUP_SITE', 'modelscope.cn')
         endpoints = {
             'modelscope.cn': 'https://modelscope.cn',
             'modelscope.ai': 'https://www.modelscope.ai',
@@ -404,20 +428,32 @@ def relocate_catalog(stage, destination, manifest, entries):
         catalog_version(db)
 
 
-def restore(destination, remote, backup_id):
+def latest_backup(remote):
+    with TemporaryDirectory(prefix='bdm-modelscope-latest-') as tmp:
+        pointer = Path(tmp) / LATEST
+        remote.fetch(LATEST, pointer)
+        try:
+            latest = json.loads(pointer.read_text(encoding='utf-8'))
+            backup_id, info = latest['id'], latest['manifest']
+            if (not BACKUP_ID.fullmatch(backup_id) or not HASH.fullmatch(info['sha256'])
+                    or type(info['size']) is not int or info['size'] < 1):
+                raise ValueError('invalid pointer')
+            return backup_id, info
+        except (KeyError, TypeError, ValueError):
+            raise BackupError('The latest backup pointer is invalid.') from None
+
+
+def restore(destination, remote, backup_id, *, manifest_info=None):
     if destination.exists():
         raise BackupError('Restore requires a new destination directory.')
+    if backup_id is None:
+        backup_id, manifest_info = latest_backup(remote)
+    if not BACKUP_ID.fullmatch(backup_id):
+        raise BackupError('Invalid backup identifier.')
     with TemporaryDirectory(prefix='.modelscope-restore-', dir=destination.parent) as tmp:
         scratch = Path(tmp)
-        info = None
-        if backup_id is None:
-            remote.fetch(LATEST, scratch / LATEST)
-            latest = json.loads((scratch / LATEST).read_text(encoding='utf-8'))
-            backup_id, info = latest['id'], latest['manifest']
-        if not BACKUP_ID.fullmatch(backup_id):
-            raise BackupError('Invalid backup identifier.')
         manifest_path = scratch / 'backup.json'
-        remote.fetch(f'backups/{backup_id}/backup.json', manifest_path, info)
+        remote.fetch(f'backups/{backup_id}/backup.json', manifest_path, manifest_info)
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         entries = validated_entries(manifest, backup_id)
         if max(entry['size'] for entry in entries.values()) + sum(
@@ -437,11 +473,31 @@ def restore(destination, remote, backup_id):
     return backup_id
 
 
+def receive_latest(directory, remote):
+    from filelock import FileLock, Timeout
+
+    version, info = latest_backup(remote)
+    namespace = sha256(f'{remote.site}/{remote.repo}'.encode()).hexdigest()[:16]
+    inbox = directory / namespace
+    inbox.mkdir(parents=True, exist_ok=True)
+    destination = inbox / version
+    try:
+        with FileLock(inbox / '.receive.lock', timeout=0):
+            if not destination.exists():
+                restore(destination, remote, version, manifest_info=info)
+            elif not (destination / DATABASE).is_file() or not (destination / 'library').is_dir():
+                raise BackupError(f'The local copy of this version is incomplete: {destination}')
+    except Timeout:
+        raise BackupError('Another BDM window is already receiving this dataset.') from None
+    return version, destination
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', default=os.getenv('MODELSCOPE_DATASET_ID'), help='Private owner/name')
     parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG, help='BDM ModelScope settings file')
     parser.add_argument('--revision', default='master')
+    parser.add_argument('--json', action='store_true', help='Emit a single JSON result')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('configure', help='Set the dataset and save a hidden token in Windows Credential Manager')
     commands.add_parser('check', help='Verify access and private visibility')
@@ -451,12 +507,27 @@ def main():
     recovery = commands.add_parser('restore', help='Restore into a new data directory')
     recovery.add_argument('destination', type=Path)
     recovery.add_argument('--id', help='Restore a specific backup instead of LATEST.json')
+    receive = commands.add_parser('receive', help='Receive the latest backup in a versioned directory')
+    receive.add_argument('destination', type=Path)
     args = parser.parse_args()
+
+    def report(message, **details):
+        print(json.dumps(details) if args.json else message)
+
+    def fail(message, code=1):
+        if args.json:
+            report('', error=message)
+            sys.exit(code)
+        parser.exit(code, f'{message}\n')
+
     try:
         dataset = configured_dataset(args.config) if not args.repo else None
         repo = args.repo or dataset
         if not repo or not valid_dataset(repo):
-            parser.error('Set the ModelScope dataset in BDM or specify --repo owner/name.')
+            message = 'Set the ModelScope dataset in BDM or specify --repo owner/name.'
+            if args.json:
+                fail(message)
+            parser.error(message)
         if args.command == 'backup' and not (args.data / DATABASE).is_file():
             raise BackupError(f'Local catalog was not found: {args.data / DATABASE}')
         with warnings.catch_warnings():
@@ -464,38 +535,47 @@ def main():
             token = os.getenv('MODELSCOPE_TOKEN')
             if not token and dataset and args.command != 'configure':
                 token = windows_token(repo)
+            if not token and args.json:
+                raise BackupError('Save an Access Token in BDM ModelScope settings first.')
             token = token or getpass('ModelScope Access Token: ')
         if not token.strip():
             raise BackupError('Provide a ModelScope Access Token using a local terminal.')
         if args.command == 'configure':
             save_settings(args.config, repo, token.strip())
-            print(f'Saved BDM ModelScope settings for {repo}')
+            report(f'Saved BDM ModelScope settings for {repo}', dataset_id=repo)
             return
-        remote = ModelScope(repo, args.revision, token.strip())
-        if args.command == 'backup':
-            source = args.data.absolute()
-            roots = list(dict.fromkeys(path.absolute() for path in [source / 'library', *(args.library or [])]))
-            backup_id = write_backup(source, roots, remote)
-            print(f'Verified backup: {backup_id}')
-        elif args.command == 'restore':
-            destination = args.destination.resolve()
-            backup_id = restore(destination, remote, args.id)
-            print(f'Verified restore: {backup_id} -> {destination}')
-        else:
-            print(f'Confirmed private ModelScope dataset: {repo}')
+        site = os.getenv('MODELSCOPE_BACKUP_SITE') or (configured_site(args.config) if dataset else None)
+        with redirect_stdout(sys.stderr) if args.json else nullcontext():
+            remote = ModelScope(repo, args.revision, token.strip(), **({'site': site} if site else {}))
+            if args.command == 'backup':
+                source = args.data.absolute()
+                roots = list(dict.fromkeys(path.absolute() for path in [source / 'library', *(args.library or [])]))
+                backup_id = write_backup(source, roots, remote)
+                message, details = f'Verified backup: {backup_id}', {'backup_id': backup_id}
+            elif args.command in {'restore', 'receive'}:
+                destination = args.destination.resolve()
+                if args.command == 'receive':
+                    backup_id, destination = receive_latest(destination, remote)
+                else:
+                    backup_id = restore(destination, remote, args.id)
+                message = f'Verified restore: {backup_id} -> {destination}'
+                details = {'backup_id': backup_id, 'destination': str(destination)}
+            else:
+                message, details = f'Confirmed private ModelScope dataset: {repo}', {'dataset_id': repo}
+        report(message, **details)
     except BackupError as exc:
-        parser.exit(1, f'{exc}\n')
+        fail(str(exc))
     except (GetPassWarning, EOFError):
-        parser.exit(1, 'Run in an interactive terminal or provide MODELSCOPE_TOKEN in its environment.\n')
+        fail('Run in an interactive terminal or provide MODELSCOPE_TOKEN in its environment.')
     except ModuleNotFoundError as exc:
         if exc.name != 'modelscope_hub':
             raise
-        parser.exit(1, 'Install the ModelScope SDK: python -m pip install "modelscope-hub>=0.7.1,<1"\n')
+        fail('Install the ModelScope SDK: python -m pip install "modelscope-hub>=0.7.1,<1"')
     except KeyboardInterrupt:
-        parser.exit(130, 'Interrupted. Run backup again to verify and reuse any uploaded files.\n')
+        fail('Interrupted. Run backup again to verify and reuse any uploaded files.', 130)
     except Exception as exc:
         # SDK exception messages may contain credentials or signed URLs.
-        parser.exit(1, f'Backup operation failed ({type(exc).__name__}). Check access, paths and network.\n')
+        fail(f'Backup operation failed ({type(exc).__name__}). Check access, paths and network.')
 
 
 if __name__ == '__main__':

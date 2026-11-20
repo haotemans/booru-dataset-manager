@@ -101,6 +101,26 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelScopeConfig {
     pub dataset_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<ModelScopeSite>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ModelScopeSite {
+    #[default]
+    #[serde(rename = "modelscope.cn")]
+    China,
+    #[serde(rename = "modelscope.ai")]
+    International,
+}
+
+impl ModelScopeSite {
+    pub fn endpoint(self) -> &'static str {
+        match self {
+            Self::China => "modelscope.cn",
+            Self::International => "modelscope.ai",
+        }
+    }
 }
 
 impl ModelScopeConfig {
@@ -123,6 +143,7 @@ impl ModelScopeConfig {
         }
         Ok(Self {
             dataset_id: dataset_id.to_owned(),
+            site: None,
         })
     }
 }

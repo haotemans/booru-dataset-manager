@@ -1144,6 +1144,7 @@ impl eframe::App for BdmApp {
         self.poll_tag_lookup(ctx);
         self.poll_danbooru_verification(ctx);
         self.poll_gelbooru_verification(ctx);
+        self.poll_modelscope_transfer(ctx);
         self.poll_ingest(ctx);
         self.ingest.thumbnails.poll(ctx, &mut self.ingest.textures);
         self.poll_workflows(ctx);

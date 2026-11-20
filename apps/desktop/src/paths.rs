@@ -1,4 +1,17 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
+
+static DATA_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn window_title() -> &'static str {
+    if DATA_DIRECTORY.get().is_some() {
+        "Booru Dataset Manager · 已接收图库"
+    } else {
+        "Booru Dataset Manager"
+    }
+}
 
 pub fn project_root() -> PathBuf {
     let executable = std::env::current_exe().ok();
@@ -37,7 +50,22 @@ fn repository_root(executable: &Path) -> Option<PathBuf> {
 }
 
 pub fn data_directory() -> PathBuf {
-    project_root().join("data")
+    DATA_DIRECTORY
+        .get()
+        .cloned()
+        .unwrap_or_else(|| project_root().join("data"))
+}
+
+pub fn set_received_data_directory(directory: PathBuf) -> Result<(), &'static str> {
+    if !directory.is_absolute()
+        || !directory.join("catalog.sqlite3").is_file()
+        || !directory.join("library").is_dir()
+    {
+        return Err("The received catalog or library directory is unavailable.");
+    }
+    DATA_DIRECTORY
+        .set(directory)
+        .map_err(|_| "The data directory was already selected.")
 }
 
 pub fn library_directory() -> PathBuf {

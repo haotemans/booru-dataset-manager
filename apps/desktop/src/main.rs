@@ -33,6 +33,17 @@ use eframe::egui;
 
 fn main() -> eframe::Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    let received = args.iter().position(|arg| arg == "--received-data");
+    if let Some(index) = received {
+        let result = args
+            .get(index + 1)
+            .ok_or("Missing received data directory.")
+            .and_then(|path| paths::set_received_data_directory(path.into()));
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
     if args.iter().any(|arg| arg == "--mcp-server") {
         let path_arg = |name: &str, fallback: std::path::PathBuf| {
             args.iter()
@@ -114,7 +125,7 @@ fn main() -> eframe::Result<()> {
         bdm_infrastructure::visual::python_command().get_program()
     ));
     let result = eframe::run_native(
-        "Booru Dataset Manager",
+        paths::window_title(),
         eframe::NativeOptions {
             persistence_path: Some(
                 capture_path
