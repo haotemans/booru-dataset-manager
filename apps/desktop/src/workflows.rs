@@ -398,6 +398,7 @@ mod tests {
             let snapshot = app.workflows.rules.clone();
             app.workflows.relationship_summary = Some("关系与本地标签已更新。".into());
             let height = std::cell::Cell::new(0.0);
+            let scroll_offset = std::cell::Cell::new(0.0);
             ctx.style_mut(|style| style.animation_time = 0.0);
             let frame = |app: &mut BdmApp, surface: usize, events: Vec<egui::Event>| {
                 let output = ctx.run(
@@ -408,15 +409,16 @@ mod tests {
                     },
                     |ctx| {
                         egui::CentralPanel::default().show(ctx, |ui| {
-                            let start = ui.cursor().top();
                             if surface == 1 {
-                                egui::ScrollArea::vertical()
-                                    .vertical_scroll_offset(300.0)
+                                let settings = egui::ScrollArea::vertical()
+                                    .vertical_scroll_offset(scroll_offset.get())
                                     .show(ui, |ui| app.settings_page(ui));
+                                height.set(settings.content_size.y);
                             } else {
+                                let start = ui.cursor().top();
                                 app.character_relationships(ui);
+                                height.set(ui.cursor().top() - start);
                             }
-                            height.set(ui.cursor().top() - start);
                         });
                         if surface == 2 {
                             app.show_dialog(ctx);
@@ -449,13 +451,19 @@ mod tests {
             for _ in 0..3 {
                 frame(&mut app, 1, Vec::new());
             }
-            let text = frame(&mut app, 1, Vec::new());
-            let pos = text
-                .iter()
-                .find(|(s, _)| s == "角色关系设置")
-                .expect("character relationship settings should be visible after scrolling")
-                .1
-                + egui::vec2(30.0, 8.0);
+            let scroll_step = size.y * 0.5;
+            let scroll_steps = (height.get() / scroll_step).ceil() as usize;
+            let pos = (0..=scroll_steps)
+                .find_map(|step| {
+                    scroll_offset.set(step as f32 * scroll_step);
+                    frame(&mut app, 1, Vec::new())
+                        .into_iter()
+                        .find(|(text, pos)| {
+                            text == "角色关系设置" && pos.y > 16.0 && pos.y + 24.0 < size.y
+                        })
+                        .map(|(_, pos)| pos + egui::vec2(30.0, 8.0))
+                })
+                .expect("character relationship settings should be reachable by scrolling");
             for pressed in [true, false] {
                 frame(
                     &mut app,
