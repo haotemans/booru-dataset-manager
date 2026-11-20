@@ -41,13 +41,15 @@ jobs:
       - name: Prepare Windows package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path target/windows-package/scripts
-          Copy-Item -Path target/release/bdm-desktop.exe,target/release/bdm.exe -Destination target/windows-package/
-          Copy-Item -Path scripts/modelscope_backup.py,scripts/modelscope_catalog.py,scripts/modelscope_mcp.py -Destination target/windows-package/scripts/
-          New-Item -ItemType File -Path target/windows-package/portable.flag
+          $package = Join-Path $env:RUNNER_TEMP 'bdm-windows-package'
+          $scripts = Join-Path $package 'scripts'
+          New-Item -ItemType Directory -Path $scripts -Force
+          Copy-Item -LiteralPath target/release/bdm-desktop.exe,target/release/bdm.exe -Destination $package -Force
+          Copy-Item -LiteralPath scripts/modelscope_backup.py,scripts/modelscope_catalog.py,scripts/modelscope_mcp.py -Destination $scripts -Force
+          New-Item -ItemType File -Path (Join-Path $package 'portable.flag') -Force
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: bdm-desktop-windows
-          path: target/windows-package/
+          path: ${{ runner.temp }}/bdm-windows-package/
           if-no-files-found: error
