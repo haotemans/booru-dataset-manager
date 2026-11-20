@@ -217,7 +217,11 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| app.settings_page(ui));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        egui::ScrollArea::vertical()
+                            .vertical_scroll_offset(300.0)
+                            .show(ui, |ui| app.settings_page(ui));
+                    });
                 },
             )
         };
@@ -234,7 +238,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .unwrap();
+            .expect("original image preference should be visible after scrolling");
         for pressed in [true, false] {
             frame(
                 app,

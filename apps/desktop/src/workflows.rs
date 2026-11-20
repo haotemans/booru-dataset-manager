@@ -410,7 +410,9 @@ mod tests {
                         egui::CentralPanel::default().show(ctx, |ui| {
                             let start = ui.cursor().top();
                             if surface == 1 {
-                                app.settings_page(ui);
+                                egui::ScrollArea::vertical()
+                                    .vertical_scroll_offset(300.0)
+                                    .show(ui, |ui| app.settings_page(ui));
                             } else {
                                 app.character_relationships(ui);
                             }
@@ -448,8 +450,12 @@ mod tests {
                 frame(&mut app, 1, Vec::new());
             }
             let text = frame(&mut app, 1, Vec::new());
-            let pos =
-                text.iter().find(|(s, _)| s == "角色关系设置").unwrap().1 + egui::vec2(30.0, 8.0);
+            let pos = text
+                .iter()
+                .find(|(s, _)| s == "角色关系设置")
+                .expect("character relationship settings should be visible after scrolling")
+                .1
+                + egui::vec2(30.0, 8.0);
             for pressed in [true, false] {
                 frame(
                     &mut app,
