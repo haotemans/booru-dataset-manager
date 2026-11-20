@@ -72,6 +72,12 @@ class SharedCatalogTests(unittest.TestCase):
         self.run_on(self.a, 'push')
         return entry
 
+    def test_pull_reports_an_unpublished_catalog(self):
+        with self.assertRaisesRegex(BackupError, 'has no published commit'):
+            self.run_on(self.b, 'pull')
+        self.assertEqual(self.run_on(self.b, 'list')['entries'], [])
+        self.assertEqual(self.remote.downloads, [])
+
     def test_pulls_metadata_only_and_fetches_one_verified_original(self):
         entry = self.publish_one()
         key = object_path(entry['original'])

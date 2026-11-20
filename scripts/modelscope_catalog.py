@@ -369,7 +369,7 @@ class Catalog:
         self.assert_clean()
         upstream = self.fetch()
         if not upstream:
-            return {'head': self.revision(), 'conflicts': []}
+            raise BackupError('The shared catalog has no published commit. Commit and push first.')
         if not self.revision():
             self.git('merge', '--ff-only', upstream)
         else:

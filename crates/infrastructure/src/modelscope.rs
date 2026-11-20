@@ -150,6 +150,10 @@ fn read_response<T: serde::de::DeserializeOwned>(output: Output) -> Result<T, St
             Some("Remote file is missing: LATEST.json") => {
                 "还没有可下载的版本，请先在 A 机上传。".to_owned()
             }
+            Some("The shared catalog has no published commit. Commit and push first.") => {
+                "魔搭共享图库还没有已发布的提交。请先在有原图的电脑上提交并推送，再回来拉取。"
+                    .to_owned()
+            }
             Some(message) => message.to_owned(),
             None => "魔搭脚本运行失败。".to_owned(),
         })
