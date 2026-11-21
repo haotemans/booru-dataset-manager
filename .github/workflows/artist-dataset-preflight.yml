@@ -1,0 +1,62 @@
+name: Artist dataset preflight
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/artist-dataset-preflight.yml
+      - scripts/artist_dataset_preflight.py
+      - tests/test_artist_dataset_preflight.py
+      - datasets/artists/pilot_artists.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p test_artist_dataset_preflight.py -v
+
+  inspect:
+    if: github.event_name == 'workflow_dispatch'
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MODELSCOPE_DATASET_ID: ${{ secrets.MODELSCOPE_DATASET_ID2 || 'feiyun12/artist_datasets' }}
+      MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check credential presence without printing secrets
+        shell: bash
+        run: |
+          missing=0
+          if [[ -z "$MODELSCOPE_DATASET_ID" ]]; then
+            echo "::error::MODELSCOPE_DATASET_ID2 and fallback repo ID are unavailable" >&2
+            missing=1
+          fi
+          if [[ -z "$MODELSCOPE_TOKEN" ]]; then
+            echo "::error::MODELSCOPE_TOKEN is unavailable in this repository/branch context" >&2
+            missing=1
+          fi
+          if [[ "$missing" -eq 1 ]]; then exit 1; fi
+      - run: python -m pip install 'modelscope-hub>=0.5,<1'
+      - name: Read-only ModelScope and Danbooru metadata checks
+        run: python scripts/artist_dataset_preflight.py --verify-modelscope
+      - name: Publish diagnostics (not media)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artist-dataset-preflight-report
+          path: data/artist-preflight/report.json
+          if-no-files-found: warn
+          retention-days: 7
