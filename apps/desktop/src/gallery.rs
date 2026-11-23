@@ -228,7 +228,9 @@ impl BdmApp {
                                 }
                             }
                             ui.add_space(8.0);
-                            let title = egui::Label::new(RichText::new(&c.tag).font(medium(13.0)));
+                            let title_text = c.tag.replace('_', " ");
+                            let title =
+                                egui::Label::new(RichText::new(title_text).font(medium(13.0)));
                             ui.add(if is_query { title.wrap() } else { title.truncate() }).on_hover_text(&c.tag);
                             ui.horizontal(|ui| {
                                 ui.label(

@@ -64,8 +64,10 @@ fn collection(record: &CollectionRecord) -> Result<Collection, CatalogError> {
         {
             return Err(CatalogError::InvalidQuery);
         }
-    } else if record.kind != CollectionKind::Artist
-        || record.name.is_empty()
+    } else if !matches!(
+        record.kind,
+        CollectionKind::Artist | CollectionKind::Character
+    ) || record.name.is_empty()
         || record.name.len() > 512
         || record
             .name
@@ -586,6 +588,18 @@ impl BdmApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_character_collections_without_remote_identity_can_load() {
+        let record = CollectionRecord {
+            provider: bdm_domain::sources::SourceProvider::Danbooru,
+            id: 1,
+            kind: CollectionKind::Character,
+            name: "local_character".into(),
+            source: None,
+        };
+        assert_eq!(collection(&record).unwrap().tag, "local_character");
+    }
     use crate::{collections::CollectionDeletion, model::Preferences};
     use std::collections::BTreeSet;
 
