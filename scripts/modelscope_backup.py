@@ -174,6 +174,9 @@ class ModelScope:
 
     def fetch(self, key, target, expected=None, *, missing_ok=False):
         remote_path = f'{REMOTE_PREFIX}/{key}'
+        if os.name == 'nt':
+            # The SDK appends the full repository path and an .incomplete suffix.
+            target = Path(windows_extended_path(os.path.abspath(target)))
         with TemporaryDirectory(prefix='.readback-', dir=target.parent) as tmp:
             try:
                 path = self.api.download_file(
@@ -273,6 +276,14 @@ def windows_path_spelling(value):
     if value.startswith('\\\\?\\'):
         return value[4:]
     return value
+
+
+def windows_extended_path(value):
+    if value.startswith('\\\\?\\'):
+        return value
+    if value.startswith('\\\\'):
+        return '\\\\?\\UNC\\' + value[2:]
+    return '\\\\?\\' + value
 
 
 def plan(db, roots):

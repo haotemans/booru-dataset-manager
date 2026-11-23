@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import sys
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +17,45 @@ try:
     from modelscope_hub.errors import FileSizeMismatchError
 except ModuleNotFoundError:
     FileSizeMismatchError = None
+
+
+class ModelScopePathTests(unittest.TestCase):
+    def test_extended_path_preserves_drive_unc_and_already_extended_paths(self):
+        for normal, extended in [
+            (r'C:\BDM\file', r'\\?\C:\BDM\file'),
+            (r'\\server\BDM\file', r'\\?\UNC\server\BDM\file'),
+        ]:
+            self.assertEqual(backup.windows_extended_path(normal), extended)
+            self.assertEqual(backup.windows_extended_path(extended), extended)
+
+    def test_readback_copies_a_long_sdk_temporary_file(self):
+        payload = b'test original bytes'
+        remote = backup.ModelScope.__new__(backup.ModelScope)
+        remote.repo = 'owner/data'
+        remote.revision = 'master'
+        remote.not_found = KeyError
+        remote.size_mismatch = ValueError
+
+        def download_file(_repo, _repo_type, file_path, *, local_dir, **_options):
+            partial = Path(local_dir) / (file_path + '.incomplete')
+            if os.name == 'nt':
+                self.assertTrue(str(partial).startswith('\\\\?\\'))
+            self.assertGreater(len(str(partial)), 260)
+            partial.parent.mkdir(parents=True)
+            partial.write_bytes(payload)
+            return partial.replace(partial.with_suffix(''))
+
+        remote.api = SimpleNamespace(download_file=download_file)
+        with TemporaryDirectory() as directory:
+            parent = Path(directory)
+            while len(str(parent)) < 200:
+                parent /= 'nested-directory'
+            parent.mkdir(parents=True)
+            target = parent / 'original.jpg'
+            key = 'catalog-originals/ab/' + 'a' * 64 + '.jpg'
+            self.assertTrue(remote.fetch(key, target))
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertEqual(list(parent.iterdir()), [target])
 
 
 @unittest.skipIf(FileSizeMismatchError is None, 'Optional ModelScope SDK is required')
