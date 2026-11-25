@@ -1256,9 +1256,7 @@ impl BdmApp {
         let mut close = false;
         ui.horizontal(|ui| {
             if ui
-                .add_enabled_ui(!selected.is_empty(), |ui| {
-                    primary(ui, "允许发送并开始")
-                })
+                .add_enabled_ui(!selected.is_empty(), |ui| primary(ui, "允许发送并开始"))
                 .inner
                 .clicked()
             {

@@ -378,8 +378,7 @@ impl BdmApp {
                             | bdm_ports::CatalogError::Authentication
                             | bdm_ports::CatalogError::Credentials
                     )
-                ) && tool_button(ui, "settings", "打开 Gelbooru 来源设置", false)
-                    .clicked()
+                ) && tool_button(ui, "settings", "打开 Gelbooru 来源设置", false).clicked()
                 {
                     self.navigate(Page::Settings);
                     return true;
