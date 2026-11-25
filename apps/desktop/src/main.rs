@@ -152,5 +152,23 @@ fn main() -> eframe::Result<()> {
         Ok(()) => diagnostics::event("shutdown result=ok"),
         Err(error) => diagnostics::event(format!("shutdown result=error error={error}")),
     }
+    if result.is_ok() {
+        if let Some(directory) = paths::catalog_restart() {
+            let restarted = std::env::current_exe().and_then(|exe| {
+                let mut command = std::process::Command::new(exe);
+                if let Some(directory) = directory {
+                    command.arg("--received-data").arg(directory);
+                }
+                if compact {
+                    command.arg("--compact");
+                }
+                command.spawn()
+            });
+            if let Err(error) = restarted {
+                diagnostics::event(format!("catalog restart failed: {error}"));
+                std::process::exit(1);
+            }
+        }
+    }
     result
 }

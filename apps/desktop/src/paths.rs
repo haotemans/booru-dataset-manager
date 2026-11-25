@@ -4,6 +4,7 @@ use std::{
 };
 
 static DATA_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+static CATALOG_RESTART: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 pub fn window_title() -> &'static str {
     if DATA_DIRECTORY.get().is_some() {
@@ -57,15 +58,37 @@ pub fn data_directory() -> PathBuf {
 }
 
 pub fn set_received_data_directory(directory: PathBuf) -> Result<(), &'static str> {
+    validate_received_directory(&directory)?;
+    DATA_DIRECTORY
+        .set(directory)
+        .map_err(|_| "The data directory was already selected.")
+}
+
+fn validate_received_directory(directory: &Path) -> Result<(), &'static str> {
     if !directory.is_absolute()
         || !directory.join("catalog.sqlite3").is_file()
         || !directory.join("library").is_dir()
     {
         return Err("The received catalog or library directory is unavailable.");
     }
-    DATA_DIRECTORY
+    Ok(())
+}
+
+pub fn viewing_received_catalog() -> bool {
+    DATA_DIRECTORY.get().is_some()
+}
+
+pub fn request_catalog_restart(directory: Option<PathBuf>) -> Result<(), &'static str> {
+    if let Some(directory) = &directory {
+        validate_received_directory(directory)?;
+    }
+    CATALOG_RESTART
         .set(directory)
-        .map_err(|_| "The data directory was already selected.")
+        .map_err(|_| "图库切换已排队。")
+}
+
+pub fn catalog_restart() -> Option<&'static Option<PathBuf>> {
+    CATALOG_RESTART.get()
 }
 
 pub fn library_directory() -> PathBuf {

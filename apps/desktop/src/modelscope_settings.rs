@@ -14,7 +14,6 @@ use bdm_ports::{SourceCredentialStore, SourceCredentials};
 use eframe::egui::{self, RichText};
 use std::{
     path::{Path, PathBuf},
-    process::{Child, Command},
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
@@ -29,7 +28,6 @@ pub struct ModelScopeSettings {
     error: Option<String>,
     status: Option<String>,
     pending: Option<Receiver<Result<TransferResult, String>>>,
-    received_window: Option<(PathBuf, Child)>,
 }
 
 impl ModelScopeSettings {
@@ -116,31 +114,19 @@ impl ModelScopeSettings {
         self.pending = Some(receiver);
         Ok(())
     }
-
-    fn open_received(&mut self, directory: PathBuf) -> Result<(), String> {
-        if let Some((open_directory, child)) = &mut self.received_window {
-            if *open_directory == directory && matches!(child.try_wait(), Ok(None)) {
-                return Ok(());
-            }
-        }
-        let executable = std::env::current_exe().map_err(|_| "找不到当前 BDM 程序。")?;
-        let child = Command::new(executable)
-            .arg("--received-data")
-            .arg(&directory)
-            .spawn()
-            .map_err(|_| {
-                format!(
-                    "图库已下载，但无法打开 BDM 窗口。目录：{}",
-                    directory.display()
-                )
-            })?;
-        self.received_window = Some((directory, child));
-        Ok(())
-    }
 }
 
 impl BdmApp {
+    fn catalog_transfer_idle(&self) -> bool {
+        !self.ingest_active()
+            && !self.workflow_active()
+            && !self.image_editor.active()
+            && self.media_review.redownload.is_none()
+            && !self.modelscope.shared.busy()
+    }
+
     pub fn poll_modelscope_transfer(&mut self, ctx: &egui::Context) {
+        let idle = self.catalog_transfer_idle();
         let settings = &mut self.modelscope;
         let Some(receiver) = &settings.pending else {
             return;
@@ -158,11 +144,18 @@ impl BdmApp {
         match result {
             Ok(result) => {
                 if let Some(directory) = result.destination {
-                    match settings.open_received(directory) {
-                        Ok(()) => {
-                            settings.status = Some(format!("已打开接收版本 {}", result.backup_id))
+                    if directory == paths::data_directory() {
+                        settings.status = Some(format!("当前已打开接收版本 {}", result.backup_id));
+                    } else if !idle {
+                        settings.status = Some(
+                            "图库已校验。请等当前任务结束，再点击下载并打开以切换到本地副本。"
+                                .into(),
+                        );
+                    } else {
+                        match paths::request_catalog_restart(Some(directory)) {
+                            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                            Err(error) => settings.error = Some(error.into()),
                         }
-                        Err(error) => settings.error = Some(error),
                     }
                 } else {
                     settings.status =
@@ -175,7 +168,7 @@ impl BdmApp {
 
     pub fn modelscope_settings_card(&mut self, ui: &mut egui::Ui) {
         let available = !self.demo && !self.is_capture();
-        let idle = !self.ingest_active() && !self.workflow_active() && !self.image_editor.active();
+        let idle = self.catalog_transfer_idle();
         let mut saved = false;
         let mut cleared = false;
         card().show(ui, |ui| {
@@ -183,7 +176,7 @@ impl BdmApp {
             setting_header(ui, "lock", "魔搭备份");
             ui.add_space(8.0);
             let settings = &mut self.modelscope;
-            let enabled = available && settings.pending.is_none();
+            let enabled = available && settings.pending.is_none() && !settings.shared.busy();
             let field_width = ui.available_width().min(360.0);
             ui.label("魔搭站点");
             ui.add_enabled_ui(enabled, |ui| {
@@ -246,7 +239,14 @@ impl BdmApp {
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
                 if ui
-                    .add_enabled(enabled, egui::Button::new("打开共享图库"))
+                    .add_enabled(
+                        enabled,
+                        egui::Button::new(if settings.shared.visible() {
+                            "收起共享图库"
+                        } else {
+                            "打开共享图库"
+                        }),
+                    )
                     .clicked()
                 {
                     let root = paths::project_root();
@@ -255,7 +255,7 @@ impl BdmApp {
                         config.site = Some(settings.site);
                         Ok(config)
                     }) {
-                        Ok(config) => settings.shared.open(ui.ctx(), config),
+                        Ok(config) => settings.shared.toggle(ui.ctx(), config),
                         Err(error) => settings.error = Some(error),
                     }
                 }
@@ -273,10 +273,7 @@ impl BdmApp {
                     }
                 }
                 if ui
-                    .add_enabled(
-                        enabled && settings.pending.is_none(),
-                        egui::Button::new("B 机：下载并打开"),
-                    )
+                    .add_enabled(enabled && idle, egui::Button::new("B 机：下载并打开"))
                     .clicked()
                 {
                     let transfer = Transfer::Receive {
@@ -284,6 +281,16 @@ impl BdmApp {
                     };
                     if let Err(error) = settings.start(ui.ctx(), transfer) {
                         settings.error = Some(error);
+                    }
+                }
+                if paths::viewing_received_catalog()
+                    && ui
+                        .add_enabled(enabled && idle, egui::Button::new("返回本机图库"))
+                        .clicked()
+                {
+                    match paths::request_catalog_restart(None) {
+                        Ok(()) => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
+                        Err(error) => settings.error = Some(error.into()),
                     }
                 }
             });
@@ -299,6 +306,7 @@ impl BdmApp {
                 ui.label(RichText::new(error).color(MUTED));
             }
         });
+        self.modelscope.shared.show_inline(ui);
         if saved {
             self.notify(ui.ctx(), "魔搭设置已保存。");
         } else if cleared {

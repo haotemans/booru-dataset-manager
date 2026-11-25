@@ -112,9 +112,12 @@ pub struct SharedCatalog {
 }
 
 impl SharedCatalog {
-    pub fn open(&mut self, ctx: &egui::Context, config: ModelScopeConfig) {
-        if self.pending.is_some() {
-            self.open = true;
+    pub fn toggle(&mut self, ctx: &egui::Context, config: ModelScopeConfig) {
+        if self.busy() {
+            return;
+        }
+        if self.open && self.config.as_ref() == Some(&config) {
+            self.open = false;
             return;
         }
         if self.config.as_ref() != Some(&config) {
@@ -215,31 +218,42 @@ impl SharedCatalog {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) {
+    pub fn busy(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub fn visible(&self) -> bool {
+        self.open
+    }
+
+    pub fn update(&mut self, ctx: &egui::Context) {
+        if self.busy() && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         self.poll();
         self.previews.poll(ctx, &mut self.textures);
+    }
+
+    pub fn show_inline(&mut self, ui: &mut egui::Ui) {
         if !self.open {
             return;
         }
-        let mut open = true;
         let title = self.config.as_ref().map_or_else(
             || "魔搭共享图库".to_owned(),
             |config| format!("魔搭共享图库 · {}", config.dataset_id),
         );
-        egui::Window::new(title)
-            .id(egui::Id::new("modelscope-shared-catalog"))
-            .default_size([860.0, 540.0])
-            .open(&mut open)
-            .show(ctx, |ui| {
-                if self.pending.is_some() {
-                    ui.spinner();
-                }
-                if let Some(error) = &self.error {
-                    ui.label(error);
-                }
-                ui.add_enabled_ui(self.pending.is_none(), |ui| self.contents(ui));
-            });
-        self.open = open;
+        ui.add_space(16.0);
+        crate::theme::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            crate::widgets::setting_header(ui, "lock", &title);
+            if self.busy() {
+                ui.spinner();
+            }
+            if let Some(error) = &self.error {
+                ui.label(error);
+            }
+            ui.add_enabled_ui(!self.busy(), |ui| self.contents(ui));
+        });
     }
 
     fn contents(&mut self, ui: &mut egui::Ui) {
@@ -268,19 +282,17 @@ impl SharedCatalog {
             }
         });
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            self.show_conflicts(ui);
-            if !self.view.changes.is_empty() {
-                egui::CollapsingHeader::new("待提交变更")
-                    .show(ui, |ui| self.show_changes(ui, &self.view.changes));
-            }
-            ui.columns(2, |columns| {
-                self.show_entries(&mut columns[0]);
-                self.show_editor(&mut columns[1]);
-            });
-            ui.separator();
-            self.show_history(ui);
+        self.show_conflicts(ui);
+        if !self.view.changes.is_empty() {
+            egui::CollapsingHeader::new("待提交变更")
+                .show(ui, |ui| self.show_changes(ui, &self.view.changes));
+        }
+        ui.columns(2, |columns| {
+            self.show_entries(&mut columns[0]);
+            self.show_editor(&mut columns[1]);
         });
+        ui.separator();
+        self.show_history(ui);
     }
 
     fn show_conflicts(&mut self, ui: &mut egui::Ui) {

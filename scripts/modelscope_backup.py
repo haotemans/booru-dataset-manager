@@ -98,9 +98,11 @@ def windows_token(repo):
     return token
 
 
-def save_settings(path, repo, token=None):
+def save_settings(path, repo, token=None, *, site=None):
     if not valid_dataset(repo):
         raise BackupError('Use a ModelScope dataset ID in owner/name format.')
+    if site not in (None, 'modelscope.cn', 'modelscope.ai'):
+        raise BackupError('Invalid ModelScope site in the BDM settings.')
     if token is not None:
         if not token or len(token) > 1024 or any(not c.isprintable() or c.isspace() for c in token):
             raise BackupError('The Access Token is empty or invalid.')
@@ -118,10 +120,11 @@ def save_settings(path, repo, token=None):
         except pywintypes.error:
             raise BackupError('Could not save the token in Windows Credential Manager.') from None
     settings = {'dataset_id': repo}
-    try:
-        site = configured_site(path)
-    except BackupError:
-        site = None
+    if site is None:
+        try:
+            site = configured_site(path)
+        except BackupError:
+            pass
     if site:
         settings['site'] = site
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -311,6 +314,14 @@ def plan(db, roots):
             raise BackupError(f'Catalog SHA-256 mismatch: {source}')
         files[key] = (source, info)
     return files
+
+
+def backup_roots(source, extra_roots=()):
+    recovered = sorted(
+        (path for path in source.iterdir() if path.is_dir() and re.fullmatch(r'library-[1-9][0-9]*', path.name)),
+        key=lambda path: int(path.name.removeprefix('library-')),
+    )
+    return list(dict.fromkeys(path.absolute() for path in [source / 'library', *extra_roots, *recovered]))
 
 
 def write_backup(source, roots, remote):
@@ -560,7 +571,7 @@ def main():
             remote = ModelScope(repo, args.revision, token.strip(), **({'site': site} if site else {}))
             if args.command == 'backup':
                 source = args.data.absolute()
-                roots = list(dict.fromkeys(path.absolute() for path in [source / 'library', *(args.library or [])]))
+                roots = backup_roots(source, args.library or ())
                 backup_id = write_backup(source, roots, remote)
                 message, details = f'Verified backup: {backup_id}', {'backup_id': backup_id}
             elif args.command in {'restore', 'receive'}:

@@ -45,7 +45,7 @@ jobs:
           $scripts = Join-Path $package 'scripts'
           New-Item -ItemType Directory -Path $scripts -Force
           Copy-Item -LiteralPath target/release/bdm-desktop.exe,target/release/bdm.exe -Destination $package -Force
-          Copy-Item -LiteralPath scripts/modelscope_backup.py,scripts/modelscope_catalog.py,scripts/modelscope_mcp.py -Destination $scripts -Force
+          Copy-Item -LiteralPath scripts/modelscope_backup.py,scripts/modelscope_catalog.py,scripts/modelscope_mcp.py,scripts/pixel_art_publish.py -Destination $scripts -Force
           New-Item -ItemType File -Path (Join-Path $package 'portable.flag') -Force
       - name: Upload Windows package
         uses: actions/upload-artifact@v4

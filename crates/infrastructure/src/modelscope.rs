@@ -30,24 +30,6 @@ pub fn transfer(
             if library.is_absolute() {
                 command.arg("--library").arg(library);
             }
-            if let Ok(entries) = fs::read_dir(&data) {
-                let mut additional_libraries = Vec::new();
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let library_index = path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .and_then(|name| name.strip_prefix("library-"))
-                        .and_then(|index| index.parse::<u32>().ok());
-                    if let Some(index) = library_index.filter(|_| path.is_dir()) {
-                        additional_libraries.push((index, path));
-                    }
-                }
-                additional_libraries.sort_unstable();
-                for (_, path) in additional_libraries {
-                    command.arg("--library").arg(path);
-                }
-            }
         }
         Transfer::Receive { directory } => {
             command.arg("receive").arg(directory);

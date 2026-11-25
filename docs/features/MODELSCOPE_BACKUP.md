@@ -2,7 +2,7 @@
 
 ## Shared Git catalog
 
-In BDM, open **系统设置 → 魔搭备份 → 打开共享图库**. Use the same private dataset on both machines. Install Git and use the configured Python runtime or a Python interpreter with `modelscope-hub>=0.7.1,<1`, `filelock`, and `pywin32-ctypes` on Windows. A read token can pull and download. A write token is needed to push.
+In BDM, open **系统设置 → 魔搭备份 → 打开共享图库**. The catalog expands on the settings page. Use the same private dataset on both machines. Install Git and use the configured Python runtime or a Python interpreter with `modelscope-hub>=0.7.1,<1`, `filelock`, and `pywin32-ctypes` on Windows. A read token can pull and download. A write token is needed to push.
 
 1. Click **拉取** to get the catalog and its history. Entries display before any images are downloaded. Select an entry and click **打开原图** to download and verify just that original. BDM generates its preview locally.
 2. Add an original by file path, or enter a local BDM media ID and click **导入已验证原图**. Import checks the source checksum, including for images whose working copies were edited. Edit names, labels, captions, collections or the local review decision in the shared catalog. **保存到本地** and **删除条目** stage changes in the local catalog.
@@ -24,7 +24,7 @@ The existing A/B buttons transfer a complete backup with the format described in
 Open **系统设置 → 魔搭备份** in BDM on both computers. Select the same ModelScope site and enter the same private dataset ID. Save a write-capable Access Token on A and a token with dataset read access on B. The Windows Credential Manager stores the token. Leave the token field blank to reuse a saved token.
 
 1. On A, pause background catalog jobs and finish pending edits. Click **A 机：上传本机图库** and wait for verification to finish. Leave the catalog idle during upload.
-2. On B, click **B 机：下载并打开**. The same BDM executable opens the verified snapshot in a separate window. Each backup ID gets its own data folder under `dist/modelscope-received`. A repeated download of the same version opens the existing local copy.
+2. On B, click **B 机：下载并打开**. After verification, BDM saves and closes the current window, then starts in the received catalog. Each backup ID gets its own data folder under `dist/modelscope-received`. A repeated download of the same version opens the existing local copy. Use **返回本机图库** in the same settings card to switch back.
 
 The desktop uses the existing `scripts/modelscope_backup.py` command. Use the bundled Python runtime, the configured ModelScope MCP Python environment in `target/modelscope-mcp/venv`, or install the dependencies below into a Python interpreter available on `PATH`. `BDM_MODELSCOPE_PYTHON` can select a specific interpreter.
 

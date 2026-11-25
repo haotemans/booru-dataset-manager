@@ -1144,6 +1144,7 @@ impl eframe::App for BdmApp {
         self.poll_tag_lookup(ctx);
         self.poll_danbooru_verification(ctx);
         self.poll_gelbooru_verification(ctx);
+        self.modelscope.shared.update(ctx);
         self.poll_modelscope_transfer(ctx);
         self.poll_ingest(ctx);
         self.ingest.thumbnails.poll(ctx, &mut self.ingest.textures);
@@ -1158,7 +1159,6 @@ impl eframe::App for BdmApp {
         }
         crate::window_chrome::show(ctx);
         self.shell(ctx);
-        self.modelscope.shared.show(ctx);
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         if self.capture_dir.is_none() {

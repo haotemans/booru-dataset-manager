@@ -204,6 +204,7 @@ class ModelScopeBackupTests(unittest.TestCase):
         version, directory = backup.receive_latest(inbox, self.remote)
         self.assertEqual(version, first)
         self.assertTrue((directory / backup.DATABASE).is_file())
+        self.assertEqual(backup.backup_roots(directory), [directory / 'library', directory / 'library-1'])
         local_edit = directory / 'local-edit.txt'
         local_edit.write_text('keep', encoding='utf-8')
         self.assertEqual(backup.receive_latest(inbox, self.remote), (first, directory))
