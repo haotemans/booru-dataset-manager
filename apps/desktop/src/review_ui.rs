@@ -87,7 +87,11 @@ pub fn decision(
             if primary {
                 ACCENT
             } else if selected || response.hovered() {
-                if danger { DANGER } else { HOVER_LINE }
+                if danger {
+                    DANGER
+                } else {
+                    HOVER_LINE
+                }
             } else {
                 LINE
             },
