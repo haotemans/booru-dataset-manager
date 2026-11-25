@@ -111,7 +111,14 @@ impl BdmApp {
                                                 ui.painter().rect_stroke(
                                                     rect,
                                                     4.0,
-                                                    egui::Stroke::new(1.0_f32, INK),
+                                                    egui::Stroke::new(
+                                                        1.5_f32,
+                                                        if response.has_focus() {
+                                                            ACCENT
+                                                        } else {
+                                                            HOVER_LINE
+                                                        },
+                                                    ),
                                                 );
                                             }
                                             if response
@@ -393,9 +400,7 @@ impl BdmApp {
             setting_header(ui, "character", "角色关系");
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("自动处理").size(12.0).color(MUTED))
-                    .on_hover_text("来源关系自动生效；在设置中查看和修改已生效关系。");
-                if ui.button("角色关系设置").clicked() {
+                if tool_button(ui, "character", "角色关系设置", false).clicked() {
                     self.dialog = Some(Dialog::CharacterRelations);
                 }
             });
@@ -534,9 +539,7 @@ impl BdmApp {
         ui.add_space(16.0);
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            section(ui, "视觉模型", "DINOv3");
-            ui.add_space(12.0);
-
+            section(ui, "视觉模型", "");
             ui.add_space(12.0);
             ui.label(RichText::new("模型目录").size(13.0));
             ui.add_sized(
@@ -546,7 +549,7 @@ impl BdmApp {
                     .margin(vec2(10.0, 9.0)),
             );
             ui.horizontal_wrapped(|ui| {
-                if ui.button("保存").clicked() {
+                if tool_button(ui, "check", "保存", false).clicked() {
                     let path = self.model_draft.trim();
                     if path.is_empty() || std::path::Path::new(path).is_absolute() {
                         self.prefs.model_path = path.into();
@@ -556,10 +559,11 @@ impl BdmApp {
                     }
                 }
                 if ui
-                    .add_enabled(
+                    .add_enabled_ui(
                         !self.workflow_active() && !self.demo && !self.is_capture(),
-                        egui::Button::new("下载模型"),
+                        |ui| tool_button(ui, "download", "下载模型", false),
                     )
+                    .inner
                     .clicked()
                 {
                     if let Err(e) = self.start_model_download(ui.ctx()) {

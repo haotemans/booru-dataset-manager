@@ -401,7 +401,7 @@ impl BdmApp {
                     .order(egui::Order::Tooltip)
                     .show(ctx, |ui| {
                         egui::Frame::none()
-                            .fill(INK)
+                            .fill(ACCENT)
                             .rounding(7.0)
                             .inner_margin(vec2(18.0, 12.0))
                             .show(ui, |ui| {

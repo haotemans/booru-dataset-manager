@@ -5,7 +5,7 @@ pub fn choice(ui: &mut egui::Ui, label: &str, selected: bool, width: f32) -> egu
     let response = ui.add_sized(
         [width, 32.0],
         egui::Button::new(RichText::new(label).size(13.0).color(if selected {
-            INK
+            ACCENT
         } else {
             MUTED
         }))
@@ -17,7 +17,7 @@ pub fn choice(ui: &mut egui::Ui, label: &str, selected: bool, width: f32) -> egu
         ui.painter().hline(
             (response.rect.left() + 12.0)..=(response.rect.right() - 12.0),
             response.rect.bottom(),
-            egui::Stroke::new(2.0_f32, INK),
+            egui::Stroke::new(2.0_f32, ACCENT),
         );
     }
     response
@@ -64,7 +64,13 @@ pub fn decision(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
-    let fill = if primary { INK } else { PANEL };
+    let fill = if primary {
+        ACCENT
+    } else if response.hovered() {
+        NAV
+    } else {
+        PANEL
+    };
     let color = if primary {
         egui::Color32::WHITE
     } else if danger {
@@ -79,9 +85,9 @@ pub fn decision(
         egui::Stroke::new(
             1.0_f32,
             if primary {
-                INK
+                ACCENT
             } else if selected || response.hovered() {
-                color
+                if danger { DANGER } else { HOVER_LINE }
             } else {
                 LINE
             },

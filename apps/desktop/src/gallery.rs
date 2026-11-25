@@ -12,10 +12,6 @@ impl BdmApp {
     }
 
     pub fn collections_page(&mut self, ui: &mut egui::Ui) {
-        if self.prefs.page == Page::Downloads {
-            icon_label(ui, "layers", "多个标签 · 同时匹配", "例如 official_art zenless_zone_zero。合集同时显示在画师页，可统一审核、裁剪、优化和导出。");
-            ui.add_space(12.0);
-        }
         if self.prefs.page == Page::Character {
             self.character_relationships(ui);
         }
@@ -89,15 +85,7 @@ impl BdmApp {
                     } else {
                         "没有匹配的 Tag"
                     },
-                    if self.query.is_empty() {
-                        if self.prefs.page == Page::Downloads {
-                            "添加下载查询，例如 official_art zenless_zone_zero"
-                        } else {
-                            "添加 Danbooru Tag"
-                        }
-                    } else {
-                        "试试其他关键词"
-                    },
+                    "",
                     self.prefs.page.icon(),
                 );
                 ui.vertical_centered(|ui| {
@@ -196,7 +184,18 @@ impl BdmApp {
                                 );
                             }
                             if response.hovered() || response.has_focus() {
-                                ui.painter().rect_stroke(rect, 7.0, Stroke::new(1.0_f32, INK));
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    7.0,
+                                    Stroke::new(
+                                        1.5_f32,
+                                        if response.has_focus() {
+                                            ACCENT
+                                        } else {
+                                            HOVER_LINE
+                                        },
+                                    ),
+                                );
                             }
                             if response.clicked() {
                                 if self.collection_delete_mode {
@@ -553,7 +552,7 @@ impl BdmApp {
         if media.is_empty() {
             card().show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                empty(ui, "没有符合条件的图片", "调整筛选条件后再试", "image");
+                empty(ui, "没有符合条件的图片", "", "image");
             });
             return;
         }
@@ -635,8 +634,18 @@ impl BdmApp {
                                 ui.allocate_exact_size(vec2(width, height), Sense::click());
                             self.paint_media(ui, rect, m.id);
                             if response.hovered() || response.has_focus() {
-                                ui.painter()
-                                    .rect_stroke(rect, 7.0, Stroke::new(1.0_f32, INK));
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    7.0,
+                                    Stroke::new(
+                                        1.5_f32,
+                                        if response.has_focus() {
+                                            ACCENT
+                                        } else {
+                                            HOVER_LINE
+                                        },
+                                    ),
+                                );
                             }
                             if response
                                 .on_hover_text(format!(
