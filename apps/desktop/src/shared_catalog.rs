@@ -168,6 +168,10 @@ impl SharedCatalog {
         self.sync_status.as_deref()
     }
 
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
     pub fn take_sync_reload(&mut self) -> bool {
         std::mem::take(&mut self.sync_reload)
     }

@@ -591,7 +591,7 @@ pub fn icon(ui: &Ui, rect: Rect, kind: &str, color: Color32) {
             line((0.12, 0.5), (0.4, 0.77));
             line((0.4, 0.77), (0.89, 0.23));
         }
-        "reset" => {
+        "reset" | "refresh" => {
             let points: Vec<_> = (0..=20)
                 .map(|i| {
                     let a = -2.7 + i as f32 / 20.0 * 5.1;
