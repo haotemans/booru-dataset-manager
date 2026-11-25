@@ -7,8 +7,8 @@ pub fn primary(ui: &mut Ui, label: &str) -> Response {
     let enabled = ui.is_enabled();
     ui.add(
         egui::Button::new(RichText::new(label).color(if enabled { Color32::WHITE } else { MUTED }))
-            .fill(if enabled { INK } else { PANEL })
-            .stroke(Stroke::new(1.0_f32, if enabled { INK } else { LINE }))
+            .fill(if enabled { ACCENT } else { PANEL })
+            .stroke(Stroke::new(1.0_f32, if enabled { ACCENT } else { LINE }))
             .rounding(7.0),
     )
 }
@@ -48,13 +48,19 @@ fn tool_control(ui: &mut Ui, kind: &str, text: &str, name: &str, selected: bool)
     ui.painter().rect(
         rect,
         6.0,
-        if selected { INK } else { PANEL },
+        if selected {
+            ACCENT
+        } else if response.hovered() {
+            NAV
+        } else {
+            PANEL
+        },
         Stroke::new(
             1.0_f32,
             if selected {
-                INK
+                ACCENT
             } else if response.hovered() || response.has_focus() {
-                LINE
+                HOVER_LINE
             } else {
                 Color32::TRANSPARENT
             },
@@ -167,13 +173,10 @@ pub fn icon_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Resp
     });
     if selected || response.hovered() || response.has_focus() {
         ui.painter()
-            .rect_filled(rect, 8.0, if selected { INK } else { NAV });
-        if !selected {
-            ui.painter().rect_stroke(
-                rect,
-                8.0,
-                Stroke::new(1.0_f32, if response.has_focus() { INK } else { LINE }),
-            );
+            .rect_filled(rect, 8.0, if selected { ACCENT } else { NAV });
+        if !selected && response.has_focus() {
+            ui.painter()
+                .rect_stroke(rect, 8.0, Stroke::new(1.0_f32, HOVER_LINE));
         }
     }
     let color = if !ui.is_enabled() {
@@ -200,22 +203,24 @@ pub fn nav_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Respo
         )
     });
     if selected {
+        ui.painter().rect_filled(rect.shrink(1.0), 7.0, SOFT);
         ui.painter().line_segment(
             [
                 rect.left_center() - vec2(0.0, 8.0),
                 rect.left_center() + vec2(0.0, 8.0),
             ],
-            Stroke::new(2.5_f32, INK),
+            Stroke::new(2.5_f32, ACCENT),
         );
+    } else if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect.shrink(1.0), 7.0, NAV);
+        if response.has_focus() {
+            ui.painter()
+                .rect_stroke(rect.shrink(1.0), 7.0, Stroke::new(1.0_f32, HOVER_LINE));
+        }
     }
-    if response.hovered() || response.has_focus() {
-        ui.painter().rect_stroke(
-            rect.shrink(1.0),
-            6.0,
-            Stroke::new(1.0_f32, if response.has_focus() { INK } else { LINE }),
-        );
-    }
-    let color = if selected || response.hovered() {
+    let color = if selected {
+        ACCENT
+    } else if response.hovered() {
         INK
     } else {
         MUTED
@@ -251,11 +256,13 @@ pub fn segment(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response
         )
     });
     if selected && ui.is_enabled() {
-        ui.painter().rect_filled(rect, 5.0, INK);
+        ui.painter().rect_filled(rect, 6.0, ACCENT);
+    } else if response.hovered() && ui.is_enabled() {
+        ui.painter().rect_filled(rect, 6.0, NAV);
     }
-    if response.has_focus() || (response.hovered() && !selected) {
+    if response.has_focus() {
         ui.painter()
-            .rect_stroke(rect, 5.0, Stroke::new(1.0_f32, INK));
+            .rect_stroke(rect, 6.0, Stroke::new(1.0_f32, HOVER_LINE));
     }
     ui.painter().text(
         rect.center(),

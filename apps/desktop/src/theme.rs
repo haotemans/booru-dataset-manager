@@ -1,15 +1,16 @@
 use eframe::egui::{self, Color32, FontFamily, FontId, Stroke, TextStyle};
 
-pub const BG: Color32 = Color32::from_rgb(255, 255, 255);
+pub const BG: Color32 = Color32::WHITE;
 pub const PANEL: Color32 = Color32::WHITE;
-pub const INK: Color32 = Color32::from_rgb(25, 25, 25);
-pub const MUTED: Color32 = Color32::from_rgb(112, 112, 112);
-pub const LINE: Color32 = Color32::from_rgb(232, 232, 232);
-pub const ACCENT: Color32 = INK;
-pub const SOFT: Color32 = Color32::WHITE;
-pub const NAV: Color32 = Color32::WHITE;
+pub const INK: Color32 = Color32::from_rgb(24, 34, 52);
+pub const MUTED: Color32 = Color32::from_rgb(107, 119, 140);
+pub const LINE: Color32 = Color32::from_rgb(226, 234, 244);
+pub const ACCENT: Color32 = Color32::from_rgb(37, 99, 235);
+pub const SOFT: Color32 = Color32::from_rgb(239, 246, 255);
+pub const NAV: Color32 = Color32::from_rgb(245, 249, 255);
+pub const HOVER_LINE: Color32 = Color32::from_rgb(147, 197, 253);
 pub const AMBER: Color32 = Color32::from_rgb(148, 105, 43);
-pub const DANGER: Color32 = Color32::from_rgb(184, 58, 58);
+pub const DANGER: Color32 = Color32::from_rgb(220, 68, 68);
 
 pub fn medium(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("medium".into()))
@@ -70,11 +71,11 @@ pub fn setup(ctx: &egui::Context) {
     style.visuals.window_fill = PANEL;
     style.visuals.extreme_bg_color = PANEL;
     style.visuals.faint_bg_color = BG;
-    // Let selected controls use their white foreground on a black selection.
+    // Let selected controls use their white foreground on an accent selection.
     style.visuals.override_text_color = None;
-    style.visuals.hyperlink_color = INK;
-    style.visuals.code_bg_color = PANEL;
-    style.visuals.selection.bg_fill = INK;
+    style.visuals.hyperlink_color = ACCENT;
+    style.visuals.code_bg_color = SOFT;
+    style.visuals.selection.bg_fill = ACCENT;
     style.visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
     style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
     style.visuals.widgets.noninteractive.bg_fill = PANEL;
@@ -86,27 +87,32 @@ pub fn setup(ctx: &egui::Context) {
     style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, INK);
     style.visuals.widgets.hovered.bg_fill = NAV;
     style.visuals.widgets.hovered.weak_bg_fill = NAV;
-    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, INK);
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, HOVER_LINE);
     style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, INK);
     style.visuals.widgets.active.bg_fill = SOFT;
     style.visuals.widgets.active.weak_bg_fill = SOFT;
     style.visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-    style.visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, INK);
-    style.visuals.widgets.open.bg_fill = PANEL;
-    style.visuals.widgets.open.weak_bg_fill = PANEL;
-    style.visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, INK);
-    style.visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, INK);
+    style.visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, ACCENT);
+    style.visuals.widgets.open.bg_fill = SOFT;
+    style.visuals.widgets.open.weak_bg_fill = SOFT;
+    style.visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, HOVER_LINE);
+    style.visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, ACCENT);
     for visuals in [
         &mut style.visuals.widgets.inactive,
         &mut style.visuals.widgets.hovered,
         &mut style.visuals.widgets.active,
     ] {
-        visuals.rounding = 6.0.into();
+        visuals.rounding = 7.0.into();
         visuals.expansion = 0.0;
     }
     style.visuals.window_rounding = 10.0.into();
     style.visuals.window_stroke = Stroke::new(1.0_f32, LINE);
-    style.visuals.window_shadow = egui::epaint::Shadow::NONE;
+    style.visuals.window_shadow = egui::epaint::Shadow {
+        offset: [0.0, 4.0].into(),
+        blur: 14.0,
+        spread: 0.0,
+        color: Color32::from_black_alpha(14),
+    };
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.interact_size.y = 34.0;

@@ -20,7 +20,7 @@ pub fn show(ctx: &egui::Context) {
     let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
     egui::TopBottomPanel::top("window_titlebar")
         .exact_height(TITLE_HEIGHT)
-        .frame(egui::Frame::none().fill(NAV))
+        .frame(egui::Frame::none().fill(PANEL))
         .show(ctx, |ui| {
             let rect = ui.max_rect();
             let controls_left = rect.right() - BUTTON_WIDTH * 3.0 - 6.0;
@@ -74,10 +74,16 @@ pub fn show(ctx: &egui::Context) {
                 let color = if danger { egui::Color32::WHITE } else { INK };
                 ui.painter().rect(
                     button_rect,
-                    5.0,
-                    if danger { DANGER } else { PANEL },
-                    if highlighted {
-                        Stroke::new(1.0_f32, INK)
+                    6.0,
+                    if danger {
+                        DANGER
+                    } else if highlighted {
+                        NAV
+                    } else {
+                        PANEL
+                    },
+                    if response.has_focus() && !danger {
+                        Stroke::new(1.0_f32, HOVER_LINE)
                     } else {
                         Stroke::NONE
                     },
