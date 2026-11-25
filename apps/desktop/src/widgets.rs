@@ -227,22 +227,13 @@ pub fn nav_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Respo
     };
     icon(
         ui,
-        Rect::from_center_size(rect.left_center() + vec2(20.0, 0.0), vec2(17.0, 17.0)),
+        Rect::from_center_size(rect.center(), vec2(18.0, 18.0)),
         kind,
         color,
     );
-    ui.painter().text(
-        rect.left_center() + vec2(40.0, 0.0),
-        Align2::LEFT_CENTER,
-        label,
-        if selected {
-            medium(13.0)
-        } else {
-            FontId::proportional(13.0)
-        },
-        color,
-    );
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    response
+        .on_hover_text(label)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub fn segment(ui: &mut Ui, label: &str, selected: bool, width: f32) -> Response {

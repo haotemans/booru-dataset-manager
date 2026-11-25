@@ -275,13 +275,11 @@ impl BdmApp {
             return;
         }
         egui::SidePanel::left("navigation")
-            .exact_width(164.0)
+            .exact_width(60.0)
             .resizable(false)
-            .frame(egui::Frame::none().fill(PANEL).inner_margin(12.0))
+            .frame(egui::Frame::none().fill(PANEL).inner_margin(egui::vec2(10.0, 12.0)))
             .show(ctx, |ui| {
-                ui.add_space(14.0);
-                ui.label(RichText::new("资料库").size(11.0).color(MUTED));
-                ui.add_space(14.0);
+                ui.add_space(6.0);
                 for page in Page::ALL.into_iter().take(5) {
                     if nav_button(ui, page.icon(), page.title(), self.prefs.page == page).clicked()
                     {
@@ -290,7 +288,7 @@ impl BdmApp {
                     ui.add_space(4.0);
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
                     for page in Page::ALL.into_iter().skip(5).rev() {
                         if nav_button(ui, page.icon(), page.title(), self.prefs.page == page)
                             .clicked()
@@ -299,11 +297,11 @@ impl BdmApp {
                         }
                         ui.add_space(4.0);
                     }
-                    ui.add_space(12.0);
-                    ui.label(RichText::new("工作台").size(11.0).color(MUTED));
+                    ui.add_space(8.0);
+                    ui.separator();
                 });
                 ui.painter().vline(
-                    ui.max_rect().right() + 11.0,
+                    ui.max_rect().right() + 9.0,
                     ui.max_rect().y_range(),
                     egui::Stroke::new(1.0_f32, LINE),
                 );
