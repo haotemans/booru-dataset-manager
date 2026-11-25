@@ -2,7 +2,7 @@ use crate::{
     app::BdmApp,
     paths,
     shared_catalog::SharedCatalog,
-    theme::{card, MUTED},
+    theme::card,
     widgets::setting_header,
 };
 use bdm_config::{ModelScopeConfig, ModelScopeSite};
