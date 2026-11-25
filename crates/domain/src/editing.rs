@@ -76,17 +76,22 @@ impl MaskRegion {
 pub struct SourceArchive {
     pub path: std::path::PathBuf,
     pub sha256: String,
+    #[serde(default)]
     pub downloaded_original: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EditRecord {
     pub operation: String,
+    #[serde(default)]
     pub model: String,
     pub source_sha256: String,
+    #[serde(default)]
     pub parent_sha256: String,
     pub output_sha256: String,
+    #[serde(default)]
     pub mask: std::path::PathBuf,
+    #[serde(default)]
     pub regions: Vec<MaskRegion>,
     pub timestamp: u64,
     #[serde(default)]
@@ -121,5 +126,24 @@ mod tests {
         };
         assert!(polygon.contains(5.0, 5.0));
         assert!(!polygon.contains(15.0, 15.0));
+    }
+
+    #[test]
+    fn edit_record_deserializes_minimal_crop_border_metadata() {
+        let json = r#"{
+            "operation": "crop_border",
+            "crop_type": "white_border",
+            "source_sha256": "abc",
+            "output_sha256": "def",
+            "crop": {"x": 16, "y": 24, "width": 2658, "height": 3496},
+            "dimensions": [2658, 3496],
+            "timestamp": 1795422561,
+            "source_archive": {"path": "archive.png", "sha256": "abc"}
+        }"#;
+        let record: EditRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(record.operation, "crop_border");
+        assert!(record.model.is_empty());
+        assert!(record.regions.is_empty());
+        assert!(!record.source_archive.unwrap().downloaded_original);
     }
 }
