@@ -277,7 +277,11 @@ impl BdmApp {
         egui::SidePanel::left("navigation")
             .exact_width(60.0)
             .resizable(false)
-            .frame(egui::Frame::none().fill(PANEL).inner_margin(egui::vec2(10.0, 12.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(PANEL)
+                    .inner_margin(egui::vec2(10.0, 12.0)),
+            )
             .show(ctx, |ui| {
                 ui.add_space(6.0);
                 for page in Page::ALL.into_iter().take(5) {
