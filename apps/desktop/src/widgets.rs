@@ -204,13 +204,6 @@ pub fn nav_button(ui: &mut Ui, kind: &str, label: &str, selected: bool) -> Respo
     });
     if selected {
         ui.painter().rect_filled(rect.shrink(1.0), 7.0, SOFT);
-        ui.painter().line_segment(
-            [
-                rect.left_center() - vec2(0.0, 8.0),
-                rect.left_center() + vec2(0.0, 8.0),
-            ],
-            Stroke::new(2.5_f32, ACCENT),
-        );
     } else if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect.shrink(1.0), 7.0, NAV);
         if response.has_focus() {

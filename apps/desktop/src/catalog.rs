@@ -217,19 +217,37 @@ impl BdmApp {
             return;
         }
         self.catalog.path = Some(path.to_owned());
+        let mut detail = None;
+        fn map_step<E: std::fmt::Display>(
+            name: &str,
+            res: Result<(), E>,
+            detail: &mut Option<String>,
+        ) -> Result<(), CatalogError> {
+            res.map_err(|err| {
+                *detail = Some(format!("{name}: {err}"));
+                CatalogError::Storage
+            })
+        }
         let result = bdm_infrastructure::catalog::SqliteCatalog::open(path).and_then(|mut repo| {
-            repo.recover_imports().map_err(|_| CatalogError::Storage)?;
-            repo.recover_repairs().map_err(|_| CatalogError::Storage)?;
-            repo.recover_deletions()
-                .map_err(|_| CatalogError::Storage)?;
-            repo.attach_known_collections()
-                .map_err(|_| CatalogError::Storage)?;
-            repo.recover_import_tags()
-                .map_err(|_| CatalogError::Storage)?;
-            repo.materialize_artifacts()
-                .map_err(|_| CatalogError::Storage)?;
-            repo.recover_workflows()
-                .map_err(|_| CatalogError::Storage)?;
+            map_step("recover_imports", repo.recover_imports(), &mut detail)?;
+            map_step("recover_repairs", repo.recover_repairs(), &mut detail)?;
+            map_step("recover_deletions", repo.recover_deletions(), &mut detail)?;
+            map_step(
+                "attach_known_collections",
+                repo.attach_known_collections(),
+                &mut detail,
+            )?;
+            map_step(
+                "recover_import_tags",
+                repo.recover_import_tags(),
+                &mut detail,
+            )?;
+            map_step(
+                "materialize_artifacts",
+                repo.materialize_artifacts(),
+                &mut detail,
+            )?;
+            map_step("recover_workflows", repo.recover_workflows(), &mut detail)?;
             self.attach_catalog(Box::new(repo))
         });
         if result.is_ok() {
@@ -240,7 +258,7 @@ impl BdmApp {
         if let Err(error) = result {
             self.catalog.repository = None;
             self.catalog.error = Some(error);
-            self.log("ERROR", &error.to_string());
+            self.log("ERROR", &detail.unwrap_or_else(|| error.to_string()));
         }
     }
 
