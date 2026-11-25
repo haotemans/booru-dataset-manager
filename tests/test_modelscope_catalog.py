@@ -98,6 +98,58 @@ class SharedCatalogTests(unittest.TestCase):
         head = self.run_on(self.b, 'commit', message='Only metadata')['head']
         diff = self.run_on(self.b, 'inspect', commit_id=head)['diff']
         self.assertEqual(diff['changes'], [{'id': entry['id'], 'name': entry['name'], 'change': 'M'}])
+
+    def _create_bdm_catalog(self, directory, *, media_id, post_id, md5, tag, label, caption, review):
+        directory.mkdir(parents=True, exist_ok=True)
+        img_dir = directory / 'library' / 'originals' / md5
+        img_dir.mkdir(parents=True, exist_ok=True)
+        img_path = img_dir / 'original.png'
+        img_path.write_bytes(PNG)
+        sha = file_info(img_path)['sha256']
+        db_path = directory / 'catalog.sqlite3'
+        db = sqlite3.connect(db_path)
+        db.executescript('''
+            CREATE TABLE collections (id INTEGER PRIMARY KEY, category INTEGER NOT NULL, tag TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'danbooru', source_metadata TEXT);
+            CREATE TABLE media (id INTEGER PRIMARY KEY, source_key TEXT UNIQUE NOT NULL, metadata TEXT NOT NULL);
+            CREATE TABLE media_sources (media_id INTEGER PRIMARY KEY, provider TEXT NOT NULL, remote_id INTEGER NOT NULL, metadata TEXT NOT NULL);
+            CREATE TABLE collection_media (collection_id INTEGER NOT NULL, media_id INTEGER NOT NULL, PRIMARY KEY(collection_id, media_id));
+            CREATE TABLE text_artifacts (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL, kind TEXT NOT NULL, content TEXT NOT NULL, state TEXT NOT NULL, reviewed INTEGER NOT NULL, provenance TEXT NOT NULL, is_current INTEGER NOT NULL);
+            CREATE TABLE agent_reviews (media_id INTEGER PRIMARY KEY, image_sha256 TEXT NOT NULL, decision TEXT NOT NULL, report TEXT NOT NULL, survivor_id INTEGER, survivor_sha256 TEXT);
+        ''')
+        db.execute("INSERT INTO collections(id, category, tag, provider) VALUES(1, 1, ?, 'gelbooru')", (tag,))
+        post = {'provider': 'gelbooru', 'id': post_id, 'md5': md5, 'file_ext': 'png', 'tag_string': label}
+        meta = {'id': media_id, 'post': post, 'path': str(img_path), 'thumbnail': str(img_path),
+                'sha256': sha, 'source_sha256': sha, 'collections': [1], 'artist_scope': [], 'keep': False}
+        db.execute("INSERT INTO media(id, source_key, metadata) VALUES(?,?,?)", (media_id, f'gelbooru:{post_id}', json.dumps(meta)))
+        db.execute("INSERT INTO media_sources(media_id, provider, remote_id, metadata) VALUES(?,?,?,?)", (media_id, 'gelbooru', post_id, json.dumps(post)))
+        db.execute("INSERT INTO collection_media(collection_id, media_id) VALUES(1, ?)", (media_id,))
+        db.execute("INSERT INTO text_artifacts(media_id, kind, content, state, reviewed, provenance, is_current) VALUES(?,'tags',?,'ready',1,'synced',1)", (media_id, label))
+        db.execute("INSERT INTO text_artifacts(media_id, kind, content, state, reviewed, provenance, is_current) VALUES(?,'caption',?,'ready',1,'synced',1)", (media_id, caption))
+        db.execute("INSERT INTO agent_reviews(media_id, image_sha256, decision, report) VALUES(?,?,?,?)", (media_id, sha, review, 'ok'))
+        db.commit()
+        db.close()
+        return db_path
+
+    def test_bidirectional_sync_merges_two_machines_without_conflicts(self):
+        db_a = self._create_bdm_catalog(
+            self.root / 'data_a', media_id=1, post_id=101, md5='aaa111',
+            tag='artist_a', label='1girl solo', caption='first caption', review='approved',
+        )
+        db_b = self._create_bdm_catalog(
+            self.root / 'data_b', media_id=1, post_id=202, md5='bbb222',
+            tag='artist_b', label='1boy', caption='second caption', review='rejected',
+        )
+        res_a1 = self.run_on(self.a, 'sync', catalog=str(db_a), library=str(self.root / 'data_a/library'))['sync']
+        self.assertEqual((res_a1['status'], res_a1['exported'], res_a1['imported']), ('synced', 1, 0))
+        res_b = self.run_on(self.b, 'sync', catalog=str(db_b), library=str(self.root / 'data_b/library'))['sync']
+        self.assertEqual((res_b['status'], res_b['exported'], res_b['imported']), ('synced', 1, 1))
+        res_a2 = self.run_on(self.a, 'sync', catalog=str(db_a), library=str(self.root / 'data_a/library'))['sync']
+        self.assertEqual((res_a2['status'], res_a2['exported'], res_a2['imported']), ('synced', 0, 1))
+        for db_path in (db_a, db_b):
+            db = sqlite3.connect(db_path)
+            self.assertEqual(db.execute('SELECT count(*) FROM media').fetchone()[0], 2)
+            self.assertEqual(db.execute('SELECT count(*) FROM collections').fetchone()[0], 2)
+            db.close()
         self.remote.downloads.clear()
         self.run_on(self.b, 'push')
         self.assertEqual(self.remote.downloads, [])

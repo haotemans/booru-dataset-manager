@@ -81,11 +81,21 @@ struct View {
 }
 
 #[derive(Deserialize)]
+struct SyncSummary {
+    status: String,
+    exported: usize,
+    imported: usize,
+    updated: usize,
+    conflicts: usize,
+}
+
+#[derive(Deserialize)]
 struct Response {
     view: View,
     path: Option<PathBuf>,
     entry: Option<EntryRef>,
     diff: Option<CommitDiff>,
+    sync: Option<SyncSummary>,
 }
 
 #[derive(Default)]
@@ -94,6 +104,8 @@ pub struct SharedCatalog {
     config: Option<ModelScopeConfig>,
     pending: Option<(&'static str, Receiver<Result<Response, String>>)>,
     error: Option<String>,
+    sync_status: Option<String>,
+    sync_reload: bool,
     view: View,
     query: String,
     selection: Option<String>,
@@ -126,6 +138,38 @@ impl SharedCatalog {
         }
         self.open = true;
         self.start(ctx, "view", json!({}));
+    }
+
+    pub fn sync(
+        &mut self,
+        ctx: &egui::Context,
+        config: ModelScopeConfig,
+        catalog: PathBuf,
+        library: PathBuf,
+    ) {
+        if self.busy() {
+            return;
+        }
+        if self.config.as_ref() != Some(&config) {
+            let open = self.open;
+            *self = Self::default();
+            self.open = open;
+            self.config = Some(config);
+        }
+        self.sync_status = Some("正在同步图库进度...".into());
+        self.start(
+            ctx,
+            "sync",
+            json!({ "catalog": catalog, "library": library }),
+        );
+    }
+
+    pub fn sync_status(&self) -> Option<&str> {
+        self.sync_status.as_deref()
+    }
+
+    pub fn take_sync_reload(&mut self) -> bool {
+        std::mem::take(&mut self.sync_reload)
     }
 
     fn start(&mut self, ctx: &egui::Context, action: &'static str, args: Value) {
@@ -194,8 +238,28 @@ impl SharedCatalog {
                 {
                     self.error = Some(format!("{} ({})", error, path.display()));
                 }
+                if let Some(sync) = response.sync {
+                    if sync.status == "conflicts" || sync.conflicts > 0 {
+                        self.open = true;
+                        self.sync_status = Some(format!(
+                            "同步发现 {} 个冲突，请在下方选择保留版本后再次同步。",
+                            sync.conflicts
+                        ));
+                    } else {
+                        self.sync_status = Some(format!(
+                            "同步完成：上传 {} · 新增 {} · 更新 {}",
+                            sync.exported, sync.imported, sync.updated
+                        ));
+                        if sync.imported > 0 || sync.updated > 0 {
+                            self.sync_reload = true;
+                        }
+                    }
+                }
             }
-            Err(error) => self.error = Some(error),
+            Err(error) => {
+                self.sync_status = None;
+                self.error = Some(error);
+            }
         }
     }
 

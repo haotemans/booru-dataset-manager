@@ -139,7 +139,7 @@ class Catalog:
                 operations = {
                     'status': self.status, 'list': self.list_entries, 'add': self.add,
                     'edit': self.edit, 'import': self.import_media, 'delete': self.delete,
-                    'commit': self.commit,
+                    'commit': self.commit, 'sync': self.sync,
                     'pull': self.pull, 'push': self.push, 'history': self.history,
                     'original': self.download, 'clear-cache': self.clear_cache,
                     'inspect': self.inspect_commit, 'resolve': self.resolve, 'revert': self.revert,
@@ -262,6 +262,24 @@ class Catalog:
                                 'collection': collection, 'caption': caption, 'review': review,
                                 'original': self.store_original(file)})
 
+    def _resolve_local_original(self, media, media_id):
+        post = media['post']
+        current = Path(windows_path_spelling(media['path']))
+        archive = (media.get('edit') or {}).get('source_archive')
+        source_sha = media.get('source_sha256', '')
+        source_md5 = '' if source_sha else post.get('md5', '')
+        if archive and archive.get('downloaded_original'):
+            original = Path(windows_path_spelling(archive['path']))
+            source_sha = source_sha or archive['sha256']
+        elif post['file_ext'] in {'jpg', 'jpeg', 'png', 'webp'}:
+            downloaded = current.with_name(f"downloaded-original.{post['file_ext']}")
+            original = downloaded if downloaded.is_file() else current
+        else:
+            original = current
+        if not source_sha and not source_md5:
+            raise BackupError(f'BDM media {media_id} has no original checksum.')
+        return original, source_sha, source_md5
+
     def import_media(self, catalog, media_id):
         self.assert_editable()
         catalog = Path(catalog).resolve()
@@ -281,20 +299,7 @@ class Catalog:
                 'WHERE cm.media_id=? ORDER BY c.tag', (media_id,),
             )]
         post = media['post']
-        current = Path(windows_path_spelling(media['path']))
-        archive = (media.get('edit') or {}).get('source_archive')
-        source_sha = media.get('source_sha256', '')
-        source_md5 = '' if source_sha else post.get('md5', '')
-        if archive and archive['downloaded_original']:
-            original = Path(windows_path_spelling(archive['path']))
-            source_sha = source_sha or archive['sha256']
-        elif post['file_ext'] in {'jpg', 'jpeg', 'png', 'webp'}:
-            downloaded = current.with_name(f"downloaded-original.{post['file_ext']}")
-            original = downloaded if downloaded.is_file() else current
-        else:
-            original = current
-        if not source_sha and not source_md5:
-            raise BackupError(f'BDM media {media_id} has no original checksum.')
+        original, source_sha, source_md5 = self._resolve_local_original(media, media_id)
         provider = post.get('provider', 'danbooru')
         identifier = sha256(f'bdm:{provider}:{post["id"]}'.encode()).hexdigest()[:32]
         target = self.worktree / entry_path(identifier)
@@ -307,6 +312,278 @@ class Catalog:
             'review': 'unreviewed',
             'original': self.store_original(original, source_sha=source_sha, source_md5=source_md5),
         })
+
+    def _portable_edit(self, edit):
+        if not edit:
+            return None
+        copy = json.loads(json.dumps(edit))
+        archive = copy.get('source_archive')
+        if isinstance(archive, dict) and 'path' in archive:
+            archive['path'] = Path(windows_path_spelling(archive['path'])).name
+        return copy
+
+    def sync(self, catalog, library=None):
+        self.assert_editable()
+        catalog = Path(catalog).resolve()
+        if not catalog.is_file():
+            raise BackupError('Choose an existing BDM catalog.')
+        library_root = Path(library).resolve() if library else (catalog.parent / 'library')
+
+        exported = 0
+        with closing(sqlite3.connect(catalog.as_uri() + '?mode=ro', uri=True)) as db:
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            media_rows = db.execute('SELECT id, metadata FROM media ORDER BY id').fetchall()
+            artifacts = {}
+            for media_id, kind, content, provenance in db.execute(
+                'SELECT media_id, kind, content, provenance FROM text_artifacts WHERE is_current=1'
+            ):
+                artifacts.setdefault(media_id, {})[kind] = (content, provenance)
+            reviews = {}
+            if 'agent_reviews' in tables:
+                for media_id, decision, report in db.execute(
+                    'SELECT media_id, decision, report FROM agent_reviews'
+                ):
+                    reviews[media_id] = (decision, report)
+            col_links = {}
+            for media_id, category, tag, provider, source_meta in db.execute(
+                'SELECT cm.media_id, c.category, c.tag, c.provider, c.source_metadata '
+                'FROM collection_media cm JOIN collections c ON c.id=cm.collection_id ORDER BY c.id'
+            ):
+                col_links.setdefault(media_id, []).append({
+                    'category': category, 'tag': tag, 'provider': provider, 'source_metadata': source_meta,
+                })
+
+        for media_id, raw_meta in media_rows:
+            media = json.loads(raw_meta)
+            post = media['post']
+            provider = post.get('provider', 'danbooru')
+            identifier = sha256(f'bdm:{provider}:{post["id"]}'.encode()).hexdigest()[:32]
+            text = artifacts.get(media_id, {})
+            tags_val, tags_prov = text.get('tags', (post.get('tag_string', ''), 'synced'))
+            cap_val, cap_prov = text.get('caption', ('', 'synced'))
+            dec, report = reviews.get(media_id, ('unreviewed', ''))
+            review = dec if dec in REVIEWS else 'unreviewed'
+            cols = col_links.get(media_id, [])
+            col_str = ', '.join(sorted({c['tag'] for c in cols}))
+            bdm_sync = {
+                'provider': provider,
+                'post': post,
+                'keep': bool(media.get('keep', False)),
+                'artist_scope': media.get('artist_scope', []),
+                'minimum_short_side': media.get('minimum_short_side', 800),
+                'flatten_transparency': bool(media.get('flatten_transparency', True)),
+                'review_report': report,
+                'tags_provenance': tags_prov,
+                'caption_provenance': cap_prov,
+                'collections': cols,
+                'edit': self._portable_edit(media.get('edit')),
+            }
+            target = self.worktree / entry_path(identifier)
+            existing = read_entry(target.read_bytes(), entry_path(identifier)) if target.is_file() else None
+            if existing is not None:
+                same_fields = (
+                    existing.get('labels') == tags_val
+                    and existing.get('caption') == cap_val
+                    and existing.get('collection') == col_str
+                    and existing.get('review') == review
+                    and existing.get('bdm_sync') == bdm_sync
+                )
+                if same_fields:
+                    continue
+                original_meta = existing['original']
+            else:
+                original_path, source_sha, source_md5 = self._resolve_local_original(media, media_id)
+                original_meta = self.store_original(original_path, source_sha=source_sha, source_md5=source_md5)
+            self.save_entry({
+                'id': identifier,
+                'name': f'{provider} {post["id"]}',
+                'labels': tags_val,
+                'caption': cap_val,
+                'collection': col_str,
+                'review': review,
+                'original': original_meta,
+                'bdm_sync': bdm_sync,
+            })
+            exported += 1
+
+        if self.status()['changes']:
+            self.commit(f'BDM sync: {exported} updated')
+
+        upstream = self.fetch()
+        if upstream:
+            pull_result = self.pull()
+            if pull_result['conflicts']:
+                return {
+                    'sync': {
+                        'status': 'conflicts',
+                        'exported': exported,
+                        'imported': 0,
+                        'updated': 0,
+                        'conflicts': len(pull_result['conflicts']),
+                        'verified_originals': 0,
+                    }
+                }
+
+        verified_originals = 0
+        if self.status()['ahead'] > 0:
+            verified_originals = self.push()['verified_originals']
+
+        imported = 0
+        updated = 0
+        entries_dir = self.worktree / 'entries'
+        remote_entries = []
+        if entries_dir.is_dir():
+            for path in sorted(entries_dir.glob('*.json')):
+                rel = f'entries/{path.name}'
+                entry = read_entry(path.read_bytes(), rel)
+                if isinstance(entry.get('bdm_sync'), dict):
+                    remote_entries.append(entry)
+
+        if remote_entries:
+            with closing(sqlite3.connect(catalog, timeout=5.0)) as db:
+                db.execute('PRAGMA foreign_keys = ON')
+                db.execute('PRAGMA busy_timeout = 3000')
+                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                by_key = {}
+                for media_id, raw_meta in db.execute('SELECT id, metadata FROM media'):
+                    m = json.loads(raw_meta)
+                    p = m['post']
+                    by_key[(p.get('provider', 'danbooru'), str(p['id']))] = (media_id, m)
+                col_map = {
+                    (cat, tag): cid for cid, cat, tag in db.execute('SELECT id, category, tag FROM collections')
+                }
+
+                def ensure_collection(col):
+                    key = (col['category'], col['tag'])
+                    if key in col_map:
+                        return col_map[key]
+                    cur = db.execute(
+                        'INSERT INTO collections(category, tag, provider, source_metadata) VALUES(?,?,?,?)',
+                        (col['category'], col['tag'], col.get('provider', 'danbooru'), col.get('source_metadata')),
+                    )
+                    col_map[key] = cur.lastrowid
+                    return cur.lastrowid
+
+                with db:
+                    for entry in remote_entries:
+                        meta = entry['bdm_sync']
+                        post = meta['post']
+                        provider = meta.get('provider', post.get('provider', 'danbooru'))
+                        key = (provider, str(post['id']))
+                        cids = [ensure_collection(c) for c in meta.get('collections', [])]
+                        if key in by_key:
+                            media_id, _ = by_key[key]
+                            changed = False
+                            for kind, val, prov in [
+                                ('tags', entry['labels'], meta.get('tags_provenance', 'synced')),
+                                ('caption', entry['caption'], meta.get('caption_provenance', 'synced')),
+                            ]:
+                                row = db.execute(
+                                    'SELECT content FROM text_artifacts WHERE media_id=? AND kind=? AND is_current=1',
+                                    (media_id, kind),
+                                ).fetchone()
+                                if (row[0] if row else '') != val:
+                                    db.execute(
+                                        'UPDATE text_artifacts SET is_current=0 WHERE media_id=? AND kind=?',
+                                        (media_id, kind),
+                                    )
+                                    db.execute(
+                                        'INSERT INTO text_artifacts(media_id, kind, content, state, reviewed, provenance, is_current) '
+                                        "VALUES(?,?,?,'ready',1,?,1)",
+                                        (media_id, kind, val, prov),
+                                    )
+                                    changed = True
+                            if 'agent_reviews' in tables and entry['review'] in {'approved', 'rejected'}:
+                                rrow = db.execute(
+                                    'SELECT decision FROM agent_reviews WHERE media_id=?', (media_id,)
+                                ).fetchone()
+                                if not rrow or rrow[0] != entry['review']:
+                                    db.execute(
+                                        'INSERT INTO agent_reviews(media_id, image_sha256, decision, report) '
+                                        'VALUES(?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET decision=excluded.decision, report=excluded.report',
+                                        (media_id, entry['original']['sha256'], entry['review'], meta.get('review_report', '')),
+                                    )
+                                    changed = True
+                            for cid in cids:
+                                cur = db.execute(
+                                    'INSERT OR IGNORE INTO collection_media(collection_id, media_id) VALUES(?,?)',
+                                    (cid, media_id),
+                                )
+                                if cur.rowcount:
+                                    changed = True
+                            if changed:
+                                updated += 1
+                        else:
+                            cached = self.cache_path(entry)
+                            if not cached.is_file() or file_info(cached) != original_info(entry):
+                                self.download(entry['id'])
+                            ext = entry['original']['extension']
+                            sha = entry['original']['sha256']
+                            folder = library_root / 'originals' / (post.get('md5') or sha[:32])
+                            folder.mkdir(parents=True, exist_ok=True)
+                            dest_img = folder / f'original.{ext}'
+                            if not dest_img.is_file() or file_info(dest_img) != original_info(entry):
+                                shutil.copyfile(cached, dest_img)
+                            new_media = {
+                                'id': 0,
+                                'post': post,
+                                'path': str(dest_img),
+                                'thumbnail': str(dest_img),
+                                'sha256': sha,
+                                'source_sha256': sha,
+                                'collections': cids,
+                                'artist_scope': meta.get('artist_scope', []),
+                                'keep': bool(meta.get('keep', False)),
+                                'minimum_short_side': meta.get('minimum_short_side', 800),
+                                'flatten_transparency': bool(meta.get('flatten_transparency', True)),
+                                'edit': None,
+                            }
+                            cur = db.execute(
+                                'INSERT INTO media(source_key, metadata) VALUES(?,?)',
+                                (f'{provider}:{post["id"]}', json.dumps(new_media, ensure_ascii=False)),
+                            )
+                            media_id = cur.lastrowid
+                            new_media['id'] = media_id
+                            db.execute(
+                                'UPDATE media SET metadata=? WHERE id=?',
+                                (json.dumps(new_media, ensure_ascii=False), media_id),
+                            )
+                            db.execute(
+                                'INSERT OR IGNORE INTO media_sources(media_id, provider, remote_id, metadata) VALUES(?,?,?,?)',
+                                (media_id, provider, int(post['id']), json.dumps(post, ensure_ascii=False)),
+                            )
+                            for cid in cids:
+                                db.execute(
+                                    'INSERT OR IGNORE INTO collection_media(collection_id, media_id) VALUES(?,?)',
+                                    (cid, media_id),
+                                )
+                            for kind, val, prov in [
+                                ('tags', entry['labels'], meta.get('tags_provenance', 'synced')),
+                                ('caption', entry['caption'], meta.get('caption_provenance', 'synced')),
+                            ]:
+                                if val:
+                                    db.execute(
+                                        'INSERT INTO text_artifacts(media_id, kind, content, state, reviewed, provenance, is_current) '
+                                        "VALUES(?,?,?,'ready',1,?,1)",
+                                        (media_id, kind, val, prov),
+                                    )
+                            if 'agent_reviews' in tables and entry['review'] in {'approved', 'rejected'}:
+                                db.execute(
+                                    'INSERT INTO agent_reviews(media_id, image_sha256, decision, report) VALUES(?,?,?,?)',
+                                    (media_id, sha, entry['review'], meta.get('review_report', '')),
+                                )
+                            imported += 1
+
+        return {
+            'sync': {
+                'status': 'synced',
+                'exported': exported,
+                'imported': imported,
+                'updated': updated,
+                'conflicts': 0,
+                'verified_originals': verified_originals,
+            }
+        }
 
     def get_entry(self, entry_id):
         path = entry_path(entry_id)
@@ -542,7 +819,7 @@ def run_request(config, workspace, action, args, *, include_view=False):
         raise BackupError('Set the ModelScope dataset in BDM first.')
     site = os.getenv('MODELSCOPE_BACKUP_SITE') or configured_site(config) or 'modelscope.cn'
     token = None
-    if action in {'pull', 'push', 'original', 'clear-cache'}:
+    if action in {'pull', 'push', 'original', 'clear-cache', 'sync'}:
         token = os.getenv('MODELSCOPE_TOKEN') or windows_token(dataset)
     try:
         return Catalog(workspace, dataset, site, token=token).run(action, args,

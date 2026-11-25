@@ -126,6 +126,9 @@ impl BdmApp {
     }
 
     pub fn poll_modelscope_transfer(&mut self, ctx: &egui::Context) {
+        if self.modelscope.shared.take_sync_reload() {
+            self.open_catalog(&paths::data_directory().join("catalog.sqlite3"));
+        }
         let idle = self.catalog_transfer_idle();
         let settings = &mut self.modelscope;
         let Some(receiver) = &settings.pending else {
@@ -239,6 +242,29 @@ impl BdmApp {
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
                 if ui
+                    .add_enabled_ui(enabled && idle, |ui| {
+                        crate::widgets::tool_button(ui, "refresh", "同步图库进度", true)
+                    })
+                    .inner
+                    .on_disabled_hover_text("等当前图库任务结束后再同步。")
+                    .clicked()
+                {
+                    let root = paths::project_root();
+                    match settings.save(&root).and_then(|_| {
+                        let mut config = ModelScopeConfig::new(&settings.saved_dataset)?;
+                        config.site = Some(settings.site);
+                        Ok(config)
+                    }) {
+                        Ok(config) => settings.shared.sync(
+                            ui.ctx(),
+                            config,
+                            paths::data_directory().join("catalog.sqlite3"),
+                            PathBuf::from(&self.prefs.root),
+                        ),
+                        Err(error) => settings.error = Some(error),
+                    }
+                }
+                if ui
                     .add_enabled(
                         enabled,
                         egui::Button::new(if settings.shared.visible() {
@@ -294,6 +320,14 @@ impl BdmApp {
                     }
                 }
             });
+            if let Some(status) = settings.shared.sync_status() {
+                ui.horizontal_wrapped(|ui| {
+                    if settings.shared.busy() {
+                        ui.spinner();
+                    }
+                    ui.label(status);
+                });
+            }
             if let Some(status) = &settings.status {
                 ui.horizontal_wrapped(|ui| {
                     if settings.pending.is_some() {

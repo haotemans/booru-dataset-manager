@@ -129,7 +129,7 @@ def server(config, source, roots, destination, receive_to, shared_workspace, pro
 
     @mcp.tool(structured_output=True)
     async def bdm_modelscope_catalog(
-        action: Literal['status', 'view', 'list', 'add', 'edit', 'import', 'delete', 'commit', 'pull',
+        action: Literal['status', 'view', 'list', 'add', 'edit', 'import', 'delete', 'commit', 'sync', 'pull',
                         'push', 'history', 'inspect', 'original', 'clear-cache', 'resolve', 'revert'],
         arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
