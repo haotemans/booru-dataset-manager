@@ -368,223 +368,287 @@ impl BdmApp {
     }
 
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
-        self.modelscope_settings_card(ui);
-        ui.add_space(16.0);
-        self.gelbooru_settings_card(ui);
-        ui.add_space(16.0);
-        egui::CollapsingHeader::new("Danbooru 来源设置")
-            .default_open(matches!(
-                self.prefs.download_source,
-                bdm_domain::sources::DownloadSource::Danbooru
-                    | bdm_domain::sources::DownloadSource::Safebooru
-            ))
-            .show(ui, |ui| self.danbooru_settings_card(ui));
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            setting_header(ui, "image", "图片查看");
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.checkbox(&mut self.prefs.auto_load_review_original, "审核时自动加载原图")
-                    .on_hover_text("默认使用缩略图。开启后，打开审核和切图自动加载原图；仍可手动切换。设置自动保存。");
-                let (rect, response) = ui.allocate_exact_size(vec2(110.0, 32.0), egui::Sense::hover());
-                icon(ui, egui::Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), vec2(17.0, 17.0)), "image", MUTED);
-                icon(ui, egui::Rect::from_center_size(rect.center(), vec2(13.0, 13.0)), "forward", if self.prefs.auto_load_review_original { ACCENT } else { MUTED });
-                icon(ui, egui::Rect::from_center_size(rect.right_center() - vec2(18.0, 0.0), vec2(29.0, 29.0)), "image", if self.prefs.auto_load_review_original { ACCENT } else { MUTED });
-                response.on_hover_text("缩略图 → 原图。裁剪和修复选区映射到原图，保存修改原图；缩放和平移只改变视图。");
-            });
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            setting_header(ui, "character", "角色关系");
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                if tool_button(ui, "character", "角色关系设置", false).clicked() {
-                    self.dialog = Some(Dialog::CharacterRelations);
-                }
-            });
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            setting_header(ui, "tag", "文本姓名格式");
-            ui.add_space(8.0);
-            icon_label(ui, "lock", "姓名本地处理", "画师名和角色名不发送给 AI；本地合并到标签与自然语言，按画师、角色、描述排列，下划线转为空格。");
-            ui.add_space(12.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label("画师名");
-                egui::ComboBox::from_id_salt("artist_tag_format")
-                    .selected_text(self.prefs.artist_tag_format.artist_label())
-                    .show_ui(ui, |ui| {
-                        for format in [
-                            ProtectedTagFormat::At,
-                            ProtectedTagFormat::Plain,
-                            ProtectedTagFormat::Typed,
-                        ] {
-                            ui.selectable_value(
-                                &mut self.prefs.artist_tag_format,
-                                format,
-                                format.artist_label(),
-                            );
-                        }
-                    });
-                ui.label("角色名");
-                egui::ComboBox::from_id_salt("character_tag_format")
-                    .selected_text(self.prefs.character_tag_format.character_label())
-                    .show_ui(ui, |ui| {
-                        for format in [ProtectedTagFormat::Plain, ProtectedTagFormat::Typed] {
-                            ui.selectable_value(
-                                &mut self.prefs.character_tag_format,
-                                format,
-                                format.character_label(),
-                            );
-                        }
-                    });
-            });
-            ui.add_space(8.0);
-            icon_label(ui, "text", "画师 → 角色 → 描述", "画师格式可选 @name、name 或 artist:name；角色可选 name 或 character:name。");
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            setting_header(ui, "download", "下载范围");
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                badge(ui, "PNG", ACCENT);
-                badge(ui, "JPEG", ACCENT);
-                badge(ui, "WebP", ACCENT);
-            })
-            .response
-            .on_hover_text(self.prefs.download_media.description());
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label("最小短边");
-                ui.add(
-                    egui::DragValue::new(&mut self.minimum_short_side_draft)
-                        .range(1..=bdm_domain::ingest::MAXIMUM_SHORT_SIDE)
-                        .suffix(" px"),
-                );
-                if icon_button(ui, "reset", "恢复默认", false).clicked() {
-                    self.minimum_short_side_draft =
-                        bdm_domain::ingest::default_minimum_short_side();
-                }
-                if icon_button(ui, "check", "保存下载设置", true).clicked() {
-                    match self.save_download_settings() {
-                        Ok(()) => self.notify(ui.ctx(), "下载设置已保存，下次新建下载任务时生效。"),
-                        Err(error) => self.notify(ui.ctx(), error),
-                    }
-                }
-            });
-            ui.add(
-                egui::Label::new(
-                    RichText::new(format!("已保存 ≥ {} px", self.prefs.minimum_short_side))
-                        .size(12.0)
-                        .color(MUTED),
-                )
-                .wrap(),
-            )
-            .on_hover_text(
-                "默认 800 px。下载前筛选、下载后核验。修改用于新任务，继续旧任务沿用原阈值。",
-            );
-            ui.checkbox(
-                &mut self.prefs.flatten_transparency,
-                "下载时将透明图片自动转为白底",
-            )
-            .on_hover_text(
-                "新建下载任务时生效；已下载文件不会被自动改写。关闭后保留原始透明通道。",
-            );
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            setting_header(ui, "layers", "图片编辑");
-            ui.add_space(8.0);
-            ui.checkbox(&mut self.prefs.confirm_image_edits,"局部修复后二次确认")
-                .on_hover_text("开启后局部修复先预览再保存；关闭后直接保存。裁剪在图片下方确认，原图另行保留。设置自动保存。");
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            setting_header(ui, "layers", "存储位置");
-            ui.add_space(16.0);
-            if let Some(path) = &self.catalog.path {
-                ui.label(RichText::new("收藏记录位置").size(13.0).strong());
-                ui.label(
-                    RichText::new(path.display().to_string())
-                        .size(12.0)
-                        .color(MUTED),
-                );
-                ui.add_space(14.0);
-            }
-            ui.label(RichText::new("托管根目录").size(13.0).strong());
-            ui.add_sized(
-                [ui.available_width().min(650.0), 36.0],
-                egui::TextEdit::singleline(&mut self.root_draft)
-                    .hint_text(crate::paths::library_directory().display().to_string())
-                    .margin(vec2(12.0, 9.0)),
-            );
-            ui.add_space(14.0);
-            if primary(ui, "保存").clicked() {
-                let path = self.root_draft.trim();
-                if !path.is_empty() && !std::path::Path::new(path).is_absolute() {
-                    self.notify(ui.ctx(), "请填写绝对路径，例如 D:\\BooruLibrary。");
-                } else {
-                    self.prefs.root = path.into();
-                    self.log("INFO", "已保存工作空间路径偏好，未移动任何文件。");
-                    self.notify(ui.ctx(), "路径偏好已保存。");
-                }
-            }
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            section(ui, "视觉模型", "");
-            ui.add_space(12.0);
-            ui.label(RichText::new("模型目录").size(13.0));
-            ui.add_sized(
-                [ui.available_width(), 36.0],
-                egui::TextEdit::singleline(&mut self.model_draft)
-                    .hint_text("默认跟随托管根目录 models/")
-                    .margin(vec2(10.0, 9.0)),
-            );
-            ui.horizontal_wrapped(|ui| {
-                if tool_button(ui, "check", "保存", false).clicked() {
-                    let path = self.model_draft.trim();
-                    if path.is_empty() || std::path::Path::new(path).is_absolute() {
-                        self.prefs.model_path = path.into();
-                        self.notify(ui.ctx(), "模型目录偏好已保存。");
-                    } else {
-                        self.notify(ui.ctx(), "模型目录需要使用绝对路径。");
-                    }
-                }
-                if ui
-                    .add_enabled_ui(
-                        !self.workflow_active() && !self.demo && !self.is_capture(),
-                        |ui| tool_button(ui, "download", "下载模型", false),
-                    )
-                    .inner
-                    .clicked()
-                {
-                    if let Err(e) = self.start_model_download(ui.ctx()) {
-                        self.workflows.error = Some(e);
-                    }
-                }
-                ui.label(self.model_directory().display().to_string());
-            });
-            ui.add_space(5.0);
-        });
-        ui.add_space(16.0);
-        card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                section(ui, "Booru Dataset Manager", "v0.1.0");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_enabled(false, egui::Button::new("检查更新"))
-                        .on_hover_text("官方发布源与更新检查适配器尚未接入。");
+        let max_width = ui.available_width().min(840.0);
+        ui.allocate_ui_with_layout(
+            vec2(max_width, 0.0),
+            egui::Layout::top_down(egui::Align::LEFT),
+            |ui| {
+                ui.set_width(max_width);
+                self.modelscope_settings_card(ui);
+                ui.add_space(12.0);
+                self.gelbooru_settings_card(ui);
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    egui::CollapsingHeader::new("Danbooru 来源设置")
+                        .default_open(matches!(
+                            self.prefs.download_source,
+                            bdm_domain::sources::DownloadSource::Danbooru
+                                | bdm_domain::sources::DownloadSource::Safebooru
+                        ))
+                        .show(ui, |ui| self.danbooru_settings_card(ui));
                 });
-            });
-        });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    setting_header(ui, "image", "图片查看");
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(
+                            &mut self.prefs.auto_load_review_original,
+                            "审核时自动加载原图",
+                        )
+                        .on_hover_text(
+                            "默认使用缩略图。开启后，打开审核和切图自动加载原图；仍可手动切换。设置自动保存。",
+                        );
+                        let (rect, response) =
+                            ui.allocate_exact_size(vec2(110.0, 32.0), egui::Sense::hover());
+                        icon(
+                            ui,
+                            egui::Rect::from_center_size(
+                                rect.left_center() + vec2(14.0, 0.0),
+                                vec2(17.0, 17.0),
+                            ),
+                            "image",
+                            MUTED,
+                        );
+                        icon(
+                            ui,
+                            egui::Rect::from_center_size(rect.center(), vec2(13.0, 13.0)),
+                            "forward",
+                            if self.prefs.auto_load_review_original {
+                                ACCENT
+                            } else {
+                                MUTED
+                            },
+                        );
+                        icon(
+                            ui,
+                            egui::Rect::from_center_size(
+                                rect.right_center() - vec2(18.0, 0.0),
+                                vec2(29.0, 29.0),
+                            ),
+                            "image",
+                            if self.prefs.auto_load_review_original {
+                                ACCENT
+                            } else {
+                                MUTED
+                            },
+                        );
+                        response.on_hover_text(
+                            "缩略图 → 原图。裁剪和修复选区映射到原图，保存修改原图；缩放和平移只改变视图。",
+                        );
+                    });
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    setting_header(ui, "character", "角色关系");
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if tool_button(ui, "character", "角色关系设置", false).clicked() {
+                            self.dialog = Some(Dialog::CharacterRelations);
+                        }
+                    });
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    setting_header(ui, "tag", "文本姓名格式");
+                    ui.add_space(8.0);
+                    icon_label(
+                        ui,
+                        "lock",
+                        "姓名本地处理",
+                        "画师名和角色名不发送给 AI；本地合并到标签与自然语言，按画师、角色、描述排列，下划线转为空格。",
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("画师名");
+                        egui::ComboBox::from_id_salt("artist_tag_format")
+                            .selected_text(self.prefs.artist_tag_format.artist_label())
+                            .show_ui(ui, |ui| {
+                                for format in [
+                                    ProtectedTagFormat::At,
+                                    ProtectedTagFormat::Plain,
+                                    ProtectedTagFormat::Typed,
+                                ] {
+                                    ui.selectable_value(
+                                        &mut self.prefs.artist_tag_format,
+                                        format,
+                                        format.artist_label(),
+                                    );
+                                }
+                            });
+                        ui.label("角色名");
+                        egui::ComboBox::from_id_salt("character_tag_format")
+                            .selected_text(self.prefs.character_tag_format.character_label())
+                            .show_ui(ui, |ui| {
+                                for format in
+                                    [ProtectedTagFormat::Plain, ProtectedTagFormat::Typed]
+                                {
+                                    ui.selectable_value(
+                                        &mut self.prefs.character_tag_format,
+                                        format,
+                                        format.character_label(),
+                                    );
+                                }
+                            });
+                    });
+                    ui.add_space(8.0);
+                    icon_label(
+                        ui,
+                        "text",
+                        "画师 → 角色 → 描述",
+                        "画师格式可选 @name、name 或 artist:name；角色可选 name 或 character:name。",
+                    );
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    setting_header(ui, "download", "下载范围");
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        badge(ui, "PNG", ACCENT);
+                        badge(ui, "JPEG", ACCENT);
+                        badge(ui, "WebP", ACCENT);
+                    })
+                    .response
+                    .on_hover_text(self.prefs.download_media.description());
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("最小短边");
+                        ui.add(
+                            egui::DragValue::new(&mut self.minimum_short_side_draft)
+                                .range(1..=bdm_domain::ingest::MAXIMUM_SHORT_SIDE)
+                                .suffix(" px"),
+                        );
+                        if icon_button(ui, "reset", "恢复默认", false).clicked() {
+                            self.minimum_short_side_draft =
+                                bdm_domain::ingest::default_minimum_short_side();
+                        }
+                        if icon_button(ui, "check", "保存下载设置", true).clicked() {
+                            match self.save_download_settings() {
+                                Ok(()) => self.notify(
+                                    ui.ctx(),
+                                    "下载设置已保存，下次新建下载任务时生效。",
+                                ),
+                                Err(error) => self.notify(ui.ctx(), error),
+                            }
+                        }
+                    });
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("已保存 ≥ {} px", self.prefs.minimum_short_side))
+                                .size(12.0)
+                                .color(MUTED),
+                        )
+                        .wrap(),
+                    )
+                    .on_hover_text(
+                        "默认 800 px。下载前筛选、下载后核验。修改用于新任务，继续旧任务沿用原阈值。",
+                    );
+                    ui.checkbox(
+                        &mut self.prefs.flatten_transparency,
+                        "下载时将透明图片自动转为白底",
+                    )
+                    .on_hover_text(
+                        "新建下载任务时生效；已下载文件不会被自动改写。关闭后保留原始透明通道。",
+                    );
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    setting_header(ui, "layers", "图片编辑");
+                    ui.add_space(8.0);
+                    ui.checkbox(&mut self.prefs.confirm_image_edits, "局部修复后二次确认")
+                        .on_hover_text("开启后局部修复先预览再保存；关闭后直接保存。裁剪在图片下方确认，原图另行保留。设置自动保存。");
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    setting_header(ui, "layers", "存储位置");
+                    ui.add_space(12.0);
+                    if let Some(path) = &self.catalog.path {
+                        ui.label(RichText::new("收藏记录位置").size(13.0).strong());
+                        ui.label(
+                            RichText::new(path.display().to_string())
+                                .size(12.0)
+                                .color(MUTED),
+                        );
+                        ui.add_space(12.0);
+                    }
+                    ui.label(RichText::new("托管根目录").size(13.0).strong());
+                    ui.add_sized(
+                        [ui.available_width().min(650.0), 36.0],
+                        egui::TextEdit::singleline(&mut self.root_draft)
+                            .hint_text(crate::paths::library_directory().display().to_string())
+                            .margin(vec2(12.0, 9.0)),
+                    );
+                    ui.add_space(12.0);
+                    if primary(ui, "保存").clicked() {
+                        let path = self.root_draft.trim();
+                        if !path.is_empty() && !std::path::Path::new(path).is_absolute() {
+                            self.notify(ui.ctx(), "请填写绝对路径，例如 D:\\BooruLibrary。");
+                        } else {
+                            self.prefs.root = path.into();
+                            self.log("INFO", "已保存工作空间路径偏好，未移动任何文件。");
+                            self.notify(ui.ctx(), "路径偏好已保存。");
+                        }
+                    }
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    section(ui, "视觉模型", "");
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("模型目录").size(13.0));
+                    ui.add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::TextEdit::singleline(&mut self.model_draft)
+                            .hint_text("默认跟随托管根目录 models/")
+                            .margin(vec2(10.0, 9.0)),
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if tool_button(ui, "check", "保存", false).clicked() {
+                            let path = self.model_draft.trim();
+                            if path.is_empty() || std::path::Path::new(path).is_absolute() {
+                                self.prefs.model_path = path.into();
+                                self.notify(ui.ctx(), "模型目录偏好已保存。");
+                            } else {
+                                self.notify(ui.ctx(), "模型目录需要使用绝对路径。");
+                            }
+                        }
+                        if ui
+                            .add_enabled_ui(
+                                !self.workflow_active() && !self.demo && !self.is_capture(),
+                                |ui| tool_button(ui, "download", "下载模型", false),
+                            )
+                            .inner
+                            .clicked()
+                        {
+                            if let Err(e) = self.start_model_download(ui.ctx()) {
+                                self.workflows.error = Some(e);
+                            }
+                        }
+                        ui.label(self.model_directory().display().to_string());
+                    });
+                    ui.add_space(5.0);
+                });
+                ui.add_space(12.0);
+                card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        section(ui, "Booru Dataset Manager", "v0.1.0");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_enabled(false, egui::Button::new("检查更新"))
+                                .on_hover_text("官方发布源与更新检查适配器尚未接入。");
+                        });
+                    });
+                });
+            },
+        );
     }
 
     pub fn save_download_settings(&mut self) -> Result<(), &'static str> {

@@ -1256,7 +1256,10 @@ impl BdmApp {
         let mut close = false;
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(!selected.is_empty(), egui::Button::new("允许发送并开始"))
+                .add_enabled_ui(!selected.is_empty(), |ui| {
+                    primary(ui, "允许发送并开始")
+                })
+                .inner
                 .clicked()
             {
                 let unchanged = self.prefs.profiles.iter().any(|p| p == &scope.profile);
@@ -1295,7 +1298,7 @@ impl BdmApp {
                     Err(error) => self.workflows.error = Some(error),
                 }
             }
-            if ui.button("取消").clicked() {
+            if tool_button(ui, "close", "取消", false).clicked() {
                 close = true;
             }
         });
@@ -1923,10 +1926,10 @@ impl BdmApp {
                 "有效 Danbooru 关系自动处理；多个角色和具体变体仍保留。只有歧义关系需要确认。",
             );
             if ui
-                .add_enabled(
-                    editable,
-                    egui::Button::new(egui::RichText::new("刷新来源关系").size(12.0)),
-                )
+                .add_enabled_ui(editable, |ui| {
+                    crate::widgets::tool_button(ui, "refresh", "刷新来源关系", false)
+                })
+                .inner
                 .on_hover_text("从 Danbooru 查询有效关系并自动处理。")
                 .clicked()
             {
@@ -1938,10 +1941,15 @@ impl BdmApp {
             let count = eligible.process_discovered_characters();
             if count > 0
                 && ui
-                    .add_enabled(
-                        editable,
-                        egui::Button::new(format!("处理已发现关系 {count}")),
-                    )
+                    .add_enabled_ui(editable, |ui| {
+                        crate::widgets::tool_button(
+                            ui,
+                            "character",
+                            &format!("处理已发现关系 {count}"),
+                            false,
+                        )
+                    })
+                    .inner
                     .on_hover_text("使用本地缓存，无需联网。")
                     .clicked()
             {
@@ -2006,7 +2014,11 @@ impl BdmApp {
         ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.workflows.base).hint_text("本体 Tag").desired_width(150.0));
             ui.add(egui::TextEdit::singleline(&mut self.workflows.variant).hint_text("变体 Tag").desired_width(150.0));
-            if ui.add_enabled(editable, egui::Button::new("添加关系")).clicked() {
+            if ui
+                .add_enabled_ui(editable, |ui| tool_button(ui, "plus", "添加关系", false))
+                .inner
+                .clicked()
+            {
                 let base = self.workflows.base.trim();
                 let variant = self.workflows.variant.trim();
                 if base != variant && self.workflows.rules.categories.get(base) == Some(&4)
@@ -2062,7 +2074,10 @@ impl BdmApp {
             .on_hover_text(&relation.evidence);
             if !relation.verified
                 && ui
-                    .add_enabled(editable, egui::Button::new("确认关系"))
+                    .add_enabled_ui(editable, |ui| {
+                        crate::widgets::tool_button(ui, "check", "确认关系", true)
+                    })
+                    .inner
                     .clicked()
             {
                 self.workflows.rules.characters[index].verified = true;
@@ -2070,7 +2085,10 @@ impl BdmApp {
                 self.save_relationships(ui.ctx());
             }
             if ui
-                .add_enabled(editable, egui::Button::new("拒绝关系"))
+                .add_enabled_ui(editable, |ui| {
+                    crate::widgets::tool_button(ui, "close", "拒绝关系", false)
+                })
+                .inner
                 .on_hover_text("停止使用这条关系，并记住拒绝决定；不删除图片。")
                 .clicked()
             {

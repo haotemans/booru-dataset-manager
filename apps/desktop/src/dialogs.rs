@@ -44,8 +44,11 @@ impl BdmApp {
                     crate::window_chrome::content_rect(ctx).size(),
                     Sense::click_and_drag(),
                 );
-                ui.painter()
-                    .rect_filled(rect, 0.0, Color32::BLACK.gamma_multiply(0.15));
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,
+                    Color32::from_rgba_unmultiplied(15, 23, 42, 24),
+                );
             });
         let mut open = true;
         let mut close = false;
@@ -375,7 +378,8 @@ impl BdmApp {
                             | bdm_ports::CatalogError::Authentication
                             | bdm_ports::CatalogError::Credentials
                     )
-                ) && ui.button("打开 Gelbooru 来源设置").clicked()
+                ) && tool_button(ui, "settings", "打开 Gelbooru 来源设置", false)
+                    .clicked()
                 {
                     self.navigate(Page::Settings);
                     return true;
@@ -393,15 +397,16 @@ impl BdmApp {
             {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button("修改凭据").clicked() {
+                    if tool_button(ui, "lock", "修改凭据", false).clicked() {
                         self.catalog.edit_credentials = !self.catalog.edit_credentials;
                         self.danbooru.api_key.clear();
                     }
                     if ui
-                        .add_enabled(
+                        .add_enabled_ui(
                             !self.tag_lookup_pending() && !self.demo && !self.is_capture(),
-                            egui::Button::new("不使用账号重试"),
+                            |ui| tool_button(ui, "refresh", "不使用账号重试", false),
                         )
+                        .inner
                         .clicked()
                     {
                         self.catalog.anonymous = true;
@@ -606,7 +611,7 @@ impl BdmApp {
                     .desired_rows(6)
                     .desired_width(f32::INFINITY),
             );
-            if ui.button("恢复 V4 默认提示词").clicked() {
+            if tool_button(ui, "reset", "恢复 V4 默认提示词", false).clicked() {
                 self.profile_draft.request.caption_system_prompt =
                     bdm_config::DEFAULT_CAPTION_SYSTEM_PROMPT.into();
             }
@@ -835,7 +840,7 @@ impl BdmApp {
                         Err(error) => self.workflows.error = Some(error),
                     }
                 }
-                let close = ui.button("返回").clicked();
+                let close = tool_button(ui, "close", "返回", false).clicked();
                 if kind == "导出" {
                     ui.menu_button("更多", |ui| {
                         ui.add_enabled_ui(!self.workflows.export_multires, |ui| {
