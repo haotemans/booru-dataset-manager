@@ -336,7 +336,11 @@ impl BdmApp {
                     ui.label(status);
                 });
             }
-            if let Some(error) = settings.error.as_deref().or_else(|| settings.shared.error()) {
+            let error = settings
+                .error
+                .as_deref()
+                .or_else(|| settings.shared.error());
+            if let Some(error) = error {
                 ui.label(RichText::new(error).color(crate::theme::DANGER));
             }
         });
