@@ -142,9 +142,11 @@ fn operation_tool(operation: &str) -> &'static str {
         "job_plan" | "job_submit" | "jobs_list" | "job_status" | "job_control" | "jobs_tick" => {
             "bdm_job"
         }
-        "download_submit" | "download_pixiv_submit" | "download_status" | "download_control" => {
-            "bdm_download"
-        }
+        "download_submit"
+        | "download_query_submit"
+        | "download_pixiv_submit"
+        | "download_status"
+        | "download_control" => "bdm_download",
         _ => "bdm_agent",
     }
 }
@@ -193,7 +195,7 @@ impl AgentServer {
     }
 
     #[tool(
-        description = "Submit/control source downloads; inspect progress by download_id. For Pixiv use download_pixiv_submit with the numeric artist user_id and optional max_works. Safebooru is the General-only Danbooru entrance. The daemon/jobs_tick runs queued transfers."
+        description = "Submit/control source downloads; inspect progress by download_id. Use download_query_submit to create/reuse a Booru tag query collection (e.g. \"kay_(arknights)\"), download_submit for an existing collection_id, or download_pixiv_submit with the numeric artist user_id and optional max_works. Safebooru is the General-only Danbooru entrance. The daemon/jobs_tick runs queued transfers."
     )]
     async fn bdm_download(&self, Parameters(args): Parameters<DownloadRequest>) -> CallToolResult {
         let request = json!(args);
@@ -291,6 +293,7 @@ impl AgentServer {
                 | "character_repair"
                 | "doctor"
                 | "download_submit"
+                | "download_query_submit"
                 | "download_status"
                 | "download_control"
                 | "bucket_plan"

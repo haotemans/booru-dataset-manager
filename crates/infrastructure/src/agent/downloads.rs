@@ -56,22 +56,41 @@ pub(super) fn dispatch(
     if !service.settings.writes {
         return Err(fail("Restart with --allow-writes"));
     }
-    if matches!(operation, "download_submit" | "download_pixiv_submit") {
+    if matches!(
+        operation,
+        "download_submit" | "download_query_submit" | "download_pixiv_submit"
+    ) {
         let pixiv = operation == "download_pixiv_submit";
+        let query_mode = operation == "download_query_submit";
         let request = input["request_id"]
             .as_str()
             .filter(|s| !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control))
             .ok_or_else(|| fail("request_id required"))?;
-        let scope = input[if pixiv { "user_id" } else { "collection_id" }]
-            .as_i64()
-            .filter(|n| *n > 0)
-            .ok_or_else(|| {
-                fail(if pixiv {
-                    "Positive Pixiv user_id required"
-                } else {
-                    "Existing collection_id required"
-                })
-            })?;
+        let query = if query_mode {
+            let raw = input["query"]
+                .as_str()
+                .ok_or_else(|| fail("query required"))?;
+            Some(
+                bdm_domain::catalog::normalize_download_query(raw)
+                    .ok_or_else(|| fail("Invalid download query"))?,
+            )
+        } else {
+            None
+        };
+        let scope = if query_mode {
+            0
+        } else {
+            input[if pixiv { "user_id" } else { "collection_id" }]
+                .as_i64()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| {
+                    fail(if pixiv {
+                        "Positive Pixiv user_id required"
+                    } else {
+                        "Existing collection_id required"
+                    })
+                })?
+        };
         let side = input["minimum_short_side"].as_u64().unwrap_or(800);
         if side > u64::from(u32::MAX) || !bdm_domain::ingest::valid_minimum_short_side(side as u32)
         {
@@ -108,6 +127,8 @@ pub(super) fn dispatch(
         };
         let parameters = if pixiv {
             json!([scope, side, source, pixiv_max_works])
+        } else if let Some(ref query) = query {
+            json!([query, side, source])
         } else {
             json!([scope, side, source])
         };
@@ -135,6 +156,11 @@ pub(super) fn dispatch(
                     saved.record.id
                 }
             }
+        } else if let Some(ref query) = query {
+            repo.add_query(query)
+                .map_err(|_| fail("Invalid download query"))?
+                .record
+                .id
         } else {
             scope
         };

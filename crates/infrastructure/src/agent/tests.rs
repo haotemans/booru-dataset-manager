@@ -590,6 +590,61 @@ fn queued_download_reuses_existing_collection_and_is_idempotent_without_network(
 }
 
 #[test]
+fn queued_query_download_creates_and_reuses_collection_idempotently() {
+    let (f, _, _) = fixture();
+    let s = service(&f, true);
+    let input = json!({
+        "request_id": "query-download-1",
+        "query": "  Kay_(Arknights)  Arknights:_Endfield ",
+        "source": "gelbooru",
+        "minimum_short_side": 800
+    });
+    let submitted = ok(&s, "download_query_submit", input.clone());
+    let collection_id = submitted["collection_id"].as_i64().unwrap();
+    let download_id = submitted["download_id"].as_i64().unwrap();
+
+    let replayed = ok(&s, "download_query_submit", input);
+    assert_eq!(replayed["download_id"], download_id);
+    assert_eq!(replayed["replayed"], true);
+
+    assert!(
+        s.execute(
+            "download_query_submit",
+            json!({
+                "request_id": "query-download-1",
+                "query": "other_tag",
+                "source": "gelbooru"
+            }),
+        )
+        .is_error
+    );
+
+    let second = ok(
+        &s,
+        "download_query_submit",
+        json!({
+            "request_id": "query-download-2",
+            "query": "kay_(arknights) arknights:_endfield",
+            "source": "gelbooru"
+        }),
+    );
+    assert_eq!(second["collection_id"], collection_id);
+    assert_ne!(second["download_id"], download_id);
+
+    let status = ok(&s, "download_status", json!({"download_id": download_id}));
+    assert_eq!(status["tag"], "kay_(arknights) arknights:_endfield");
+    assert_eq!(status["source_mode"], "Gelbooru");
+
+    assert!(
+        s.execute(
+            "download_query_submit",
+            json!({"request_id": "query-invalid", "query": "-invalid_tag"}),
+        )
+        .is_error
+    );
+}
+
+#[test]
 fn safe_download_queue_keeps_its_route_on_resume_and_reuses_source_identity() {
     use bdm_domain::{
         catalog::{CollectionKind, SourceTag},

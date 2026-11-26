@@ -235,6 +235,7 @@ impl AgentService {
                 super::composite::dispatch(self, &mut repo, operation, input)
             }
             "download_submit"
+            | "download_query_submit"
             | "download_pixiv_submit"
             | "download_control"
             | "download_status" => super::downloads::dispatch(self, &mut repo, operation, input),
