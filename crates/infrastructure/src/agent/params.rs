@@ -195,3 +195,14 @@ pub struct PairArgs {
     pub reason: String,
     pub model: String,
 }
+
+#[derive(Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteRejectedArgs {
+    /// 1..=64 distinct media IDs already queued with decision='reject' in agent_reviews.
+    pub media_ids: Vec<i64>,
+    /// Must be true to permanently delete the queued files from disk and catalog.
+    pub confirm: bool,
+    pub reason: String,
+    pub model: String,
+}

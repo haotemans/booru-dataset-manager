@@ -1172,3 +1172,50 @@ pub(super) fn pair(
         json!({"decision":report,"files_deleted":0,"next":{"action":"continue_requested_workflow","hint":"Resolve the next returned pair; rescan if more_pending was true. Final deletion stays in the UI review queue."}}),
     ))
 }
+
+pub(super) fn delete_rejected(
+    repo: &mut SqliteCatalog,
+    settings: &Settings,
+    args: DeleteRejectedArgs,
+) -> Result<ServiceReply, IngestError> {
+    writes(settings)?;
+    provenance(&args.reason, &args.model)?;
+    if !args.confirm {
+        return Err(IngestError::StorageDetails(
+            json!({"code":"confirmation_required","message":"confirm=true required"}).to_string(),
+        ));
+    }
+    if args.media_ids.is_empty() || args.media_ids.len() > 64 {
+        return Err(IngestError::InvalidMedia);
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for &id in &args.media_ids {
+        if id <= 0 || !ids.insert(id) {
+            return Err(IngestError::InvalidMedia);
+        }
+        let row: Option<String> = storage(
+            repo.connection
+                .query_row(
+                    "SELECT image_sha256 FROM agent_reviews WHERE media_id=?1 AND decision='reject'",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional(),
+        )?;
+        let Some(sha) = row else {
+            return Err(IngestError::Integrity);
+        };
+        media(repo, settings, id, Some(&sha))?;
+    }
+    repo.delete_review_scope(&ids)?;
+    let deleted: Vec<i64> = ids.iter().copied().collect();
+    repo.audit(
+        "agent_delete_rejected",
+        &json!({"media_ids":deleted,"reason":args.reason,"model":args.model}).to_string(),
+    )?;
+    Ok(result(json!({
+        "deleted_ids": deleted,
+        "deleted_count": deleted.len(),
+        "files_deleted": deleted.len(),
+    })))
+}

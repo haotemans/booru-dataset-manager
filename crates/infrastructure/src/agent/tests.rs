@@ -645,6 +645,93 @@ fn queued_query_download_creates_and_reuses_collection_idempotently() {
 }
 
 #[test]
+fn delete_rejected_requires_confirm_and_reject_decision_and_preserves_survivor() {
+    let (mut f, _, m1) = fixture();
+    let mut p2 = f.post.clone();
+    p2.id += 1;
+    p2.md5 = "0123456789abcdef0123456789abcdef".into();
+    f.repo
+        .import(
+            &p2,
+            &f.directory.path().join("library"),
+            f.collection,
+            800,
+            &AtomicBool::new(false),
+            &f.provider,
+        )
+        .unwrap();
+    let m2 = f
+        .repo
+        .list_media()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.id != m1.id)
+        .unwrap();
+    let first = m1.id;
+    let second = m2.id;
+    let s = service(&f, true);
+    ok(&s, "view", json!({"media_id": first}));
+    ok(&s, "view", json!({"media_id": second}));
+
+    // Cannot delete before the item is queued with decision='reject'.
+    assert!(
+        s.execute(
+            "delete_rejected",
+            json!({
+                "media_ids": [second],
+                "confirm": true,
+                "reason": "test",
+                "model": "test-model"
+            }),
+        )
+        .is_error
+    );
+
+    ok(
+        &s,
+        "pair",
+        json!({
+            "first_id": first,
+            "second_id": second,
+            "expected_sha256": [m1.sha256, m2.sha256],
+            "survivor_id": first,
+            "reason": "duplicate",
+            "model": "test-model"
+        }),
+    );
+
+    // Must pass confirm=true.
+    assert!(
+        s.execute(
+            "delete_rejected",
+            json!({
+                "media_ids": [second],
+                "confirm": false,
+                "reason": "user confirmed",
+                "model": "test-model"
+            }),
+        )
+        .is_error
+    );
+
+    let deleted = ok(
+        &s,
+        "delete_rejected",
+        json!({
+            "media_ids": [second],
+            "confirm": true,
+            "reason": "user confirmed",
+            "model": "test-model"
+        }),
+    );
+    assert_eq!(deleted["deleted_ids"], json!([second]));
+    assert_eq!(deleted["deleted_count"], 1);
+    assert_eq!(deleted["files_deleted"], 1);
+    assert!(f.repo.media_by_id(second).unwrap().is_none());
+    assert!(f.repo.media_by_id(first).unwrap().is_some());
+}
+
+#[test]
 fn safe_download_queue_keeps_its_route_on_resume_and_reuses_source_identity() {
     use bdm_domain::{
         catalog::{CollectionKind, SourceTag},

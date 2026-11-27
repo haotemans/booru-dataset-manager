@@ -231,6 +231,9 @@ impl AgentService {
             "assess" => tools::assess(&mut repo, settings, args!(AssessArgs)),
             "scan" => tools::scan(&mut repo, settings, args!(ScanArgs)),
             "pair" => tools::pair(&mut repo, settings, args!(PairArgs)),
+            "delete_rejected" => {
+                tools::delete_rejected(&mut repo, settings, args!(DeleteRejectedArgs))
+            }
             "work_next" | "work_apply_view" | "work_finish" => {
                 super::composite::dispatch(self, &mut repo, operation, input)
             }

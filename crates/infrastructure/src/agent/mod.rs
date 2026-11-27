@@ -439,6 +439,19 @@ impl AgentServer {
         })
         .await
     }
+
+    #[tool(
+        description = "Permanently delete up to 64 media items already queued with decision='reject' in agent_reviews (requires confirm=true). Preserves survivor duplicate associations and removes files from disk and catalog."
+    )]
+    async fn bdm_delete_rejected(
+        &self,
+        Parameters(args): Parameters<DeleteRejectedArgs>,
+    ) -> CallToolResult {
+        self.task(false, move |repo, settings| {
+            tools::delete_rejected(repo, settings, args)
+        })
+        .await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
