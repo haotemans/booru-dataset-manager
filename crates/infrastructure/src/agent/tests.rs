@@ -646,13 +646,26 @@ fn queued_query_download_creates_and_reuses_collection_idempotently() {
 
 #[test]
 fn delete_rejected_requires_confirm_and_reject_decision_and_preserves_survivor() {
+    use image::ImageEncoder;
     let (mut f, _, m1) = fixture();
-    let mut p2 = f.post.clone();
-    p2.id += 1;
-    p2.md5 = "0123456789abcdef0123456789abcdef".into();
+    let decoded = image::load_from_memory(&f.provider.bytes)
+        .unwrap()
+        .to_rgb8();
+    let mut bytes = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut bytes,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::NoFilter,
+    )
+    .write_image(decoded.as_raw(), 800, 800, image::ExtendedColorType::Rgb8)
+    .unwrap();
+    f.provider.bytes = bytes;
+    f.post.id += 1;
+    f.post.file_size = f.provider.bytes.len() as u64;
+    f.post.md5 = format!("{:x}", md5::Md5::digest(&f.provider.bytes));
     f.repo
         .import(
-            &p2,
+            &f.post,
             &f.directory.path().join("library"),
             f.collection,
             800,
